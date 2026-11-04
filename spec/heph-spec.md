@@ -13,7 +13,7 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 - Fingerprint `path` is the raw request target including the query string, never normalised (2.2).
 - Fingerprint `body` is `null` when empty, and `sha256:` plus the hex of the raw bytes for non-JSON media types (2.2).
 - Idempotency records carry a 60 second default lease; 5xx and raised errors release the record, status below 500 is stored and replayed (2.7, 2.8).
-- Numbers not exactly representable as IEEE-754 doubles are rejected with `HEPH-VAL-422`, never rounded (4.3).
+- Integer literals above 2^53-1 are rejected with `HEPH-VAL-422`, never rounded; literals with a fraction or exponent follow RFC 8785 number serialisation (4.3).
 - Money `amount` is a string matching `^(0|-?[1-9][0-9]*)$`; JSON numbers are rejected (3.2, 3.4).
 
 ## 1. Errors
