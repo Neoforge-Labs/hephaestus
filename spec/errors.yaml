@@ -1,0 +1,64 @@
+# heph error-code registry. Source of truth for every HEPH-* code.
+# Codes match ^HEPH-[A-Z]{2,6}-\d{3}$ and `area` is the code's middle segment.
+# Generates per-language constants and one docs page per code. Do not add codes
+# here that a task has not specified: every entry is a promise implementations keep.
+- code: HEPH-GEN-500
+  status: 500
+  title: Internal error
+  area: GEN
+  detail_hint: An unexpected failure. Never include internals; give the trace_id so the operator can find it.
+- code: HEPH-VAL-422
+  status: 422
+  title: Validation failed
+  area: VAL
+  detail_hint: Name the offending field and the rule it broke, not the submitted value.
+- code: HEPH-NF-404
+  status: 404
+  title: Resource not found
+  area: NF
+  detail_hint: Name the resource type. Also use this when the caller may not learn that a resource exists.
+- code: HEPH-AUTH-401
+  status: 401
+  title: Authentication required
+  area: AUTH
+  detail_hint: Credentials are missing, malformed or expired. Do not say which part was wrong.
+- code: HEPH-AUTH-403
+  status: 403
+  title: Permission denied
+  area: AUTH
+  detail_hint: The caller is authenticated but not allowed. Name the missing permission, not the resource contents.
+- code: HEPH-RATE-429
+  status: 429
+  title: Rate limit exceeded
+  area: RATE
+  detail_hint: Say when to retry; the response also carries a Retry-After header.
+- code: HEPH-IDEMP-400
+  status: 400
+  title: Idempotency key missing
+  area: IDEMP
+  detail_hint: The endpoint requires an Idempotency-Key header and the request had none.
+- code: HEPH-IDEMP-409
+  status: 409
+  title: Original request still in flight
+  area: IDEMP
+  detail_hint: A request with this key is still being processed. Retry after it completes.
+- code: HEPH-IDEMP-422
+  status: 422
+  title: Idempotency key reused with a different payload
+  area: IDEMP
+  detail_hint: The key was already used for a request with a different fingerprint. Use a new key.
+- code: HEPH-MONEY-422
+  status: 422
+  title: Invalid money amount
+  area: MONEY
+  detail_hint: The amount is not a valid integer-minor-units string, or has excess precision for its currency.
+- code: HEPH-MONEY-409
+  status: 409
+  title: Currency mismatch
+  area: MONEY
+  detail_hint: The operation mixes two currencies. Name both currency codes.
+- code: HEPH-WH-401
+  status: 401
+  title: Webhook signature invalid or expired
+  area: WH
+  detail_hint: No signature verified, or the timestamp is outside the 300 second tolerance. Do not say which.

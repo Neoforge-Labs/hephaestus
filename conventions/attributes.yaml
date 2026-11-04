@@ -1,0 +1,30 @@
+# Shared telemetry attribute names. Generates constants for Python, TypeScript,
+# Go and Rust. `pii: true` attributes are redacted from logs by default.
+- name: tenant.id
+  type: string
+  description: Identifier of the tenant (account or organisation) the work runs for.
+  pii: false
+- name: user.id
+  type: string
+  description: Identifier of the authenticated end user.
+  pii: true
+- name: idempotency.key
+  type: string
+  description: Client-chosen Idempotency-Key value. Clients may embed identifiers in it, so it is treated as PII.
+  pii: true
+- name: job.name
+  type: string
+  description: Name of the background job being executed.
+  pii: false
+- name: webhook.provider
+  type: string
+  description: Provider a webhook came from or is sent to, for example stripe or paystack.
+  pii: false
+- name: money.currency
+  type: string
+  description: ISO 4217 alphabetic currency code of a monetary amount.
+  pii: false
+- name: heph.error.code
+  type: string
+  description: The HEPH-* error code returned or recorded for the operation.
+  pii: false
