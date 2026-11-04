@@ -61,7 +61,7 @@ def _good(tmp_path: Path, cases: object, **top: object) -> list[str]:
     return check_vectors(_scratch(tmp_path, "money.format", cases, **top), ERRORS, require_all=False)
 
 
-GOOD = {"name": "a", "input": {"minor": 1, "currency": "KES"}, "expect": {"amount": "0.01"}}
+GOOD = {"name": "a", "input": {"minor": "1", "currency": "KES"}, "expect": {"amount": "0.01"}}
 
 
 def test_accepts_well_formed_file(tmp_path: Path) -> None:
@@ -69,22 +69,24 @@ def test_accepts_well_formed_file(tmp_path: Path) -> None:
 
 
 def test_rejects_unknown_suite(tmp_path: Path) -> None:
-    root = _scratch(tmp_path, "money.format", [GOOD], suite="money.nope")
-    assert check_vectors(root, ERRORS, require_all=False)
+    # File name matches the bogus suite, so only the schema enum can object.
+    root = _scratch(tmp_path, "money.nope", [GOOD])
+    findings = check_vectors(root, ERRORS, require_all=False)
+    assert any("is not one of" in f for f in findings), findings
 
 
 def test_rejects_case_with_neither_expect_nor_error(tmp_path: Path) -> None:
-    bad = {"name": "a", "input": {"minor": 1, "currency": "KES"}}
+    bad = {"name": "a", "input": {"minor": "1", "currency": "KES"}}
     assert _good(tmp_path, [bad])
 
 
 def test_rejects_error_code_outside_registry(tmp_path: Path) -> None:
-    bad = {"name": "a", "input": {"minor": 1, "currency": "KES"}, "expect": {"error": "HEPH-MONEY-999"}}
+    bad = {"name": "a", "input": {"minor": "1", "currency": "KES"}, "expect": {"error": "HEPH-MONEY-999"}}
     assert any("registry" in f for f in _good(tmp_path, [bad]))
 
 
 def test_rejects_malformed_error_code(tmp_path: Path) -> None:
-    bad = {"name": "a", "input": {"minor": 1, "currency": "KES"}, "expect": {"error": "heph-money-422"}}
+    bad = {"name": "a", "input": {"minor": "1", "currency": "KES"}, "expect": {"error": "heph-money-422"}}
     assert _good(tmp_path, [bad])
 
 
@@ -98,7 +100,8 @@ def test_rejects_duplicate_case_names(tmp_path: Path) -> None:
 
 
 def test_rejects_wrong_spec_version(tmp_path: Path) -> None:
-    assert _good(tmp_path, [GOOD], spec="0.2.0")
+    findings = _good(tmp_path, [GOOD], spec="0.2.0")
+    assert any("was expected" in f for f in findings), findings
 
 
 def test_rejects_suite_not_matching_filename(tmp_path: Path) -> None:
@@ -109,3 +112,26 @@ def test_rejects_suite_not_matching_filename(tmp_path: Path) -> None:
 def test_missing_suite_files_reported_when_required(tmp_path: Path) -> None:
     root = _scratch(tmp_path, "money.format", [GOOD])
     assert any("missing" in f for f in check_vectors(root, ERRORS))
+
+
+def test_rejects_count_below_floor(tmp_path: Path) -> None:
+    root = _scratch(tmp_path, "money.format", [GOOD])
+    assert any("minimum is 10" in f for f in check_vectors(root, ERRORS))
+
+
+def test_reports_unreadable_json(tmp_path: Path) -> None:
+    root = _scratch(tmp_path, "money.format", [GOOD])
+    (root / "money" / "format.json").write_text("{not json", encoding="utf-8")
+    assert any("cannot read" in f for f in check_vectors(root, ERRORS, require_all=False))
+
+
+def test_reports_unreadable_registry(tmp_path: Path) -> None:
+    root = _scratch(tmp_path, "money.format", [GOOD])
+    findings = check_vectors(root, tmp_path / "nope.yaml", require_all=False)
+    assert any("cannot read error registry" in f for f in findings), findings
+
+
+def test_reports_unloadable_schema(tmp_path: Path) -> None:
+    root = _scratch(tmp_path, "money.format", [GOOD])
+    (root / "schema" / "vector-file.schema.json").unlink()
+    assert any("cannot load schema" in f for f in check_vectors(root, ERRORS, require_all=False))

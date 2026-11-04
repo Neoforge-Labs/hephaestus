@@ -2,7 +2,7 @@
   "suite": "signatures.sign",
   "spec": "0.1.0",
   "description": "Standard Webhooks v1 signature (spec 5.2). `timestamp` is integer seconds; `payload_b64` is the base64 of the raw body bytes.",
-  "source": "standardwebhooks.Webhook.sign (rfc8785 0.1.4, standardwebhooks 1.1.0), except the non-UTF-8 case which uses stdlib hmac/hashlib/base64 (cross-checked against the package on UTF-8 payloads); reference example cross-checked against the Standard Webhooks published test vector.",
+  "source": "standardwebhooks.Webhook.sign (rfc8785 0.1.4, standardwebhooks 1.1.0), except the non-UTF-8 case which uses stdlib hmac/hashlib/base64 (cross-checked against the package on UTF-8 payloads); reference example cross-checked against test_sign_function in https://github.com/standard-webhooks/standard-webhooks/blob/main/libraries/python/tests/test_webhooks.py (main at commit ab6844147ce9cdb0d2dbf2e60d1ea85001fd2554, read 2026-11-05); the non-UTF-8 case is rebuilt from spec 5.2 with stdlib only.",
   "cases": [
     {
       "name": "reference-example",

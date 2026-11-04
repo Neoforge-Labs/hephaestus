@@ -1,0 +1,13 @@
+language: 'unknown'
+layer: 'library'
+
+tasks:
+  check:
+    command: 'uv run ../tools/check_vectors.py'
+    inputs:
+      - 'schema/*.json'
+      - 'money/*.json'
+      - 'hashing/*.json'
+      - 'signatures/*.json'
+      - '/spec/errors.yaml'
+      - '/tools/check_vectors.py'

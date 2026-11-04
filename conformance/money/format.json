@@ -1,13 +1,13 @@
 {
   "suite": "money.format",
   "spec": "0.1.0",
-  "description": "Minor units to a canonical decimal string: exactly `exponent` fractional digits, no grouping, `-` prefix for negatives, no `-0`.",
+  "description": "Minor units (a decimal string, so i64 extremes survive JavaScript numbers) to a canonical decimal string (spec 3.6): exactly `exponent` fractional digits, no grouping, `-` prefix for negatives, never `-0`.",
   "source": "Hand-derived from ISO 4217 exponents.",
   "cases": [
     {
       "name": "kes-1020",
       "input": {
-        "minor": 1020,
+        "minor": "1020",
         "currency": "KES"
       },
       "expect": {
@@ -17,7 +17,7 @@
     {
       "name": "kes-neg-5",
       "input": {
-        "minor": -5,
+        "minor": "-5",
         "currency": "KES"
       },
       "expect": {
@@ -27,7 +27,7 @@
     {
       "name": "jpy-1000",
       "input": {
-        "minor": 1000,
+        "minor": "1000",
         "currency": "JPY"
       },
       "expect": {
@@ -37,7 +37,7 @@
     {
       "name": "bhd-1",
       "input": {
-        "minor": 1,
+        "minor": "1",
         "currency": "BHD"
       },
       "expect": {
@@ -47,7 +47,7 @@
     {
       "name": "kes-0",
       "input": {
-        "minor": 0,
+        "minor": "0",
         "currency": "KES"
       },
       "expect": {
@@ -57,7 +57,7 @@
     {
       "name": "kes-5",
       "input": {
-        "minor": 5,
+        "minor": "5",
         "currency": "KES"
       },
       "expect": {
@@ -67,7 +67,7 @@
     {
       "name": "kes-100",
       "input": {
-        "minor": 100,
+        "minor": "100",
         "currency": "KES"
       },
       "expect": {
@@ -77,7 +77,7 @@
     {
       "name": "kes-1029",
       "input": {
-        "minor": 1029,
+        "minor": "1029",
         "currency": "KES"
       },
       "expect": {
@@ -87,7 +87,7 @@
     {
       "name": "kes-neg-1020",
       "input": {
-        "minor": -1020,
+        "minor": "-1020",
         "currency": "KES"
       },
       "expect": {
@@ -97,7 +97,7 @@
     {
       "name": "usd-123456",
       "input": {
-        "minor": 123456,
+        "minor": "123456",
         "currency": "USD"
       },
       "expect": {
@@ -107,7 +107,7 @@
     {
       "name": "jpy-0",
       "input": {
-        "minor": 0,
+        "minor": "0",
         "currency": "JPY"
       },
       "expect": {
@@ -117,7 +117,7 @@
     {
       "name": "jpy-neg-7",
       "input": {
-        "minor": -7,
+        "minor": "-7",
         "currency": "JPY"
       },
       "expect": {
@@ -127,7 +127,7 @@
     {
       "name": "bhd-neg-1",
       "input": {
-        "minor": -1,
+        "minor": "-1",
         "currency": "BHD"
       },
       "expect": {
@@ -137,7 +137,7 @@
     {
       "name": "bhd-1234",
       "input": {
-        "minor": 1234,
+        "minor": "1234",
         "currency": "BHD"
       },
       "expect": {
@@ -147,7 +147,7 @@
     {
       "name": "clf-1",
       "input": {
-        "minor": 1,
+        "minor": "1",
         "currency": "CLF"
       },
       "expect": {
@@ -157,7 +157,7 @@
     {
       "name": "kes-i64-max",
       "input": {
-        "minor": 9223372036854775807,
+        "minor": "9223372036854775807",
         "currency": "KES"
       },
       "expect": {
@@ -167,7 +167,7 @@
     {
       "name": "kes-i64-min",
       "input": {
-        "minor": -9223372036854775808,
+        "minor": "-9223372036854775808",
         "currency": "KES"
       },
       "expect": {
@@ -177,7 +177,7 @@
     {
       "name": "jpy-i64-max",
       "input": {
-        "minor": 9223372036854775807,
+        "minor": "9223372036854775807",
         "currency": "JPY"
       },
       "expect": {
@@ -187,7 +187,7 @@
     {
       "name": "unknown-currency",
       "input": {
-        "minor": 1,
+        "minor": "1",
         "currency": "XYZ"
       },
       "expect": {

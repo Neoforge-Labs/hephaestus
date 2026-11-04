@@ -1,8 +1,8 @@
 {
   "suite": "money.parse",
   "spec": "0.1.0",
-  "description": "Human-facing decimal strings (spec 3.6): strict ASCII, excess precision rejected unless a rounding mode is given. half_up rounds ties away from zero; half_even rounds ties to the even minor unit; down truncates (only non-negative inputs are pinned for down).",
-  "source": "Hand-derived from ISO 4217 exponents and spec 3.2/3.6; no implementation consulted.",
+  "description": "Human-facing decimal strings (spec 3.6): strict ASCII, excess precision rejected unless a rounding mode is given. `minor` is a decimal string so i64 extremes survive JavaScript numbers. Rounding modes are defined in spec 3.6 (down truncates toward zero).",
+  "source": "Hand-derived from ISO 4217 exponents and spec 3.2/3.6; no implementation consulted. kes-down-negative: -1029.5 truncated toward zero is -1029 (a floor would give -1030).",
   "cases": [
     {
       "name": "kes-reject-10",
@@ -12,7 +12,7 @@
         "rounding": "reject"
       },
       "expect": {
-        "minor": 1000
+        "minor": "1000"
       }
     },
     {
@@ -23,7 +23,7 @@
         "rounding": "reject"
       },
       "expect": {
-        "minor": 1
+        "minor": "1"
       }
     },
     {
@@ -34,7 +34,7 @@
         "rounding": "reject"
       },
       "expect": {
-        "minor": 1029
+        "minor": "1029"
       }
     },
     {
@@ -45,7 +45,7 @@
         "rounding": "reject"
       },
       "expect": {
-        "minor": 1020
+        "minor": "1020"
       }
     },
     {
@@ -56,7 +56,7 @@
         "rounding": "reject"
       },
       "expect": {
-        "minor": 0
+        "minor": "0"
       }
     },
     {
@@ -67,7 +67,7 @@
         "rounding": "reject"
       },
       "expect": {
-        "minor": -500
+        "minor": "-500"
       }
     },
     {
@@ -287,7 +287,7 @@
         "rounding": "half_up"
       },
       "expect": {
-        "minor": 1030
+        "minor": "1030"
       }
     },
     {
@@ -298,7 +298,7 @@
         "rounding": "half_even"
       },
       "expect": {
-        "minor": 1030
+        "minor": "1030"
       }
     },
     {
@@ -309,7 +309,7 @@
         "rounding": "down"
       },
       "expect": {
-        "minor": 1029
+        "minor": "1029"
       }
     },
     {
@@ -320,7 +320,7 @@
         "rounding": "half_even"
       },
       "expect": {
-        "minor": 1028
+        "minor": "1028"
       }
     },
     {
@@ -331,7 +331,7 @@
         "rounding": "half_up"
       },
       "expect": {
-        "minor": -1030
+        "minor": "-1030"
       }
     },
     {
@@ -342,7 +342,7 @@
         "rounding": "half_even"
       },
       "expect": {
-        "minor": -1030
+        "minor": "-1030"
       }
     },
     {
@@ -353,7 +353,7 @@
         "rounding": "half_up"
       },
       "expect": {
-        "minor": 1029
+        "minor": "1029"
       }
     },
     {
@@ -364,7 +364,7 @@
         "rounding": "half_even"
       },
       "expect": {
-        "minor": 1030
+        "minor": "1030"
       }
     },
     {
@@ -375,7 +375,7 @@
         "rounding": "down"
       },
       "expect": {
-        "minor": 1029
+        "minor": "1029"
       }
     },
     {
@@ -386,7 +386,7 @@
         "rounding": "half_up"
       },
       "expect": {
-        "minor": 1029
+        "minor": "1029"
       }
     },
     {
@@ -419,7 +419,7 @@
         "rounding": "reject"
       },
       "expect": {
-        "minor": 10
+        "minor": "10"
       }
     },
     {
@@ -441,7 +441,7 @@
         "rounding": "half_up"
       },
       "expect": {
-        "minor": 11
+        "minor": "11"
       }
     },
     {
@@ -452,7 +452,7 @@
         "rounding": "half_even"
       },
       "expect": {
-        "minor": 10
+        "minor": "10"
       }
     },
     {
@@ -463,7 +463,7 @@
         "rounding": "half_even"
       },
       "expect": {
-        "minor": 12
+        "minor": "12"
       }
     },
     {
@@ -474,7 +474,7 @@
         "rounding": "down"
       },
       "expect": {
-        "minor": 10
+        "minor": "10"
       }
     },
     {
@@ -485,7 +485,7 @@
         "rounding": "reject"
       },
       "expect": {
-        "minor": 1234
+        "minor": "1234"
       }
     },
     {
@@ -496,7 +496,7 @@
         "rounding": "reject"
       },
       "expect": {
-        "minor": 1
+        "minor": "1"
       }
     },
     {
@@ -518,7 +518,7 @@
         "rounding": "reject"
       },
       "expect": {
-        "minor": 0
+        "minor": "0"
       }
     },
     {
@@ -529,7 +529,7 @@
         "rounding": "reject"
       },
       "expect": {
-        "minor": 9223372036854775807
+        "minor": "9223372036854775807"
       }
     },
     {
@@ -551,7 +551,7 @@
         "rounding": "reject"
       },
       "expect": {
-        "minor": 9223372036854775807
+        "minor": "9223372036854775807"
       }
     },
     {
@@ -562,7 +562,7 @@
         "rounding": "reject"
       },
       "expect": {
-        "minor": -9223372036854775808
+        "minor": "-9223372036854775808"
       }
     },
     {
@@ -596,6 +596,17 @@
       },
       "expect": {
         "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-down-negative-truncates-toward-zero",
+      "input": {
+        "amount": "-10.295",
+        "currency": "KES",
+        "rounding": "down"
+      },
+      "expect": {
+        "minor": "-1029"
       }
     }
   ]

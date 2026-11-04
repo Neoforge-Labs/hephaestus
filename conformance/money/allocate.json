@@ -2,7 +2,7 @@
   "suite": "money.allocate",
   "spec": "0.1.0",
   "description": "Split an amount so parts sum exactly to the input, by largest remainder with ties to the lower index (spec 3.7). A negative amount allocates its magnitude and negates each part. An empty ratio list and an all-zero ratio list are rejected with HEPH-MONEY-422; negative ratios are not representable.",
-  "source": "Hand-derived arithmetic; exact large values checked by integer division only. 100/[3,1,2]: shares 50, 16.667, 33.333, floors 50,16,33 sum 99, one leftover unit to index 1 (remainder 2/3 is largest) giving 50,17,33 (sequential would give 51,16,33). 1000/[1 x7]: 142.857 each, floors 142 x7 = 994, six leftover units, all remainders tie so indices 0-5 get one each: 143 x6 + 142 = 1000.",
+  "source": "Hand-derived arithmetic; exact large values checked by integer division only. 100/[3,1,2]: shares 50, 16.667, 33.333, floors 50,16,33 sum 99, one leftover unit to index 1 (remainder 2/3 is largest) giving 50,17,33 (sequential would give 51,16,33). 1000/[1 x7]: 142.857 each, floors 142 x7 = 994, six leftover units, all remainders tie so indices 0-5 get one each: 143 x6 + 142 = 1000. 9223372036854775807/[2,1]: amount*2 = 18446744073709551614 overflows i64; floors 6148914691236517204 and 3074457345618258602 sum to 9223372036854775806; remainders 2/3 and 1/3, so the one leftover unit goes to index 0 giving 6148914691236517205 + 3074457345618258602 = 9223372036854775807. Ratios stay within 0..2^53-1 so they survive JavaScript numbers.",
   "cases": [
     {
       "name": "kes-100-by-1-1-1",
@@ -419,25 +419,25 @@
       }
     },
     {
-      "name": "kes-i64-max-by-large-ratios",
+      "name": "kes-i64-max-by-2-1-needs-wide-intermediate",
       "input": {
         "money": {
           "amount": "9223372036854775807",
           "currency": "KES"
         },
         "ratios": [
-          4611686018427387904,
-          4611686018427387903
+          2,
+          1
         ]
       },
       "expect": {
         "parts": [
           {
-            "amount": "4611686018427387904",
+            "amount": "6148914691236517205",
             "currency": "KES"
           },
           {
-            "amount": "4611686018427387903",
+            "amount": "3074457345618258602",
             "currency": "KES"
           }
         ]
