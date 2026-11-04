@@ -12,6 +12,8 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 - A fingerprint mismatch returns `HEPH-IDEMP-422` even while the original is in flight (2.6).
 - Fingerprint `path` is the raw request target including the query string, never normalised (2.2).
 - Fingerprint `body` is `null` when empty, and `sha256:` plus the hex of the raw bytes for non-JSON media types (2.2).
+- Idempotency records carry a 60 second lease; 5xx and raised errors release the record, status below 500 is stored and replayed (2.7, 2.8).
+- Numbers not exactly representable as IEEE-754 doubles are rejected with `HEPH-VAL-422`, never rounded (4.3).
 - Money `amount` is a string matching `^(0|-?[1-9][0-9]*)$`; JSON numbers are rejected (3.2, 3.4).
 
 ## 1. Errors
@@ -22,7 +24,7 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 
 1.2. The body MUST contain the RFC 9457 members `type`, `title`, `status` and `detail`, and the extension members `code` and `trace_id`.
 
-1.3. `code` MUST be a code from `spec/errors.yaml`. Codes match `^HEPH-[A-Z]{2,6}-\d{3}$`; the middle segment is the entry's `area`. Implementations MUST NOT emit a code absent from the registry.
+1.3. `code` MUST be a code from `spec/errors.yaml`. Codes match `^HEPH-[A-Z]{2,6}-[0-9]{3}$` (ASCII digits only; the whole string must match, with no trailing newline); the middle segment is the entry's `area`. Implementations MUST NOT emit a code absent from the registry.
 
 1.4. `type` MUST be `https://heph.neoforgelabs.tech/errors/<code>`, for example `https://heph.neoforgelabs.tech/errors/HEPH-VAL-422`.
 
@@ -51,29 +53,31 @@ Example:
 
 **Profiles:** the IETF `Idempotency-Key` HTTP header field draft (draft-ietf-httpapi-idempotency-key-header).
 
-2.1. Clients send the key in the `Idempotency-Key` header. An endpoint that requires a key and receives none MUST respond `HEPH-IDEMP-400`. Keys MUST be opaque (a UUID or similar); clients MUST NOT embed personal data in an `Idempotency-Key`, because the key is recorded as the telemetry attribute `idempotency.key` and is not redacted.
+2.1. Clients send the key in the `Idempotency-Key` header. An `Idempotency-Key` MUST be 1 to 255 characters of printable ASCII (VCHAR, 0x21-0x7E), with no whitespace. A missing key, an empty key, or a key violating this syntax MUST be rejected with `HEPH-IDEMP-400` by an endpoint that requires a key. Keys MUST be opaque (a UUID or similar); clients MUST NOT embed personal data in an `Idempotency-Key`, because the key is recorded as the telemetry attribute `idempotency.key` and is not redacted.
 
 2.2. **Fingerprint.** The fingerprint identifies the request a key was first used with. It is computed in four steps:
 
 1. Build a JSON object with exactly three members, named `method`, `path` and `body`:
    - `method`: the HTTP method as an uppercase ASCII string, for example `"POST"`.
    - `path`: the request target in origin-form exactly as received: the path followed, if a query string is present, by `?` and the query string. It is the raw request target: implementations MUST NOT normalise it (no percent-decoding, case-folding, query reordering or slash collapsing), so two orderings of one query yield different fingerprints. It excludes scheme, host and fragment. An empty query (a bare `?`) is kept as received.
-   - `body`: if the request has no body or a zero-length body, the JSON value `null`. If the body is JSON (media type `application/json` or `+json`), the parsed JSON value. For any other media type, the string `"sha256:"` followed by the lowercase hex SHA-256 of the raw body bytes.
+   - `body`: if the request has no body or a zero-length body, the JSON value `null`. If the body is JSON, the parsed JSON value; a body with a JSON media type that does not parse, or that RFC 8785 cannot represent (4.3), MUST be rejected with `HEPH-VAL-422`. A media type is JSON when its type/subtype, compared case-insensitively and ignoring parameters (so `application/json; charset=utf-8` is JSON), is `application/json` or its subtype ends in `+json`. For any other media type, the string `"sha256:"` followed by the lowercase hex SHA-256 of the raw body bytes.
 2. Serialise the object with RFC 8785 JCS (section 4), giving a UTF-8 string.
 3. Compute SHA-256 over the bytes of that UTF-8 string, with no added newline or BOM.
 4. The fingerprint is `sha256:` followed by the 64-character lowercase hex digest.
 
-For `POST /v1/charges` with body `{"b":1,"a":2}` the JCS string is `{"body":{"a":2,"b":1},"method":"POST","path":"/v1/charges"}`. Headers (including the key itself) are not part of the fingerprint.
+For `POST /v1/charges` with body `{"b":1,"a":2}` the JCS string is `{"body":{"a":2,"b":1},"method":"POST","path":"/v1/charges"}` and the fingerprint is `sha256:9d7a9f8a22e4d35d3efc80eafe7f0026713f6ad9ba4a3abd5c025e92036fd6eb`. Check it with `printf '%s' '<jcs string>' | shasum -a 256`. Headers (including the key itself) are not part of the fingerprint.
 
-2.3. **Storage.** A record is unique on `(scope, key)`, where `scope` is the tenant id when the request has one and the empty string otherwise. It stores the fingerprint, state (`in_flight` or `completed`), and once completed the response status and body. Record creation MUST be atomic with the uniqueness check: of two concurrent first requests with the same `(scope, key)`, exactly one proceeds.
+2.3. **Storage.** A record is unique on `(scope, key)`, where `scope` is the tenant id of the authenticated principal when it has one and the empty string otherwise (never a client-supplied header or body field). It stores the fingerprint, state (`in_flight` or `completed`), a lease expiry while `in_flight`, and once completed the response status and body. Record creation MUST be atomic with the uniqueness check: of two concurrent first requests with the same `(scope, key)`, exactly one proceeds.
 
 2.4. **Replay.** If a `completed` record exists and the fingerprint matches, the server MUST NOT run the operation again. It MUST return the stored status and body with the additional header `Idempotent-Replayed: true`.
 
-2.5. If a record exists in state `in_flight`, the server MUST respond `HEPH-IDEMP-409`.
+2.5. If a record exists in state `in_flight` and its lease has not expired, the server MUST respond `HEPH-IDEMP-409`.
 
-2.6. If a record exists and its fingerprint differs, the server MUST respond `HEPH-IDEMP-422`, whatever its state. This takes precedence over 2.5: when the original is still in flight and the fingerprint also differs, the answer is `HEPH-IDEMP-422`, because it names a client bug rather than a retry-later condition.
+2.6. If a record exists and its fingerprint differs, the server MUST respond `HEPH-IDEMP-422`, whatever its state. This takes precedence over 2.5: when the original is still in flight and the fingerprint also differs, the answer is `HEPH-IDEMP-422`, because it names a client bug rather than a retry-later condition. An `in_flight` record whose lease has expired is not matched by 2.5 or 2.6 on state alone; 2.8 applies.
 
-2.7. **Retention.** Records are kept for at least 24 hours from creation by default. After expiry a key is treated as new. Deployments MAY configure a longer retention.
+2.7. **Retention and lease.** The default retention is 24 hours from creation and MAY be configured longer. After expiry a key is treated as new. The default `in_flight` lease is 60 seconds and is configurable.
+
+2.8. **Lifecycle.** A request that creates a record starts it `in_flight` with a lease. When the operation produces a response with status below 500, the record MUST become `completed` and store that response; 4xx responses are stored and replayed like any other, because they are real outcomes of the operation. When the operation produces a response with status 500 or above, or the handler raises, the record MUST be released, meaning it is removed (not left `in_flight`), so the client can retry. A request that finds an `in_flight` record whose lease has expired MUST be allowed to proceed and take over the record with a new lease, so a crashed worker cannot wedge a key for the retention window.
 
 ## 3. Money on the wire
 
@@ -87,7 +91,9 @@ For `POST /v1/charges` with body `{"b":1,"a":2}` the JCS string is `{"body":{"a"
 
 3.2. `amount` is a JSON **string**: an integer count of the currency's minor units in base 10, so that it survives JavaScript numbers. It MUST match `^(0|-?[1-9][0-9]*)$` (ASCII digits only, no `+`, no leading zeros, no whitespace, no decimal point, no exponent, and no `-0`). It MUST fit in a signed 64-bit integer. Anything else is rejected with `HEPH-MONEY-422`.
 
-3.3. `currency` is an ISO 4217 alphabetic code, three uppercase ASCII letters. Its minor-unit exponent is taken from ISO 4217 (`USD` 2, `JPY` 0, `KWD` 3).
+3.3. `currency` MUST be an alphabetic code present in the ISO 4217 table with a defined minor-unit exponent; three uppercase ASCII letters is necessary but not sufficient. The exponent is taken from the table (`USD` 2, `JPY` 0, `KWD` 3). An unknown code (for example `XYZ`), or a code with no defined exponent (`XXX`, `XAU`, `XTS`, `XDR` and the other non-currency codes), MUST be rejected with `HEPH-MONEY-422`. The spec pins to ISO 4217:2015 List One as published by SIX Group; a change to the accepted set requires a spec version bump and updated conformance vectors.
+
+A wire object that violates 3.1 (missing member, extra member, or a value of the wrong JSON type) MUST also be rejected with `HEPH-MONEY-422`. `HEPH-MONEY-409` is reserved for a currency mismatch between two amounts in one operation.
 
 3.4. A JSON number in `amount` MUST be rejected with `HEPH-MONEY-422`. Floating point MUST NOT be used to parse, hold or compute money.
 
@@ -103,7 +109,7 @@ For `POST /v1/charges` with body `{"b":1,"a":2}` the JCS string is `{"body":{"a"
 
 4.2. A content hash is the string `sha256:` followed by the lowercase hex SHA-256 digest (64 characters). Uppercase hex and other prefixes are invalid.
 
-4.3. Inputs that RFC 8785 cannot represent (non-finite numbers, lone surrogates) and duplicate object member names MUST be rejected rather than normalised.
+4.3. The following MUST be rejected, never silently normalised or rounded: non-finite numbers; lone surrogates; duplicate object member names; and any JSON number that cannot be represented exactly as an IEEE-754 double, which includes every integer with magnitude greater than 2^53-1 (so `9007199254740993` is rejected, not rounded to `9007199254740992`). This matches the `rfc8785` reference package, which raises on integers outside the safe-integer domain. `1e21` canonicalises to `1e+21`, and `-0` to `0`. The core returns `HEPH-VAL-422` for all of these rejections.
 
 ## 5. Webhooks
 
@@ -111,13 +117,13 @@ For `POST /v1/charges` with body `{"b":1,"a":2}` the JCS string is `{"body":{"a"
 
 5.1. Messages carry the headers `webhook-id`, `webhook-timestamp` (integer seconds since the Unix epoch) and `webhook-signature`.
 
-5.2. The signed content is `<webhook-id>.<webhook-timestamp>.<raw body>`. The signature is HMAC-SHA256 over it, base64-encoded, and `webhook-signature` carries it as `v1,<base64>`.
+5.2. Secrets follow Standard Webhooks: a secret may carry the optional `whsec_` prefix, and the HMAC key is the base64-decoded remainder. The signed content is `<webhook-id>.<webhook-timestamp>.<raw body>`. The signature is HMAC-SHA256 over it, base64-encoded, and `webhook-signature` carries it as `v1,<base64>`.
 
 5.3. `webhook-signature` MAY hold several space-separated signatures. A message is valid if any signature of a known version verifies. Signatures of unknown versions MUST be ignored, not treated as failures.
 
 5.4. Verification MUST use constant-time comparison.
 
-5.5. The timestamp tolerance is 300 seconds in either direction. A timestamp outside it MUST be rejected even if the signature verifies.
+5.5. The timestamp tolerance is 300 seconds in either direction, and the boundary is inclusive: a timestamp is accepted when `|now - timestamp| <= 300` and rejected when the difference exceeds 300 (301 seconds old, or 301 seconds in the future, is rejected). A timestamp outside it MUST be rejected even if the signature verifies.
 
 5.6. A failure to verify, for any reason, is `HEPH-WH-401`. The response MUST NOT reveal which check failed.
 

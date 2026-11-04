@@ -7,7 +7,7 @@
 Run with ``uv run tools/check_registry.py`` (PyYAML is declared inline, PEP 723).
 
 Error entries need ``{code, status, title, area, detail_hint}``: the code matches
-``^HEPH-[A-Z]{2,6}-\\d{3}$``, is unique, ``status`` is 400-599 and ``area`` equals
+``HEPH-[A-Z]{2,6}-[0-9]{3}`` (full match, ASCII digits), is unique, ``status`` is 400-599 and ``area`` equals
 the code's middle segment. Attribute entries need ``{name, type, description,
 pii}``: names are dotted lowercase, unique, and ``pii`` is a real boolean.
 """
@@ -21,8 +21,8 @@ from typing import Any
 
 import yaml
 
-CODE_RE = re.compile(r"^HEPH-[A-Z]{2,6}-\d{3}$")
-ATTR_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
+CODE_RE = re.compile(r"HEPH-[A-Z]{2,6}-[0-9]{3}")
+ATTR_RE = re.compile(r"[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+")
 ERROR_FIELDS = ("code", "status", "title", "area", "detail_hint")
 ATTRIBUTE_FIELDS = ("name", "type", "description", "pii")
 
@@ -31,7 +31,11 @@ def _load(path: Path, errors: list[str]) -> list[Any]:
     if not path.is_file():
         errors.append(f"{path} does not exist")
         return []
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        errors.append(f"{path.name}: invalid YAML: {exc}")
+        return []
     if not isinstance(data, list):
         errors.append(f"{path.name}: top level must be a list of entries")
         return []
@@ -48,7 +52,7 @@ def _check_errors(path: Path, errors: list[str]) -> None:
         for field in ERROR_FIELDS:
             if entry.get(field) in (None, ""):
                 errors.append(f"{path.name}: {code}: missing '{field}'")
-        if not CODE_RE.match(code):
+        if not CODE_RE.fullmatch(code):
             errors.append(f"{path.name}: {code}: code must match {CODE_RE.pattern}")
         else:
             if entry.get("area") != code.split("-")[1]:
@@ -71,7 +75,7 @@ def _check_attributes(path: Path, errors: list[str]) -> None:
         for field in ATTRIBUTE_FIELDS:
             if entry.get(field) in (None, ""):
                 errors.append(f"{path.name}: {name}: missing '{field}'")
-        if not ATTR_RE.match(name):
+        if not ATTR_RE.fullmatch(name):
             errors.append(f"{path.name}: {name}: name must be dotted lowercase")
         if name in seen:
             errors.append(f"{path.name}: duplicate attribute {name}")

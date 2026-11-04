@@ -34,9 +34,9 @@
   detail_hint: Say when to retry; the response also carries a Retry-After header.
 - code: HEPH-IDEMP-400
   status: 400
-  title: Idempotency key missing
+  title: Idempotency key missing or malformed
   area: IDEMP
-  detail_hint: The endpoint requires an Idempotency-Key header and the request had none.
+  detail_hint: The key is missing, empty, or not 1-255 printable ASCII characters without whitespace.
 - code: HEPH-IDEMP-409
   status: 409
   title: Original request still in flight
