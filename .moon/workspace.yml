@@ -1,0 +1,14 @@
+$schema: 'https://moonrepo.dev/schemas/workspace.json'
+
+# moon rejects project paths that do not exist yet, so only projects present on
+# disk are listed. Each later task adds its own entry beside its moon.yml:
+#   spec: 'spec'                  conformance: 'conformance'
+#   core: 'core'                  hephkit: 'python/hephkit'
+#   heph-cli: 'go'                docker: 'docker'
+#   compose: 'compose'            examples-hello: 'examples/hello'
+projects:
+  docs: 'docs'
+
+vcs:
+  client: 'git'
+  defaultBranch: 'main'
