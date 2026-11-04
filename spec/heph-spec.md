@@ -6,6 +6,14 @@
 
 The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119 and RFC 8174. Where this document profiles a standard, the standard governs everything this document does not restate. Four parts are original: the error-code registry (section 1), idempotency storage and replay (section 2), money on the wire (section 3) and the provenance record (section 7).
 
+## Decisions this version settles
+
+- Idempotency records are scoped by `(tenant id or "", key)`, so keys never collide across tenants (2.3).
+- A fingerprint mismatch returns `HEPH-IDEMP-422` even while the original is in flight (2.6).
+- Fingerprint `path` is the raw request target including the query string, never normalised (2.2).
+- Fingerprint `body` is `null` when empty, and `sha256:` plus the hex of the raw bytes for non-JSON media types (2.2).
+- Money `amount` is a string matching `^(0|-?[1-9][0-9]*)$`; JSON numbers are rejected (3.2, 3.4).
+
 ## 1. Errors
 
 **Profiles:** RFC 9457 (Problem Details for HTTP APIs).
@@ -43,13 +51,13 @@ Example:
 
 **Profiles:** the IETF `Idempotency-Key` HTTP header field draft (draft-ietf-httpapi-idempotency-key-header).
 
-2.1. Clients send the key in the `Idempotency-Key` header. An endpoint that requires a key and receives none MUST respond `HEPH-IDEMP-400`.
+2.1. Clients send the key in the `Idempotency-Key` header. An endpoint that requires a key and receives none MUST respond `HEPH-IDEMP-400`. Keys MUST be opaque (a UUID or similar); clients MUST NOT embed personal data in an `Idempotency-Key`, because the key is recorded as the telemetry attribute `idempotency.key` and is not redacted.
 
 2.2. **Fingerprint.** The fingerprint identifies the request a key was first used with. It is computed in four steps:
 
 1. Build a JSON object with exactly three members, named `method`, `path` and `body`:
    - `method`: the HTTP method as an uppercase ASCII string, for example `"POST"`.
-   - `path`: the request target in origin-form exactly as received: the path followed, if a query string is present, by `?` and the query string. It is not percent-decoded, case-folded or reordered, and it excludes scheme, host and fragment. An empty query (a bare `?`) is kept as received.
+   - `path`: the request target in origin-form exactly as received: the path followed, if a query string is present, by `?` and the query string. It is the raw request target: implementations MUST NOT normalise it (no percent-decoding, case-folding, query reordering or slash collapsing), so two orderings of one query yield different fingerprints. It excludes scheme, host and fragment. An empty query (a bare `?`) is kept as received.
    - `body`: if the request has no body or a zero-length body, the JSON value `null`. If the body is JSON (media type `application/json` or `+json`), the parsed JSON value. For any other media type, the string `"sha256:"` followed by the lowercase hex SHA-256 of the raw body bytes.
 2. Serialise the object with RFC 8785 JCS (section 4), giving a UTF-8 string.
 3. Compute SHA-256 over the bytes of that UTF-8 string, with no added newline or BOM.
@@ -63,7 +71,7 @@ For `POST /v1/charges` with body `{"b":1,"a":2}` the JCS string is `{"body":{"a"
 
 2.5. If a record exists in state `in_flight`, the server MUST respond `HEPH-IDEMP-409`.
 
-2.6. If a record exists and its fingerprint differs, the server MUST respond `HEPH-IDEMP-422`, whatever its state.
+2.6. If a record exists and its fingerprint differs, the server MUST respond `HEPH-IDEMP-422`, whatever its state. This takes precedence over 2.5: when the original is still in flight and the fingerprint also differs, the answer is `HEPH-IDEMP-422`, because it names a client bug rather than a retry-later condition.
 
 2.7. **Retention.** Records are kept for at least 24 hours from creation by default. After expiry a key is treated as new. Deployments MAY configure a longer retention.
 

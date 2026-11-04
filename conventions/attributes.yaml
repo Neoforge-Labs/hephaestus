@@ -10,8 +10,8 @@
   pii: true
 - name: idempotency.key
   type: string
-  description: Client-chosen Idempotency-Key value. Clients may embed identifiers in it, so it is treated as PII.
-  pii: true
+  description: Idempotency-Key value, used to correlate a request with its replays. Clients MUST send opaque keys and no personal data.
+  pii: false
 - name: job.name
   type: string
   description: Name of the background job being executed.

@@ -1,4 +1,10 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["pyyaml"]
+# ///
 """Validate spec/errors.yaml and conventions/attributes.yaml.
+
+Run with ``uv run tools/check_registry.py`` (PyYAML is declared inline, PEP 723).
 
 Error entries need ``{code, status, title, area, detail_hint}``: the code matches
 ``^HEPH-[A-Z]{2,6}-\\d{3}$``, is unique, ``status`` is 400-599 and ``area`` equals
