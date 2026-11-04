@@ -33,6 +33,9 @@ def _load(path: Path, errors: list[str]) -> list[Any]:
         return []
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as exc:
+        errors.append(f"{path.name}: cannot read file: {exc}")
+        return []
     except yaml.YAMLError as exc:
         errors.append(f"{path.name}: invalid YAML: {exc}")
         return []

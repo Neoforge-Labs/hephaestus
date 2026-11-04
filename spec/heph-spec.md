@@ -12,7 +12,7 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 - A fingerprint mismatch returns `HEPH-IDEMP-422` even while the original is in flight (2.6).
 - Fingerprint `path` is the raw request target including the query string, never normalised (2.2).
 - Fingerprint `body` is `null` when empty, and `sha256:` plus the hex of the raw bytes for non-JSON media types (2.2).
-- Idempotency records carry a 60 second lease; 5xx and raised errors release the record, status below 500 is stored and replayed (2.7, 2.8).
+- Idempotency records carry a 60 second default lease; 5xx and raised errors release the record, status below 500 is stored and replayed (2.7, 2.8).
 - Numbers not exactly representable as IEEE-754 doubles are rejected with `HEPH-VAL-422`, never rounded (4.3).
 - Money `amount` is a string matching `^(0|-?[1-9][0-9]*)$`; JSON numbers are rejected (3.2, 3.4).
 
@@ -53,7 +53,7 @@ Example:
 
 **Profiles:** the IETF `Idempotency-Key` HTTP header field draft (draft-ietf-httpapi-idempotency-key-header).
 
-2.1. Clients send the key in the `Idempotency-Key` header. An `Idempotency-Key` MUST be 1 to 255 characters of printable ASCII (VCHAR, 0x21-0x7E), with no whitespace. A missing key, an empty key, or a key violating this syntax MUST be rejected with `HEPH-IDEMP-400` by an endpoint that requires a key. Keys MUST be opaque (a UUID or similar); clients MUST NOT embed personal data in an `Idempotency-Key`, because the key is recorded as the telemetry attribute `idempotency.key` and is not redacted.
+2.1. Clients send the key in the `Idempotency-Key` header. An `Idempotency-Key` MUST be 1 to 255 characters of printable ASCII (VCHAR, 0x21-0x7E), with no whitespace. A missing key, an empty key, or a key violating this syntax MUST be rejected with `HEPH-IDEMP-400` by an endpoint that requires a key. An endpoint that does not require an `Idempotency-Key` MUST ignore a malformed one rather than failing the request. Keys MUST be opaque (a UUID or similar); clients MUST NOT embed personal data in an `Idempotency-Key`, because the key is recorded as the telemetry attribute `idempotency.key` and is not redacted.
 
 2.2. **Fingerprint.** The fingerprint identifies the request a key was first used with. It is computed in four steps:
 
@@ -73,11 +73,11 @@ For `POST /v1/charges` with body `{"b":1,"a":2}` the JCS string is `{"body":{"a"
 
 2.5. If a record exists in state `in_flight` and its lease has not expired, the server MUST respond `HEPH-IDEMP-409`.
 
-2.6. If a record exists and its fingerprint differs, the server MUST respond `HEPH-IDEMP-422`, whatever its state. This takes precedence over 2.5: when the original is still in flight and the fingerprint also differs, the answer is `HEPH-IDEMP-422`, because it names a client bug rather than a retry-later condition. An `in_flight` record whose lease has expired is not matched by 2.5 or 2.6 on state alone; 2.8 applies.
+2.6. If a record exists and its fingerprint differs, the server MUST respond `HEPH-IDEMP-422`, whatever its state and whether or not an `in_flight` lease has expired. This takes precedence over 2.5: when the original is still in flight and the fingerprint also differs, the answer is `HEPH-IDEMP-422`, because it names a client bug rather than a retry-later condition.
 
 2.7. **Retention and lease.** The default retention is 24 hours from creation and MAY be configured longer. After expiry a key is treated as new. The default `in_flight` lease is 60 seconds and is configurable.
 
-2.8. **Lifecycle.** A request that creates a record starts it `in_flight` with a lease. When the operation produces a response with status below 500, the record MUST become `completed` and store that response; 4xx responses are stored and replayed like any other, because they are real outcomes of the operation. When the operation produces a response with status 500 or above, or the handler raises, the record MUST be released, meaning it is removed (not left `in_flight`), so the client can retry. A request that finds an `in_flight` record whose lease has expired MUST be allowed to proceed and take over the record with a new lease, so a crashed worker cannot wedge a key for the retention window.
+2.8. **Lifecycle.** A request that creates a record starts it `in_flight` with a lease. When the operation produces a response with status below 500, the record MUST become `completed` and store that response; 4xx responses are stored and replayed like any other, because they are real outcomes of the operation. When the operation produces a response with status 500 or above, or the handler raises, the record MUST be released, meaning it is removed (not left `in_flight`), so the client can retry. A request that finds an `in_flight` record whose lease has expired and whose fingerprint equals the stored one (a genuine retry) MUST be allowed to proceed and take over the record with a new lease, so a crashed worker cannot wedge a key for the retention window. A request with a differing fingerprint is answered by 2.6 instead. The stored fingerprint is never replaced for the life of the record: one key means one payload for the whole retention window, and an expired lease says only that the previous attempt's outcome is unknown, not that the client's payload may change.
 
 ## 3. Money on the wire
 
@@ -109,7 +109,13 @@ A wire object that violates 3.1 (missing member, extra member, or a value of the
 
 4.2. A content hash is the string `sha256:` followed by the lowercase hex SHA-256 digest (64 characters). Uppercase hex and other prefixes are invalid.
 
-4.3. The following MUST be rejected, never silently normalised or rounded: non-finite numbers; lone surrogates; duplicate object member names; and any JSON number that cannot be represented exactly as an IEEE-754 double, which includes every integer with magnitude greater than 2^53-1 (so `9007199254740993` is rejected, not rounded to `9007199254740992`). This matches the `rfc8785` reference package, which raises on integers outside the safe-integer domain. `1e21` canonicalises to `1e+21`, and `-0` to `0`. The core returns `HEPH-VAL-422` for all of these rejections.
+4.3. Number handling depends on how the number is written, not on how large its value is. The core returns `HEPH-VAL-422` for every rejection in this section; nothing is silently rounded or normalised.
+
+- A JSON number written as an **integer literal** (no fraction and no exponent) MUST have magnitude at most 2^53-1, that is 9007199254740991, the largest accepted integer literal. A larger integer literal MUST be rejected: `9007199254740992`, `9007199254740993` and `-9007199254740993` are rejected.
+- A JSON number written **with a fraction or an exponent** is parsed as an IEEE-754 double and serialised by the RFC 8785 ECMAScript `Number::toString` rules. Rounding to the nearest double is expected and permitted here. For example `1e20` becomes `100000000000000000000`, `1e21` becomes `1e+21`, `0.1` stays `0.1`, and `123456789012345678901234567890.5` becomes `1.2345678901234568e+29`. An integer-valued literal with a fraction or exponent (such as `1e20`) is therefore not an integer literal for this rule. `-0` is serialised as `0`.
+- Non-finite values (NaN, +Infinity, -Infinity), lone surrogates and duplicate object member names MUST be rejected.
+
+This matches the `rfc8785` reference package, which raises on integer literals outside the safe-integer domain.
 
 ## 5. Webhooks
 
