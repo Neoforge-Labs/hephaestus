@@ -25,6 +25,14 @@ Usage (writes conformance/hashing/*.json and conformance/signatures/*.json)::
     uv run tools/gen_signature_vectors.py --hashing    # jcs.json and content.json
     uv run tools/gen_signature_vectors.py --signatures # sign.json and verify.json
 
+One case bypasses ``standardwebhooks``: the signature over a payload that is not
+valid UTF-8 (``RAW_PAYLOAD``). The package only accepts ``str``, but Standard
+Webhooks signs the raw body bytes, so a wrapper that decodes the body to text
+would pass every other vector and still be wrong. That signature is derived with
+``hmac``, ``hashlib`` and ``base64`` from the standard library (HMAC-SHA256 over
+``{msg_id}.{timestamp}.{payload}`` with the base64-decoded secret), and the same
+function is cross-checked against the package on a UTF-8 payload before use.
+
 Header convention for ``signatures.verify``: all three header keys are always
 present; an absent header is represented by the empty string.
 """
@@ -34,6 +42,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import hmac
 import json
 import sys
 from datetime import datetime, timezone
@@ -252,6 +261,22 @@ def sign(secret: str, msg_id: str, ts: int, payload: str) -> str:
     return webhooks.Webhook(secret).sign(msg_id, datetime.fromtimestamp(ts, timezone.utc), payload)
 
 
+RAW_PAYLOAD = b"\xff\xfe\x00binary"  # not valid UTF-8
+
+
+def sign_raw(secret: str, msg_id: str, ts: int, payload: bytes) -> str:
+    """Standard Webhooks v1 signature over raw bytes, from stdlib primitives only."""
+    key = base64.b64decode(secret.removeprefix("whsec_") + "==")
+    mac = hmac.new(key, f"{msg_id}.{ts}.".encode() + payload, hashlib.sha256).digest()
+    return "v1," + base64.b64encode(mac).decode("ascii")
+
+
+def _check_stdlib_matches_package() -> None:
+    for secret, ts, text in [(SECRET, TS, PAYLOAD), (OTHER_SECRET, 0, "x"), (SECRET, 4102444800, "\u00eb")]:
+        if sign_raw(secret, MSG_ID, ts, text.encode()) != sign(secret, MSG_ID, ts, text):
+            raise Disagreement("stdlib HMAC derivation differs from standardwebhooks on a UTF-8 payload")
+
+
 # Independent oracle: the Standard Webhooks reference test vector for this
 # secret/id/timestamp/payload (standard-webhooks test suite).
 ORACLE_SIGN = "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
@@ -283,6 +308,15 @@ def build_sign() -> list[dict[str, Any]]:
                 "expect": {"signature": sig},
             }
         )
+    _check_stdlib_matches_package()
+    cases.append(
+        {
+            "name": "non-utf8-payload-signed-as-raw-bytes",
+            "input": {"secret": SECRET, "msg_id": MSG_ID, "timestamp": TS,
+                      "payload_b64": base64.b64encode(RAW_PAYLOAD).decode("ascii")},
+            "expect": {"signature": sign_raw(SECRET, MSG_ID, TS, RAW_PAYLOAD)},
+        }
+    )
     by = {c["name"]: c["expect"]["signature"] for c in cases}
     if by["secret-without-whsec-prefix-is-raw-base64"] != by["reference-example"]:
         raise Disagreement("prefixed and raw secrets sign differently")
@@ -367,6 +401,23 @@ def build_verify() -> list[dict[str, Any]]:
                 "expect": {"ok": True} if intended else {"error": WH},
             }
         )
+    _check_stdlib_matches_package()
+    raw_good = sign_raw(SECRET, MSG_ID, TS, RAW_PAYLOAD)
+    lossy = sign_raw(SECRET, MSG_ID, TS, RAW_PAYLOAD.decode("utf-8", errors="replace").encode("utf-8"))
+    if raw_good == lossy:
+        raise Disagreement("lossy-decode signature equals raw signature")
+    raw_b64 = base64.b64encode(RAW_PAYLOAD).decode("ascii")
+    for name, sig, ok in [
+        ("non-utf8-payload-signed-as-raw-bytes", raw_good, True),
+        ("non-utf8-payload-signature-over-lossy-decoded-text-rejected", lossy, False),
+    ]:
+        cases.append(
+            {
+                "name": name,
+                "input": {"secret": SECRET, "headers": headers(sig), "payload_b64": raw_b64, "now": now},
+                "expect": {"ok": True} if ok else {"error": WH},
+            }
+        )
     return cases
 
 
@@ -403,11 +454,11 @@ def main() -> int:
         if args.signatures or both:
             out.append((ROOT / "conformance/signatures/sign.json", "signatures.sign",
                         "Standard Webhooks v1 signature (spec 5.2). `timestamp` is integer seconds; `payload_b64` is the base64 of the raw body bytes.",
-                        f"standardwebhooks.Webhook.sign ({versions}); reference example cross-checked against the Standard Webhooks published test vector.",
+                        f"standardwebhooks.Webhook.sign ({versions}), except the non-UTF-8 case which uses stdlib hmac/hashlib/base64 (cross-checked against the package on UTF-8 payloads); reference example cross-checked against the Standard Webhooks published test vector.",
                         build_sign()))
             out.append((ROOT / "conformance/signatures/verify.json", "signatures.verify",
                         "Verification (spec 5). `now` is the verifier clock in integer seconds. All three header keys are always present; an absent header is the empty string. Tolerance 300 s, inclusive.",
-                        f"standardwebhooks.Webhook.verify with its clock pinned to `now` ({versions}); any exception counts as rejection (spec 5.6). Every case's intended outcome is also stated in this script and the run aborts if the package disagrees.",
+                        f"standardwebhooks.Webhook.verify with its clock pinned to `now` ({versions}); any exception counts as rejection (spec 5.6); the two non-UTF-8 cases are derived with stdlib hmac (the package only takes str). Every case's intended outcome is also stated in this script and the run aborts if the package disagrees.",
                         build_verify()))
     except Disagreement as exc:
         print(f"REFERENCE DISAGREEMENT, nothing written: {exc}", file=sys.stderr)

@@ -1,8 +1,8 @@
 {
   "suite": "money.currency",
   "spec": "0.1.0",
-  "description": "Exponents are the minor-unit digits of ISO 4217 List One (SIX Group). A code must be in the table with a defined exponent (spec 3.3); XXX, XAU, XTS and XDR have none.",
-  "source": "ISO 4217 List One as published by SIX Group; exponents hand-derived from the table. Amendment number of the pinned 2015 edition NOT established from a trusted source (see task report); the exponents used here are unchanged across all editions since 2015.",
+  "description": "Normative minor-unit exponent table for the currencies Phase 1 supports (spec 3.3). A code absent from this file, or listed as an error, is rejected with HEPH-MONEY-422.",
+  "source": "Derived from ISO 4217 List One as published by SIX Group, retrieved on 2026-11-04, plus hand-derivation of each exponent from the table. No amendment number is cited.",
   "cases": [
     {
       "name": "usd-exponent-2",

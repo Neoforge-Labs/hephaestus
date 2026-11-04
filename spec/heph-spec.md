@@ -91,7 +91,7 @@ For `POST /v1/charges` with body `{"b":1,"a":2}` the JCS string is `{"body":{"a"
 
 3.2. `amount` is a JSON **string**: an integer count of the currency's minor units in base 10, so that it survives JavaScript numbers. It MUST match `^(0|-?[1-9][0-9]*)$` (ASCII digits only, no `+`, no leading zeros, no whitespace, no decimal point, no exponent, and no `-0`). It MUST fit in a signed 64-bit integer. Anything else is rejected with `HEPH-MONEY-422`.
 
-3.3. `currency` MUST be an alphabetic code present in the ISO 4217 table with a defined minor-unit exponent; three uppercase ASCII letters is necessary but not sufficient. The exponent is taken from the table (`USD` 2, `JPY` 0, `KWD` 3). An unknown code (for example `XYZ`), or a code with no defined exponent (`XXX`, `XAU`, `XTS`, `XDR` and the other non-currency codes), MUST be rejected with `HEPH-MONEY-422`. The spec pins to ISO 4217:2015 List One as published by SIX Group; a change to the accepted set requires a spec version bump and updated conformance vectors.
+3.3. `currency` MUST be an alphabetic code with a defined minor-unit exponent; three uppercase ASCII letters is necessary but not sufficient. The exponent is the one given in `conformance/money/currency.json`, which is the normative exponent table for the currencies Phase 1 supports (`USD` 2, `JPY` 0, `KWD` 3). That file records its derivation: ISO 4217 List One as published by SIX Group, retrieved on 2026-11-04, with each exponent hand-derived from the table. An unknown code (for example `XYZ`), or a code with no defined exponent (`XXX`, `XAU`, `XTS`, `XDR` and the other non-currency codes), MUST be rejected with `HEPH-MONEY-422`. A change to the accepted set requires a spec version bump and updated conformance vectors.
 
 A wire object that violates 3.1 (missing member, extra member, or a value of the wrong JSON type) MUST also be rejected with `HEPH-MONEY-422`. `HEPH-MONEY-409` is reserved for a currency mismatch between two amounts in one operation.
 
@@ -100,6 +100,8 @@ A wire object that violates 3.1 (missing member, extra member, or a value of the
 3.5. Implementations hold money as a signed 64-bit integer of minor units plus a currency. Arithmetic across two currencies MUST fail with `HEPH-MONEY-409`. Overflow MUST fail rather than wrap.
 
 3.6. Parsing a decimal string such as `"19.99"` (a human-facing input, not the wire format) MUST be strict ASCII and MUST reject more fractional digits than the currency's exponent with `HEPH-MONEY-422`, unless the caller supplies an explicit rounding mode.
+
+3.7. **Allocation.** Allocating an amount by a list of ratios uses the largest-remainder method. Ratios are non-negative integers (negative ratios are not representable); the list MUST be non-empty and at least one ratio MUST be non-zero, otherwise the call is rejected with `HEPH-MONEY-422`. A negative amount allocates its absolute value and negates each part. For a non-negative amount, each part's exact share is `amount * ratio / sum(ratios)`; take its floor, then distribute the leftover minor units one at a time to the parts with the largest fractional remainders, ties going to the lower index. The parts always sum to the original amount exactly, and every part carries the original currency. For example 100 allocated by `[3,1,2]` is `[50,17,33]`, not `[51,16,33]`.
 
 ## 4. Canonical JSON and hashing
 

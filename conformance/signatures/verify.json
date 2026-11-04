@@ -2,7 +2,7 @@
   "suite": "signatures.verify",
   "spec": "0.1.0",
   "description": "Verification (spec 5). `now` is the verifier clock in integer seconds. All three header keys are always present; an absent header is the empty string. Tolerance 300 s, inclusive.",
-  "source": "standardwebhooks.Webhook.verify with its clock pinned to `now` (rfc8785 0.1.4, standardwebhooks 1.1.0); any exception counts as rejection (spec 5.6). Every case's intended outcome is also stated in this script and the run aborts if the package disagrees.",
+  "source": "standardwebhooks.Webhook.verify with its clock pinned to `now` (rfc8785 0.1.4, standardwebhooks 1.1.0); any exception counts as rejection (spec 5.6); the two non-UTF-8 cases are derived with stdlib hmac (the package only takes str). Every case's intended outcome is also stated in this script and the run aborts if the package disagrees.",
   "cases": [
     {
       "name": "valid",
@@ -354,6 +354,38 @@
       },
       "expect": {
         "ok": true
+      }
+    },
+    {
+      "name": "non-utf8-payload-signed-as-raw-bytes",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,BsqgULOjB9VT4MJ6Jp6Iu61u1fHthNAJZFYQCeTZsGI="
+        },
+        "payload_b64": "//4AYmluYXJ5",
+        "now": 1614265340
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "non-utf8-payload-signature-over-lossy-decoded-text-rejected",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,F5U/iNAhEB7YTiEj7ytWGzmi8nxeHWgFm1/EwFSK6zk="
+        },
+        "payload_b64": "//4AYmluYXJ5",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
       }
     }
   ]

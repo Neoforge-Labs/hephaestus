@@ -1,8 +1,8 @@
 {
   "suite": "money.allocate",
   "spec": "0.1.0",
-  "description": "Split an amount so parts sum exactly to the input. Remainder minor units go one each to the earliest parts with non-zero ratio (a negative amount allocates its magnitude and negates). Allocation semantics are not in spec section 3 yet: the cases here use only inputs on which sequential and largest-remainder methods agree. An empty ratio list and an all-zero ratio list are rejected with HEPH-MONEY-422; negative ratios are unspecified and deliberately not pinned.",
-  "source": "Hand-derived arithmetic; exact large values checked by integer division only.",
+  "description": "Split an amount so parts sum exactly to the input, by largest remainder with ties to the lower index (spec 3.7). A negative amount allocates its magnitude and negates each part. An empty ratio list and an all-zero ratio list are rejected with HEPH-MONEY-422; negative ratios are not representable.",
+  "source": "Hand-derived arithmetic; exact large values checked by integer division only. 100/[3,1,2]: shares 50, 16.667, 33.333, floors 50,16,33 sum 99, one leftover unit to index 1 (remainder 2/3 is largest) giving 50,17,33 (sequential would give 51,16,33). 1000/[1 x7]: 142.857 each, floors 142 x7 = 994, six leftover units, all remainders tie so indices 0-5 get one each: 143 x6 + 142 = 1000.",
   "cases": [
     {
       "name": "kes-100-by-1-1-1",
@@ -489,6 +489,86 @@
       },
       "expect": {
         "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-100-by-3-1-2-largest-remainder-not-sequential",
+      "input": {
+        "money": {
+          "amount": "100",
+          "currency": "KES"
+        },
+        "ratios": [
+          3,
+          1,
+          2
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "50",
+            "currency": "KES"
+          },
+          {
+            "amount": "17",
+            "currency": "KES"
+          },
+          {
+            "amount": "33",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-1000-by-seven-equal-ratios-ties-to-lower-index",
+      "input": {
+        "money": {
+          "amount": "1000",
+          "currency": "KES"
+        },
+        "ratios": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "143",
+            "currency": "KES"
+          },
+          {
+            "amount": "143",
+            "currency": "KES"
+          },
+          {
+            "amount": "143",
+            "currency": "KES"
+          },
+          {
+            "amount": "143",
+            "currency": "KES"
+          },
+          {
+            "amount": "143",
+            "currency": "KES"
+          },
+          {
+            "amount": "143",
+            "currency": "KES"
+          },
+          {
+            "amount": "142",
+            "currency": "KES"
+          }
+        ]
       }
     }
   ]
