@@ -1,0 +1,198 @@
+{
+  "suite": "money.format",
+  "spec": "0.1.0",
+  "description": "Minor units to a canonical decimal string: exactly `exponent` fractional digits, no grouping, `-` prefix for negatives, no `-0`.",
+  "source": "Hand-derived from ISO 4217 exponents.",
+  "cases": [
+    {
+      "name": "kes-1020",
+      "input": {
+        "minor": 1020,
+        "currency": "KES"
+      },
+      "expect": {
+        "amount": "10.20"
+      }
+    },
+    {
+      "name": "kes-neg-5",
+      "input": {
+        "minor": -5,
+        "currency": "KES"
+      },
+      "expect": {
+        "amount": "-0.05"
+      }
+    },
+    {
+      "name": "jpy-1000",
+      "input": {
+        "minor": 1000,
+        "currency": "JPY"
+      },
+      "expect": {
+        "amount": "1000"
+      }
+    },
+    {
+      "name": "bhd-1",
+      "input": {
+        "minor": 1,
+        "currency": "BHD"
+      },
+      "expect": {
+        "amount": "0.001"
+      }
+    },
+    {
+      "name": "kes-0",
+      "input": {
+        "minor": 0,
+        "currency": "KES"
+      },
+      "expect": {
+        "amount": "0.00"
+      }
+    },
+    {
+      "name": "kes-5",
+      "input": {
+        "minor": 5,
+        "currency": "KES"
+      },
+      "expect": {
+        "amount": "0.05"
+      }
+    },
+    {
+      "name": "kes-100",
+      "input": {
+        "minor": 100,
+        "currency": "KES"
+      },
+      "expect": {
+        "amount": "1.00"
+      }
+    },
+    {
+      "name": "kes-1029",
+      "input": {
+        "minor": 1029,
+        "currency": "KES"
+      },
+      "expect": {
+        "amount": "10.29"
+      }
+    },
+    {
+      "name": "kes-neg-1020",
+      "input": {
+        "minor": -1020,
+        "currency": "KES"
+      },
+      "expect": {
+        "amount": "-10.20"
+      }
+    },
+    {
+      "name": "usd-123456",
+      "input": {
+        "minor": 123456,
+        "currency": "USD"
+      },
+      "expect": {
+        "amount": "1234.56"
+      }
+    },
+    {
+      "name": "jpy-0",
+      "input": {
+        "minor": 0,
+        "currency": "JPY"
+      },
+      "expect": {
+        "amount": "0"
+      }
+    },
+    {
+      "name": "jpy-neg-7",
+      "input": {
+        "minor": -7,
+        "currency": "JPY"
+      },
+      "expect": {
+        "amount": "-7"
+      }
+    },
+    {
+      "name": "bhd-neg-1",
+      "input": {
+        "minor": -1,
+        "currency": "BHD"
+      },
+      "expect": {
+        "amount": "-0.001"
+      }
+    },
+    {
+      "name": "bhd-1234",
+      "input": {
+        "minor": 1234,
+        "currency": "BHD"
+      },
+      "expect": {
+        "amount": "1.234"
+      }
+    },
+    {
+      "name": "clf-1",
+      "input": {
+        "minor": 1,
+        "currency": "CLF"
+      },
+      "expect": {
+        "amount": "0.0001"
+      }
+    },
+    {
+      "name": "kes-i64-max",
+      "input": {
+        "minor": 9223372036854775807,
+        "currency": "KES"
+      },
+      "expect": {
+        "amount": "92233720368547758.07"
+      }
+    },
+    {
+      "name": "kes-i64-min",
+      "input": {
+        "minor": -9223372036854775808,
+        "currency": "KES"
+      },
+      "expect": {
+        "amount": "-92233720368547758.08"
+      }
+    },
+    {
+      "name": "jpy-i64-max",
+      "input": {
+        "minor": 9223372036854775807,
+        "currency": "JPY"
+      },
+      "expect": {
+        "amount": "9223372036854775807"
+      }
+    },
+    {
+      "name": "unknown-currency",
+      "input": {
+        "minor": 1,
+        "currency": "XYZ"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    }
+  ]
+}

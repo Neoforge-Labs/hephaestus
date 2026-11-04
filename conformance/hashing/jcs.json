@@ -1,0 +1,395 @@
+{
+  "suite": "hashing.jcs",
+  "spec": "0.1.0",
+  "description": "Canonical JSON (spec 4). Input is JSON text; expect is the RFC 8785 string, or HEPH-VAL-422 (spec 4.3).",
+  "source": "RFC 8785 sections 3.2.2, 3.2.3 and Appendix B; cyberphone/json-canonicalization number and string data; expected strings produced by rfc8785 0.1.4, standardwebhooks 1.1.0; rejections of duplicate names, NaN/Infinity, lone surrogates and malformed text hand-derived from spec 4.3.",
+  "cases": [
+    {
+      "name": "empty-object",
+      "input": {
+        "json": "{}"
+      },
+      "expect": {
+        "canonical": "{}"
+      }
+    },
+    {
+      "name": "empty-array",
+      "input": {
+        "json": "[]"
+      },
+      "expect": {
+        "canonical": "[]"
+      }
+    },
+    {
+      "name": "top-level-scalars-null",
+      "input": {
+        "json": "null"
+      },
+      "expect": {
+        "canonical": "null"
+      }
+    },
+    {
+      "name": "whitespace-stripped-array-order-kept",
+      "input": {
+        "json": " [ 3 , 1 ,\n 2 , {\"b\" : 1 , \"a\" : [ ] } ] "
+      },
+      "expect": {
+        "canonical": "[3,1,2,{\"a\":[],\"b\":1}]"
+      }
+    },
+    {
+      "name": "keys-sorted",
+      "input": {
+        "json": "{\"b\":1,\"a\":2,\"B\":3}"
+      },
+      "expect": {
+        "canonical": "{\"B\":3,\"a\":2,\"b\":1}"
+      }
+    },
+    {
+      "name": "rfc8785-3.2.2-sample",
+      "input": {
+        "json": "{\"numbers\":[333333333.33333329,1E30,4.50,2e-3,0.000000000000000000000000001],\"string\":\"\\u20ac$\\u000F\\u000aA'\\u0042\\u0022\\u005c\\\\\\\"\\/\",\"literals\":[null,true,false]}"
+      },
+      "expect": {
+        "canonical": "{\"literals\":[null,true,false],\"numbers\":[333333333.3333333,1e+30,4.5,0.002,1e-27],\"string\":\"\u20ac$\\u000f\\nA'B\\\"\\\\\\\\\\\"/\"}"
+      }
+    },
+    {
+      "name": "rfc8785-3.2.3-utf16-key-sort",
+      "input": {
+        "json": "{\"\\u20ac\":\"Euro Sign\",\"\\r\":\"Carriage Return\",\"\\ufb33\":\"Hebrew Letter Dalet With Dagesh\",\"1\":\"One\",\"\\ud83d\\ude00\":\"Emoji: Grinning Face\",\"\\u0080\":\"Control\",\"\\u00f6\":\"Latin Small Letter O With Diaeresis\"}"
+      },
+      "expect": {
+        "canonical": "{\"\\r\":\"Carriage Return\",\"1\":\"One\",\"\u0080\":\"Control\",\"\u00f6\":\"Latin Small Letter O With Diaeresis\",\"\u20ac\":\"Euro Sign\",\"\ud83d\ude00\":\"Emoji: Grinning Face\",\"\ufb33\":\"Hebrew Letter Dalet With Dagesh\"}"
+      }
+    },
+    {
+      "name": "nested-keys-utf16-code-unit-order-not-code-point",
+      "input": {
+        "json": "{\"outer\":{\"\\ufb33\":1,\"\\ud83d\\ude00\":2,\"\\uffff\":3},\"a\":[{\"z\":1,\"y\":2}]}"
+      },
+      "expect": {
+        "canonical": "{\"a\":[{\"y\":2,\"z\":1}],\"outer\":{\"\ud83d\ude00\":2,\"\ufb33\":1,\"\uffff\":3}}"
+      }
+    },
+    {
+      "name": "sorted-deeply-nested",
+      "input": {
+        "json": "{\"z\":{\"y\":{\"x\":1,\"a\":2},\"b\":[{\"d\":1,\"c\":2}]},\"a\":null}"
+      },
+      "expect": {
+        "canonical": "{\"a\":null,\"z\":{\"b\":[{\"c\":2,\"d\":1}],\"y\":{\"a\":2,\"x\":1}}}"
+      }
+    },
+    {
+      "name": "non-ascii-raw-and-escaped-equal",
+      "input": {
+        "json": "[\"\u00e9\",\"\\u00e9\",\"\u20ac\",\"\\u20ac\"]"
+      },
+      "expect": {
+        "canonical": "[\"\u00e9\",\"\u00e9\",\"\u20ac\",\"\u20ac\"]"
+      }
+    },
+    {
+      "name": "non-bmp-surrogate-pair-and-raw",
+      "input": {
+        "json": "[\"\\ud83d\\ude00\",\"\ud83d\ude00\"]"
+      },
+      "expect": {
+        "canonical": "[\"\ud83d\ude00\",\"\ud83d\ude00\"]"
+      }
+    },
+    {
+      "name": "non-ascii-keys",
+      "input": {
+        "json": "{\"\u00e9\":1,\"e\":2,\"z\":3}"
+      },
+      "expect": {
+        "canonical": "{\"e\":2,\"z\":3,\"\u00e9\":1}"
+      }
+    },
+    {
+      "name": "string-escapes-short-forms-and-control-chars",
+      "input": {
+        "json": "[\"\\u0000\\u0008\\u0009\\u000a\\u000c\\u000d\\u001f\\u007f\\u0022\\u005c\\u002f\"]"
+      },
+      "expect": {
+        "canonical": "[\"\\u0000\\b\\t\\n\\f\\r\\u001f\u007f\\\"\\\\/\"]"
+      }
+    },
+    {
+      "name": "line-separators-not-escaped",
+      "input": {
+        "json": "[\"\\u2028\\u2029\"]"
+      },
+      "expect": {
+        "canonical": "[\"\u2028\u2029\"]"
+      }
+    },
+    {
+      "name": "number-zero-negative-zero-literals",
+      "input": {
+        "json": "[0,-0,0.0,-0.0]"
+      },
+      "expect": {
+        "canonical": "[0,0,0,0]"
+      }
+    },
+    {
+      "name": "number-0.1",
+      "input": {
+        "json": "{\"n\":0.1}"
+      },
+      "expect": {
+        "canonical": "{\"n\":0.1}"
+      }
+    },
+    {
+      "name": "number-1e20-is-float-literal-and-expands",
+      "input": {
+        "json": "{\"n\":1e20}"
+      },
+      "expect": {
+        "canonical": "{\"n\":100000000000000000000}"
+      }
+    },
+    {
+      "name": "number-1e21-switches-to-exponent",
+      "input": {
+        "json": "{\"n\":1e21}"
+      },
+      "expect": {
+        "canonical": "{\"n\":1e+21}"
+      }
+    },
+    {
+      "name": "number-1.5e300",
+      "input": {
+        "json": "{\"n\":1.5e300}"
+      },
+      "expect": {
+        "canonical": "{\"n\":1.5e+300}"
+      }
+    },
+    {
+      "name": "number-fraction-literal-rounds-to-double",
+      "input": {
+        "json": "{\"n\":123456789012345678901234567890.5}"
+      },
+      "expect": {
+        "canonical": "{\"n\":1.2345678901234568e+29}"
+      }
+    },
+    {
+      "name": "number-integer-literal-max-safe",
+      "input": {
+        "json": "{\"n\":9007199254740991}"
+      },
+      "expect": {
+        "canonical": "{\"n\":9007199254740991}"
+      }
+    },
+    {
+      "name": "number-integer-literal-negative-max-safe",
+      "input": {
+        "json": "{\"n\":-9007199254740991}"
+      },
+      "expect": {
+        "canonical": "{\"n\":-9007199254740991}"
+      }
+    },
+    {
+      "name": "number-integer-literal-2-pow-53-rejected",
+      "input": {
+        "json": "{\"n\":9007199254740992}"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "number-integer-literal-2-pow-53-plus-1-rejected",
+      "input": {
+        "json": "{\"n\":9007199254740993}"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "number-integer-literal-negative-beyond-safe-rejected",
+      "input": {
+        "json": "{\"n\":-9007199254740993}"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "number-integer-literal-beyond-u64-rejected",
+      "input": {
+        "json": "{\"n\":184467440737095516160}"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "number-float-literal-overflow-to-infinity-rejected",
+      "input": {
+        "json": "{\"n\":1e400}"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "rfc8785-appendix-b-extremes",
+      "input": {
+        "json": "[5e-324,1.7976931348623157e308]"
+      },
+      "expect": {
+        "canonical": "[5e-324,1.7976931348623157e+308]"
+      }
+    },
+    {
+      "name": "rfc8785-appendix-b-2-pow-53-as-float",
+      "input": {
+        "json": "[9007199254740992.0,295147905179352830000.0]"
+      },
+      "expect": {
+        "canonical": "[9007199254740992,295147905179352830000]"
+      }
+    },
+    {
+      "name": "rfc8785-appendix-b-1e23-neighbours",
+      "input": {
+        "json": "[9.999999999999997e22,1e23,1.0000000000000001e23]"
+      },
+      "expect": {
+        "canonical": "[9.999999999999997e+22,1e+23,1.0000000000000001e+23]"
+      }
+    },
+    {
+      "name": "rfc8785-appendix-b-1e21-neighbours",
+      "input": {
+        "json": "[9.999999999999997e20,9.999999999999999e20,1e21]"
+      },
+      "expect": {
+        "canonical": "[999999999999999700000,999999999999999900000,1e+21]"
+      }
+    },
+    {
+      "name": "rfc8785-appendix-b-small",
+      "input": {
+        "json": "[0.000001,9.999999999999997e-7,-0.0000033333333333333333]"
+      },
+      "expect": {
+        "canonical": "[0.000001,9.999999999999997e-7,-0.0000033333333333333333]"
+      }
+    },
+    {
+      "name": "rfc8785-appendix-b-333333333",
+      "input": {
+        "json": "[333333333.3333332,333333333.33333325,333333333.3333333,333333333.3333334,333333333.33333343]"
+      },
+      "expect": {
+        "canonical": "[333333333.3333332,333333333.33333325,333333333.3333333,333333333.3333334,333333333.33333343]"
+      }
+    },
+    {
+      "name": "rfc8785-appendix-b-1424953923781206.2",
+      "input": {
+        "json": "[1424953923781206.2]"
+      },
+      "expect": {
+        "canonical": "[1424953923781206.2]"
+      }
+    },
+    {
+      "name": "duplicate-member-names-rejected",
+      "input": {
+        "json": "{\"a\":1,\"a\":2}"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "duplicate-member-names-nested-rejected",
+      "input": {
+        "json": "{\"x\":{\"b\":1,\"b\":1}}"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "nan-literal-rejected",
+      "input": {
+        "json": "{\"n\":NaN}"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "infinity-literal-rejected",
+      "input": {
+        "json": "{\"n\":Infinity}"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "negative-infinity-literal-rejected",
+      "input": {
+        "json": "{\"n\":-Infinity}"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "lone-high-surrogate-rejected",
+      "input": {
+        "json": "[\"\\ud800\"]"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "lone-low-surrogate-rejected",
+      "input": {
+        "json": "[\"\\udc00\"]"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "malformed-json-rejected",
+      "input": {
+        "json": "{\"a\":"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "trailing-garbage-rejected",
+      "input": {
+        "json": "{} x"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    }
+  ]
+}

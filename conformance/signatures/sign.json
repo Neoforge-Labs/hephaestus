@@ -1,0 +1,128 @@
+{
+  "suite": "signatures.sign",
+  "spec": "0.1.0",
+  "description": "Standard Webhooks v1 signature (spec 5.2). `timestamp` is integer seconds; `payload_b64` is the base64 of the raw body bytes.",
+  "source": "standardwebhooks.Webhook.sign (rfc8785 0.1.4, standardwebhooks 1.1.0); reference example cross-checked against the Standard Webhooks published test vector.",
+  "cases": [
+    {
+      "name": "reference-example",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "msg_id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+        "timestamp": 1614265330,
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0="
+      },
+      "expect": {
+        "signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+      }
+    },
+    {
+      "name": "secret-without-whsec-prefix-is-raw-base64",
+      "input": {
+        "secret": "MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "msg_id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+        "timestamp": 1614265330,
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0="
+      },
+      "expect": {
+        "signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+      }
+    },
+    {
+      "name": "different-secret-length-16-bytes",
+      "input": {
+        "secret": "whsec_MDEyMzQ1Njc4OWFiY2RlZg==",
+        "msg_id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+        "timestamp": 1614265330,
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0="
+      },
+      "expect": {
+        "signature": "v1,r94XOxQw8v+vLaVrXIUkFWnEmqNekP5mdIZf2e/Me5o="
+      }
+    },
+    {
+      "name": "empty-payload",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "msg_id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+        "timestamp": 1614265330,
+        "payload_b64": ""
+      },
+      "expect": {
+        "signature": "v1,v48jdbgvh29KJz2Qc+ghw8G6vG3nAKnujWBg8oM/62A="
+      }
+    },
+    {
+      "name": "non-ascii-payload-signed-as-utf8",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "msg_id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+        "timestamp": 1614265330,
+        "payload_b64": "eyJuYW1lIjoiWm/DqyDigqwg8J+YgCJ9"
+      },
+      "expect": {
+        "signature": "v1,nbbZdRjvAkSJqK5AFzG63TCwXB0hsoZdKorLZqDbDO8="
+      }
+    },
+    {
+      "name": "payload-with-newlines-signed-raw",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "msg_id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+        "timestamp": 1614265330,
+        "payload_b64": "ewogICJhIjogMQp9Cg=="
+      },
+      "expect": {
+        "signature": "v1,NF3ndPKeO8MFAeB8/RSkSN4SL/QdfMHzEcVxBjid3t0="
+      }
+    },
+    {
+      "name": "different-msg-id",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "msg_id": "msg_2KWPBgLlAfxdpx2AI54pPJ85f4W",
+        "timestamp": 1614265330,
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0="
+      },
+      "expect": {
+        "signature": "v1,nzOG9+BXqm2NhJRc/BwwC0acJq+5mg0toMDBHQY3CwU="
+      }
+    },
+    {
+      "name": "timestamp-zero",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "msg_id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+        "timestamp": 0,
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0="
+      },
+      "expect": {
+        "signature": "v1,6JNthw4DtDhc3tFxR0yL2tKk3DGy4nWCVnGrycO3mk0="
+      }
+    },
+    {
+      "name": "timestamp-beyond-2038",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "msg_id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+        "timestamp": 4102444800,
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0="
+      },
+      "expect": {
+        "signature": "v1,sS0B/Pmm4V+yjQOpDbdnGYaYFOBDRa48z5/DcnO9qqE="
+      }
+    },
+    {
+      "name": "payload-containing-dots-and-spaces",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "msg_id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+        "timestamp": 1614265330,
+        "payload_b64": "bXNnX3A1alhOOEFRTTlMV00wRDRsb0tXeEplay4xNjE0MjY1MzMwLnggeQ=="
+      },
+      "expect": {
+        "signature": "v1,Rh34li1vM6hT1Y6Eq9SgOrXnbK20diZgZr5M1hIzc2s="
+      }
+    }
+  ]
+}

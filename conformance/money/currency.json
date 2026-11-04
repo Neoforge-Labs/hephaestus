@@ -1,0 +1,296 @@
+{
+  "suite": "money.currency",
+  "spec": "0.1.0",
+  "description": "Exponents are the minor-unit digits of ISO 4217 List One (SIX Group). A code must be in the table with a defined exponent (spec 3.3); XXX, XAU, XTS and XDR have none.",
+  "source": "ISO 4217 List One as published by SIX Group; exponents hand-derived from the table. Amendment number of the pinned 2015 edition NOT established from a trusted source (see task report); the exponents used here are unchanged across all editions since 2015.",
+  "cases": [
+    {
+      "name": "usd-exponent-2",
+      "input": {
+        "code": "USD"
+      },
+      "expect": {
+        "exponent": 2
+      }
+    },
+    {
+      "name": "eur-exponent-2",
+      "input": {
+        "code": "EUR"
+      },
+      "expect": {
+        "exponent": 2
+      }
+    },
+    {
+      "name": "gbp-exponent-2",
+      "input": {
+        "code": "GBP"
+      },
+      "expect": {
+        "exponent": 2
+      }
+    },
+    {
+      "name": "kes-exponent-2",
+      "input": {
+        "code": "KES"
+      },
+      "expect": {
+        "exponent": 2
+      }
+    },
+    {
+      "name": "tzs-exponent-2",
+      "input": {
+        "code": "TZS"
+      },
+      "expect": {
+        "exponent": 2
+      }
+    },
+    {
+      "name": "ngn-exponent-2",
+      "input": {
+        "code": "NGN"
+      },
+      "expect": {
+        "exponent": 2
+      }
+    },
+    {
+      "name": "zar-exponent-2",
+      "input": {
+        "code": "ZAR"
+      },
+      "expect": {
+        "exponent": 2
+      }
+    },
+    {
+      "name": "ugx-exponent-0",
+      "input": {
+        "code": "UGX"
+      },
+      "expect": {
+        "exponent": 0
+      }
+    },
+    {
+      "name": "jpy-exponent-0",
+      "input": {
+        "code": "JPY"
+      },
+      "expect": {
+        "exponent": 0
+      }
+    },
+    {
+      "name": "bhd-exponent-3",
+      "input": {
+        "code": "BHD"
+      },
+      "expect": {
+        "exponent": 3
+      }
+    },
+    {
+      "name": "kwd-exponent-3",
+      "input": {
+        "code": "KWD"
+      },
+      "expect": {
+        "exponent": 3
+      }
+    },
+    {
+      "name": "omr-exponent-3",
+      "input": {
+        "code": "OMR"
+      },
+      "expect": {
+        "exponent": 3
+      }
+    },
+    {
+      "name": "krw-exponent-0",
+      "input": {
+        "code": "KRW"
+      },
+      "expect": {
+        "exponent": 0
+      }
+    },
+    {
+      "name": "isk-exponent-0",
+      "input": {
+        "code": "ISK"
+      },
+      "expect": {
+        "exponent": 0
+      }
+    },
+    {
+      "name": "xof-exponent-0",
+      "input": {
+        "code": "XOF"
+      },
+      "expect": {
+        "exponent": 0
+      }
+    },
+    {
+      "name": "jod-exponent-3",
+      "input": {
+        "code": "JOD"
+      },
+      "expect": {
+        "exponent": 3
+      }
+    },
+    {
+      "name": "clf-exponent-4",
+      "input": {
+        "code": "CLF"
+      },
+      "expect": {
+        "exponent": 4
+      }
+    },
+    {
+      "name": "chf-exponent-2",
+      "input": {
+        "code": "CHF"
+      },
+      "expect": {
+        "exponent": 2
+      }
+    },
+    {
+      "name": "cny-exponent-2",
+      "input": {
+        "code": "CNY"
+      },
+      "expect": {
+        "exponent": 2
+      }
+    },
+    {
+      "name": "unknown-code-xyz",
+      "input": {
+        "code": "XYZ"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "no-exponent-xxx-no-currency",
+      "input": {
+        "code": "XXX"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "no-exponent-xau-gold",
+      "input": {
+        "code": "XAU"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "no-exponent-xts-testing",
+      "input": {
+        "code": "XTS"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "no-exponent-xdr-sdr",
+      "input": {
+        "code": "XDR"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "lowercase-usd",
+      "input": {
+        "code": "usd"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "mixed-case-usd",
+      "input": {
+        "code": "Usd"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "two-letters",
+      "input": {
+        "code": "US"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "four-letters",
+      "input": {
+        "code": "USDD"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "empty",
+      "input": {
+        "code": ""
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "digits",
+      "input": {
+        "code": "840"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "trailing-space",
+      "input": {
+        "code": "USD "
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "fullwidth-letters",
+      "input": {
+        "code": "\uff35\uff33\uff24"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    }
+  ]
+}

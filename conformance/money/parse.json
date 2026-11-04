@@ -1,0 +1,602 @@
+{
+  "suite": "money.parse",
+  "spec": "0.1.0",
+  "description": "Human-facing decimal strings (spec 3.6): strict ASCII, excess precision rejected unless a rounding mode is given. half_up rounds ties away from zero; half_even rounds ties to the even minor unit; down truncates (only non-negative inputs are pinned for down).",
+  "source": "Hand-derived from ISO 4217 exponents and spec 3.2/3.6; no implementation consulted.",
+  "cases": [
+    {
+      "name": "kes-reject-10",
+      "input": {
+        "amount": "10",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": 1000
+      }
+    },
+    {
+      "name": "kes-reject-0p01",
+      "input": {
+        "amount": "0.01",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": 1
+      }
+    },
+    {
+      "name": "kes-reject-10p29",
+      "input": {
+        "amount": "10.29",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": 1029
+      }
+    },
+    {
+      "name": "kes-reject-10p2",
+      "input": {
+        "amount": "10.2",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": 1020
+      }
+    },
+    {
+      "name": "kes-reject-0",
+      "input": {
+        "amount": "0",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": 0
+      }
+    },
+    {
+      "name": "kes-reject-neg5",
+      "input": {
+        "amount": "-5",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": -500
+      }
+    },
+    {
+      "name": "kes-reject-error-empty",
+      "input": {
+        "amount": "",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-dot-only",
+      "input": {
+        "amount": ".",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-leading-dot",
+      "input": {
+        "amount": ".5",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-trailing-dot",
+      "input": {
+        "amount": "1.",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-excess-precision",
+      "input": {
+        "amount": "10.299",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-leading-space",
+      "input": {
+        "amount": " 1.00",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-trailing-space",
+      "input": {
+        "amount": "1.00 ",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-plus-sign",
+      "input": {
+        "amount": "+5",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-exponent",
+      "input": {
+        "amount": "1e3",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-letters",
+      "input": {
+        "amount": "abc",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-thousands-separator",
+      "input": {
+        "amount": "1,000.50",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-arabic-indic-digits",
+      "input": {
+        "amount": "\u0661\u0660\u0660",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-unicode-minus",
+      "input": {
+        "amount": "\u22125",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-fullwidth-digits",
+      "input": {
+        "amount": "\uff11\uff10",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-overflow",
+      "input": {
+        "amount": "184467440737095517",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-trailing-newline",
+      "input": {
+        "amount": "10\n",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-leading-newline",
+      "input": {
+        "amount": "\n10",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-two-dots",
+      "input": {
+        "amount": "1.2.3",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-error-lone-minus",
+      "input": {
+        "amount": "-",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-half-up-tie",
+      "input": {
+        "amount": "10.295",
+        "currency": "KES",
+        "rounding": "half_up"
+      },
+      "expect": {
+        "minor": 1030
+      }
+    },
+    {
+      "name": "kes-half-even-tie-to-even-up",
+      "input": {
+        "amount": "10.295",
+        "currency": "KES",
+        "rounding": "half_even"
+      },
+      "expect": {
+        "minor": 1030
+      }
+    },
+    {
+      "name": "kes-down-tie",
+      "input": {
+        "amount": "10.295",
+        "currency": "KES",
+        "rounding": "down"
+      },
+      "expect": {
+        "minor": 1029
+      }
+    },
+    {
+      "name": "kes-half-even-tie-to-even-down",
+      "input": {
+        "amount": "10.285",
+        "currency": "KES",
+        "rounding": "half_even"
+      },
+      "expect": {
+        "minor": 1028
+      }
+    },
+    {
+      "name": "kes-half-up-negative-tie",
+      "input": {
+        "amount": "-10.295",
+        "currency": "KES",
+        "rounding": "half_up"
+      },
+      "expect": {
+        "minor": -1030
+      }
+    },
+    {
+      "name": "kes-half-even-negative-tie",
+      "input": {
+        "amount": "-10.295",
+        "currency": "KES",
+        "rounding": "half_even"
+      },
+      "expect": {
+        "minor": -1030
+      }
+    },
+    {
+      "name": "kes-half-up-below-tie",
+      "input": {
+        "amount": "10.294",
+        "currency": "KES",
+        "rounding": "half_up"
+      },
+      "expect": {
+        "minor": 1029
+      }
+    },
+    {
+      "name": "kes-half-even-above-tie",
+      "input": {
+        "amount": "10.2951",
+        "currency": "KES",
+        "rounding": "half_even"
+      },
+      "expect": {
+        "minor": 1030
+      }
+    },
+    {
+      "name": "kes-down-above-tie",
+      "input": {
+        "amount": "10.2951",
+        "currency": "KES",
+        "rounding": "down"
+      },
+      "expect": {
+        "minor": 1029
+      }
+    },
+    {
+      "name": "kes-half-up-exact-needs-no-rounding",
+      "input": {
+        "amount": "10.29",
+        "currency": "KES",
+        "rounding": "half_up"
+      },
+      "expect": {
+        "minor": 1029
+      }
+    },
+    {
+      "name": "kes-half-up-still-rejects-malformed",
+      "input": {
+        "amount": " 1.00",
+        "currency": "KES",
+        "rounding": "half_up"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-half-even-still-rejects-letters",
+      "input": {
+        "amount": "abc",
+        "currency": "KES",
+        "rounding": "half_even"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "jpy-reject-10",
+      "input": {
+        "amount": "10",
+        "currency": "JPY",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": 10
+      }
+    },
+    {
+      "name": "jpy-reject-fraction",
+      "input": {
+        "amount": "10.5",
+        "currency": "JPY",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "jpy-half-up-tie",
+      "input": {
+        "amount": "10.5",
+        "currency": "JPY",
+        "rounding": "half_up"
+      },
+      "expect": {
+        "minor": 11
+      }
+    },
+    {
+      "name": "jpy-half-even-tie-down",
+      "input": {
+        "amount": "10.5",
+        "currency": "JPY",
+        "rounding": "half_even"
+      },
+      "expect": {
+        "minor": 10
+      }
+    },
+    {
+      "name": "jpy-half-even-tie-up",
+      "input": {
+        "amount": "11.5",
+        "currency": "JPY",
+        "rounding": "half_even"
+      },
+      "expect": {
+        "minor": 12
+      }
+    },
+    {
+      "name": "jpy-down",
+      "input": {
+        "amount": "10.9",
+        "currency": "JPY",
+        "rounding": "down"
+      },
+      "expect": {
+        "minor": 10
+      }
+    },
+    {
+      "name": "bhd-reject-1p234",
+      "input": {
+        "amount": "1.234",
+        "currency": "BHD",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": 1234
+      }
+    },
+    {
+      "name": "bhd-reject-0p001",
+      "input": {
+        "amount": "0.001",
+        "currency": "BHD",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": 1
+      }
+    },
+    {
+      "name": "bhd-reject-four-places",
+      "input": {
+        "amount": "1.2345",
+        "currency": "BHD",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-zero-with-decimals",
+      "input": {
+        "amount": "0.00",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": 0
+      }
+    },
+    {
+      "name": "jpy-max-i64",
+      "input": {
+        "amount": "9223372036854775807",
+        "currency": "JPY",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": 9223372036854775807
+      }
+    },
+    {
+      "name": "jpy-i64-max-plus-one",
+      "input": {
+        "amount": "9223372036854775808",
+        "currency": "JPY",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-max-i64-with-fraction",
+      "input": {
+        "amount": "92233720368547758.07",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": 9223372036854775807
+      }
+    },
+    {
+      "name": "kes-min-i64-with-fraction",
+      "input": {
+        "amount": "-92233720368547758.08",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": -9223372036854775808
+      }
+    },
+    {
+      "name": "kes-max-i64-plus-one-minor",
+      "input": {
+        "amount": "92233720368547758.08",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "unknown-currency",
+      "input": {
+        "amount": "1.00",
+        "currency": "XYZ",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "no-exponent-currency",
+      "input": {
+        "amount": "1.00",
+        "currency": "XXX",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    }
+  ]
+}

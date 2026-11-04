@@ -1,0 +1,422 @@
+{
+  "suite": "money.arith",
+  "spec": "0.1.0",
+  "description": "Wire-format arithmetic (spec 3.1-3.5). Currency mismatch is HEPH-MONEY-409; overflow and every wire violation are HEPH-MONEY-422. `b` is absent for `neg`.",
+  "source": "Hand-derived from spec section 3 and i64 bounds.",
+  "cases": [
+    {
+      "name": "add-kes",
+      "input": {
+        "op": "add",
+        "a": {
+          "amount": "100",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "250",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "result": {
+          "amount": "350",
+          "currency": "KES"
+        }
+      }
+    },
+    {
+      "name": "add-negative",
+      "input": {
+        "op": "add",
+        "a": {
+          "amount": "100",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "-250",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "result": {
+          "amount": "-150",
+          "currency": "KES"
+        }
+      }
+    },
+    {
+      "name": "add-to-zero",
+      "input": {
+        "op": "add",
+        "a": {
+          "amount": "9223372036854775807",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "-9223372036854775807",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "result": {
+          "amount": "0",
+          "currency": "KES"
+        }
+      }
+    },
+    {
+      "name": "sub-kes",
+      "input": {
+        "op": "sub",
+        "a": {
+          "amount": "100",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "250",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "result": {
+          "amount": "-150",
+          "currency": "KES"
+        }
+      }
+    },
+    {
+      "name": "sub-from-zero-max",
+      "input": {
+        "op": "sub",
+        "a": {
+          "amount": "0",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "9223372036854775807",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "result": {
+          "amount": "-9223372036854775807",
+          "currency": "KES"
+        }
+      }
+    },
+    {
+      "name": "sub-to-zero-has-no-negative-zero",
+      "input": {
+        "op": "sub",
+        "a": {
+          "amount": "5",
+          "currency": "JPY"
+        },
+        "b": {
+          "amount": "5",
+          "currency": "JPY"
+        }
+      },
+      "expect": {
+        "result": {
+          "amount": "0",
+          "currency": "JPY"
+        }
+      }
+    },
+    {
+      "name": "neg-positive",
+      "input": {
+        "op": "neg",
+        "a": {
+          "amount": "100",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "result": {
+          "amount": "-100",
+          "currency": "KES"
+        }
+      }
+    },
+    {
+      "name": "neg-negative",
+      "input": {
+        "op": "neg",
+        "a": {
+          "amount": "-100",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "result": {
+          "amount": "100",
+          "currency": "KES"
+        }
+      }
+    },
+    {
+      "name": "neg-zero-has-no-negative-zero",
+      "input": {
+        "op": "neg",
+        "a": {
+          "amount": "0",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "result": {
+          "amount": "0",
+          "currency": "KES"
+        }
+      }
+    },
+    {
+      "name": "neg-i64-max",
+      "input": {
+        "op": "neg",
+        "a": {
+          "amount": "9223372036854775807",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "result": {
+          "amount": "-9223372036854775807",
+          "currency": "KES"
+        }
+      }
+    },
+    {
+      "name": "add-currency-mismatch",
+      "input": {
+        "op": "add",
+        "a": {
+          "amount": "100",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "100",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-409"
+      }
+    },
+    {
+      "name": "sub-currency-mismatch",
+      "input": {
+        "op": "sub",
+        "a": {
+          "amount": "100",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "100",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-409"
+      }
+    },
+    {
+      "name": "add-overflow-max-plus-one",
+      "input": {
+        "op": "add",
+        "a": {
+          "amount": "9223372036854775807",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "1",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "add-underflow-min-plus-minus-one",
+      "input": {
+        "op": "add",
+        "a": {
+          "amount": "-9223372036854775808",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "-1",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "sub-overflow-max-minus-minus-one",
+      "input": {
+        "op": "sub",
+        "a": {
+          "amount": "9223372036854775807",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "-1",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "sub-underflow-min-minus-one",
+      "input": {
+        "op": "sub",
+        "a": {
+          "amount": "-9223372036854775808",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "1",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "neg-i64-min-overflows",
+      "input": {
+        "op": "neg",
+        "a": {
+          "amount": "-9223372036854775808",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "add-leading-zero-amount",
+      "input": {
+        "op": "add",
+        "a": {
+          "amount": "01",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "1",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "add-negative-zero-amount",
+      "input": {
+        "op": "add",
+        "a": {
+          "amount": "-0",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "1",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "add-json-number-amount",
+      "input": {
+        "op": "add",
+        "a": {
+          "amount": 100,
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "1",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "add-amount-exceeds-i64",
+      "input": {
+        "op": "add",
+        "a": {
+          "amount": "9223372036854775808",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "0",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "neg-unknown-currency",
+      "input": {
+        "op": "neg",
+        "a": {
+          "amount": "1",
+          "currency": "XYZ"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "add-extra-member",
+      "input": {
+        "op": "add",
+        "a": {
+          "amount": "1",
+          "currency": "KES",
+          "note": "x"
+        },
+        "b": {
+          "amount": "1",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "add-missing-currency",
+      "input": {
+        "op": "add",
+        "a": {
+          "amount": "1"
+        },
+        "b": {
+          "amount": "1",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    }
+  ]
+}
