@@ -4,6 +4,9 @@ Every rule lives in the Rust core. This module only turns a Python object into
 JSON text for the core; nothing is canonicalised or validated here, so NaN,
 Infinity, lone surrogates, duplicate member names and over-deep nesting are
 rejected by the core with ``HEPH-VAL-422``.
+
+Failures raise :class:`HashingError` (a ``ValueError``), which carries the
+registry code in ``.code`` exactly as ``MoneyError`` and ``SignatureError`` do.
 """
 
 import json

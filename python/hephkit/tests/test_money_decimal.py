@@ -69,10 +69,13 @@ def test_decimal_fifty_digits_overflows_cleanly() -> None:
 
 
 def test_decimal_huge_exponent_is_rejected_without_building_the_digits() -> None:
-    for text in ("1E+999999999", "1E+999999999999999999", "9E+99"):
-        with pytest.raises(MoneyError) as exc:
+    for text in ("1E+999999999", "1E+999999999999999999"):
+        with pytest.raises(MoneyError, match="too large to render") as exc:
             Money.from_decimal(Decimal(text), "KES")
         assert exc.value.code == "HEPH-MONEY-422"
+    with pytest.raises(MoneyError) as exc:
+        Money.from_decimal(Decimal("9E+99"), "KES")  # renders fine; core overflow
+    assert exc.value.code == "HEPH-MONEY-422"
 
 
 def test_decimal_huge_zero_exponent_is_zero() -> None:
@@ -81,9 +84,11 @@ def test_decimal_huge_zero_exponent_is_zero() -> None:
 
 def test_decimal_tiny_exponent_is_excess_precision_not_memory() -> None:
     for text in ("1E-999999999", "1E-999999999999999999"):
-        with pytest.raises(MoneyError) as exc:
+        with pytest.raises(MoneyError, match="too large to render") as exc:
             Money.from_decimal(Decimal(text), "KES")
         assert exc.value.code == "HEPH-MONEY-422"
+        with pytest.raises(MoneyError, match="too large to render"):
+            Money.from_decimal(Decimal(text), "KES", "half_up")  # rejected, not 0
 
 
 @pytest.mark.parametrize("text", ["NaN", "-NaN", "sNaN", "Infinity", "-Infinity"])
@@ -105,7 +110,7 @@ def test_i64_extremes_and_out_of_range() -> None:
     assert Money(2**63 - 1, "KES").minor == 2**63 - 1
     assert Money(-(2**63), "KES").minor == -(2**63)
     for bad in (2**63, -(2**63) - 1, 10**40):
-        with pytest.raises(MoneyError) as exc:
+        with pytest.raises(MoneyError, match="signed 64-bit range") as exc:
             Money(bad, "KES")
         assert exc.value.code == "HEPH-MONEY-422"
 
@@ -124,8 +129,12 @@ def test_overflow_and_mismatch_codes() -> None:
 
 def test_allocate_bad_ratios() -> None:
     m = Money(100, "KES")
-    for ratios in ([], [0, 0], [-1, 2], [2**64]):
+    for ratios in ([], [0, 0]):
         with pytest.raises(MoneyError) as exc:
+            m.allocate(ratios)
+        assert exc.value.code == "HEPH-MONEY-422"
+    for ratios in ([-1, 2], [2**64]):
+        with pytest.raises(MoneyError, match="unsigned 64-bit range") as exc:
             m.allocate(ratios)
         assert exc.value.code == "HEPH-MONEY-422"
 

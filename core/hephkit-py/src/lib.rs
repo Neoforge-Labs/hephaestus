@@ -64,7 +64,7 @@ fn parse_rounding(name: &str) -> PyResult<Rounding> {
 fn minor_arg(py: Python<'_>, minor: &Bound<'_, PyAny>) -> PyResult<i64> {
     minor.extract::<i64>().map_err(|e| {
         if e.is_instance_of::<PyOverflowError>(py) {
-            money_invalid(py, "minor units do not fit in a signed 64-bit integer")
+            money_invalid(py, "minor units outside the signed 64-bit range")
         } else {
             e
         }
@@ -155,7 +155,7 @@ fn money_allocate(
     for ratio in &ratios {
         let value = ratio.extract::<u64>().map_err(|e| {
             if e.is_instance_of::<PyOverflowError>(py) {
-                money_invalid(py, "allocation ratios must be integers in 0..2^64-1")
+                money_invalid(py, "ratio outside the unsigned 64-bit range")
             } else {
                 e
             }

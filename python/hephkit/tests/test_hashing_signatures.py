@@ -136,3 +136,27 @@ def test_huge_string_inputs() -> None:
         Money.parse("1." + "0" * 10_000_000, "KES")
     assert Money.parse("0." + "0" * 10_000_000, "KES", "down").minor == 0
     assert len(canonical_json("x" * 10_000_000)) == 10_000_002
+
+
+def test_verify_header_names_are_case_insensitive() -> None:
+    sig = sign(SECRET, "m", 7, b"x")
+    mixed = {"Webhook-Id": "m", "WEBHOOK-TIMESTAMP": "7", "webhook-signature": sig}
+    assert verify(SECRET, mixed, b"x", now=7) is None
+
+
+def test_absent_header_is_distinguishable_from_a_lookup_miss() -> None:
+    sig = sign(SECRET, "m", 7, b"x")
+    missing = {"Webhook-Id": "m", "WEBHOOK-TIMESTAMP": "7"}
+    with pytest.raises(SignatureError) as exc:
+        verify(SECRET, missing, b"x", now=7)
+    assert exc.value.code == "HEPH-WH-401"
+    assert sig  # the same message verifies once the header is present
+
+
+def test_hashing_error_exported_with_code() -> None:
+    from hephkit import hashing
+
+    assert "HashingError" in hashing.__all__
+    with pytest.raises(hashing.HashingError) as exc:
+        hashing.canonical_json(float("nan"))
+    assert exc.value.code == "HEPH-VAL-422"

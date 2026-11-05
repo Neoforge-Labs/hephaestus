@@ -32,15 +32,16 @@ def verify(
     """Return ``None`` if the message verifies; raise :class:`SignatureError`
     (``code`` ``HEPH-WH-401``) otherwise, whatever the reason (spec 5.6).
 
-    ``headers`` is looked up by the exact lower-case names ``webhook-id``,
-    ``webhook-timestamp`` and ``webhook-signature``; an absent header is the
-    empty string and is rejected. ``now`` defaults to the wall clock.
+    ``headers`` is looked up case-insensitively (HTTP field names, RFC 9110) for
+    ``webhook-id``, ``webhook-timestamp`` and ``webhook-signature``; an absent
+    header is the empty string and is rejected. ``now`` defaults to the wall clock.
     """
+    lowered = {k.lower(): v for k, v in headers.items()}
     _core.verify(
         secret,
-        headers.get("webhook-id", ""),
-        headers.get("webhook-timestamp", ""),
-        headers.get("webhook-signature", ""),
+        lowered.get("webhook-id", ""),
+        lowered.get("webhook-timestamp", ""),
+        lowered.get("webhook-signature", ""),
         payload,
         int(time.time()) if now is None else now,
         tolerance,

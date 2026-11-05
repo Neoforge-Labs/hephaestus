@@ -107,6 +107,8 @@ A wire object that violates 3.1 (missing member, extra member, or a value of the
 
 Formatting minor units as a decimal string produces exactly `exponent` fractional digits, no grouping separators, a `-` prefix for negative values, and never `-0`. Formatting `1` with exponent 3 gives `0.001`; with exponent 0 there is no decimal point.
 
+*Implementation note (non-normative; it constrains bindings, not the core).* A binding that exposes a decimal type (for example Python's `Decimal`) and renders it to text before calling the core MUST bound the length of the text it is willing to construct, and MUST reject a value over that bound with `HEPH-MONEY-422` rather than build it: a compact value such as `1E-999999999999` otherwise expands into an unbounded string. A bound rejects values the core would have rounded (for example `1E-999999999` with `half_up`); that is accepted. The Python binding's bound is 4096 characters.
+
 3.7. **Allocation.** Allocating an amount by a list of ratios uses the largest-remainder method. Ratios are non-negative integers (negative ratios are not representable); the list MUST be non-empty and at least one ratio MUST be non-zero, otherwise the call is rejected with `HEPH-MONEY-422`. A negative amount allocates its absolute value and negates each part. For a non-negative amount, each part's exact share is `amount * ratio / sum(ratios)`; take its floor, then distribute the leftover minor units one at a time to the parts with the largest fractional remainders, ties going to the lower index. The parts always sum to the original amount exactly, and every part carries the original currency. For example 100 allocated by `[3,1,2]` is `[50,17,33]`, not `[51,16,33]`.
 
 ## 4. Canonical JSON and hashing

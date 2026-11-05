@@ -18,11 +18,11 @@ __all__ = ["Money", "MoneyError", "Rounding"]
 Rounding = Literal["reject", "half_up", "half_even", "down"]
 
 # A Decimal whose plain (non-scientific) rendering would exceed this many
-# characters is handed to the core in scientific form instead. The core's
-# strict decimal grammar has no exponent, so it rejects it (HEPH-MONEY-422)
-# without Python ever building a gigantic string for something like
-# Decimal("1E+999999999999").
+# characters is rejected (HEPH-MONEY-422, "too large to render") before Python
+# builds a gigantic string for something like Decimal("1E+999999999999").
+# Binding-level policy; see the non-normative note in spec 3.6.
 _MAX_PLAIN_CHARS: Final = 4096
+_TOO_LARGE_CODE: Final = "HEPH-MONEY-422"
 
 
 def _decimal_text(value: Decimal) -> str:
@@ -30,7 +30,8 @@ def _decimal_text(value: Decimal) -> str:
 
     Trailing zeros are kept, so ``Decimal("10.290")`` keeps its three
     fractional digits and the core's digit-count rule (spec 3.6) applies to it.
-    A non-finite value yields text the core rejects.
+    A non-finite value yields text the core rejects. A value whose plain form
+    would exceed ``_MAX_PLAIN_CHARS`` raises ``MoneyError``.
     """
     if not value.is_finite():
         return str(value)
@@ -41,7 +42,12 @@ def _decimal_text(value: Decimal) -> str:
         return "-0" if sign else "0"  # zero has no integer trailing zeros to spell out
     width = len(digits) + exponent if exponent >= 0 else max(len(digits), -exponent) + 2
     if width > _MAX_PLAIN_CHARS:
-        return str(value)
+        err = MoneyError(
+            f"{_TOO_LARGE_CODE}: decimal is too large to render "
+            f"(plain form would exceed {_MAX_PLAIN_CHARS} characters)"
+        )
+        err.code = _TOO_LARGE_CODE
+        raise err
     return format(value, "f")
 
 
@@ -77,7 +83,15 @@ class Money:
     def from_decimal(
         cls, value: Decimal, currency: str, rounding: Rounding = "reject"
     ) -> "Money":
-        """Convert a ``Decimal`` exactly; only ``Decimal`` is accepted (no ``float``, no ``int``)."""
+        """Convert a ``Decimal`` exactly; only ``Decimal`` is accepted (no ``float``, no ``int``).
+
+        Size limit: a value whose plain (non-scientific) form would exceed 4096
+        characters is rejected with ``MoneyError`` (``HEPH-MONEY-422``, "too large
+        to render"), so a compact ``Decimal("1E-999999999999")`` cannot expand into
+        an enormous string. Trade-off: such a value is rejected even where the core
+        would round it, e.g. ``Decimal("1E-999999999")`` with ``half_up`` raises
+        instead of giving 0.
+        """
         if not isinstance(value, Decimal):
             raise TypeError(
                 f"value must be a decimal.Decimal, not {type(value).__name__}"
