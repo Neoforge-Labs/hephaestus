@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-IDEMP-400 — Idempotency key missing or malformed"
+---
+
+# HEPH-IDEMP-400
+
+**Idempotency key missing or malformed**
+
+| | |
+| --- | --- |
+| HTTP status | `400` |
+| Area | `IDEMP` |
+| Problem `type` | `https://heph.neoforgelabs.tech/errors/HEPH-IDEMP-400` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+The Idempotency-Key header is missing, empty, or not 1-255 printable ASCII characters without whitespace.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+An endpoint that requires an Idempotency-Key received none, an empty one, or one that is not 1 to 255 printable ASCII characters (0x21-0x7E) with no whitespace. Send the header on every mutating request to such an endpoint, using a fresh opaque value such as a UUID per logical operation. Do not put personal data in the key; it is recorded as the idempotency.key telemetry attribute without redaction. Endpoints that do not require a key ignore a malformed one.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error reference](/reference/errors).

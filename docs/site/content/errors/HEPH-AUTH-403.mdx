@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-AUTH-403 — Permission denied"
+---
+
+# HEPH-AUTH-403
+
+**Permission denied**
+
+| | |
+| --- | --- |
+| HTTP status | `403` |
+| Area | `AUTH` |
+| Problem `type` | `https://heph.neoforgelabs.tech/errors/HEPH-AUTH-403` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+You are authenticated but do not have permission to perform this action.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+The principal was authenticated but lacks the permission this action needs. Do not retry with the same credentials. Check the roles or scopes granted to the principal and the tenant it is acting in, and grant the missing permission if the access is intended. If the caller should not learn whether the resource exists, return HEPH-NF-404 instead.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error reference](/reference/errors).

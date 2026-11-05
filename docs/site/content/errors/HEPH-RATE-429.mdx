@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-RATE-429 — Rate limit exceeded"
+---
+
+# HEPH-RATE-429
+
+**Rate limit exceeded**
+
+| | |
+| --- | --- |
+| HTTP status | `429` |
+| Area | `RATE` |
+| Problem `type` | `https://heph.neoforgelabs.tech/errors/HEPH-RATE-429` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+Too many requests. Wait before trying again; if the response has a Retry-After header, wait that long.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+The caller exceeded a rate limit. Back off before retrying. If the response carries a Retry-After header, wait that long; otherwise use exponential backoff with jitter. Never retry in a tight loop. If legitimate traffic is hitting the limit, batch requests, cache responses, or raise the limit for that tenant in the rate limiter configuration.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error reference](/reference/errors).

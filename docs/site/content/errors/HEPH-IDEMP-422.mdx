@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-IDEMP-422 — Idempotency key reused with a different payload"
+---
+
+# HEPH-IDEMP-422
+
+**Idempotency key reused with a different payload**
+
+| | |
+| --- | --- |
+| HTTP status | `422` |
+| Area | `IDEMP` |
+| Problem `type` | `https://heph.neoforgelabs.tech/errors/HEPH-IDEMP-422` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+This Idempotency-Key was already used for a different request. Use a new key for a new request.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+The Idempotency-Key was already used for a request with a different fingerprint (method, raw request target including the query string, or body). One key means one payload for the whole retention window (24 hours by default), whether the original is in flight or complete. This is a client bug, caused either by one key being reused for different operations or by a retry that does not send the same bytes, for example because query parameters were reordered or the body was rebuilt. Use a new key for each new operation and resend an identical request when retrying.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error reference](/reference/errors).

@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-NF-404 — Resource not found"
+---
+
+# HEPH-NF-404
+
+**Resource not found**
+
+| | |
+| --- | --- |
+| HTTP status | `404` |
+| Area | `NF` |
+| Problem `type` | `https://heph.neoforgelabs.tech/errors/HEPH-NF-404` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+The requested resource was not found.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+The route matched but the resource it names does not exist, or the principal is not allowed to learn that it exists. Check the identifier you are passing, that it belongs to the tenant of the authenticated principal, and that it has not been deleted. Return this code, rather than HEPH-AUTH-403, when revealing that a resource exists would itself leak information. An unknown route is a different problem, so check the path.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error reference](/reference/errors).

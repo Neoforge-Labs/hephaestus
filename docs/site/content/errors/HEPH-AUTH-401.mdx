@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-AUTH-401 — Authentication required"
+---
+
+# HEPH-AUTH-401
+
+**Authentication required**
+
+| | |
+| --- | --- |
+| HTTP status | `401` |
+| Area | `AUTH` |
+| Problem `type` | `https://heph.neoforgelabs.tech/errors/HEPH-AUTH-401` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+Authentication is required. Your credentials are missing, malformed or expired.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+No valid credentials were presented, because the Authorization header or token is absent, malformed, signed with the wrong key, or past its expiry. Send credentials with the request, refresh an expired token, and check that the client and the server agree on the issuer and signing key. This code means the caller is unidentified; if the caller is identified but not allowed, the code is HEPH-AUTH-403.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error reference](/reference/errors).

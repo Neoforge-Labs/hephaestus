@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-GEN-500 — Internal error"
+---
+
+# HEPH-GEN-500
+
+**Internal error**
+
+| | |
+| --- | --- |
+| HTTP status | `500` |
+| Area | `GEN` |
+| Problem `type` | `https://heph.neoforgelabs.tech/errors/HEPH-GEN-500` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+Something went wrong on our side. Try again later. If this response has a trace\_id, quote it if you contact support.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+The service hit an unhandled failure that no more specific code describes. The caller sees only the generic detail, so the cause is in your own telemetry. Take the trace\_id from the response, find that trace and its logs, and fix the underlying exception. If you are raising this deliberately for an expected condition, map the condition to a specific registry code instead. Never put stack traces, SQL or file paths in detail.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error reference](/reference/errors).
