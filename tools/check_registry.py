@@ -87,6 +87,13 @@ def _check_attributes(path: Path, errors: list[str]) -> None:
             errors.append(f"{path.name}: {name}: pii must be a boolean")
 
 
+def check_errors(path: Path) -> list[str]:
+    """Return a list of error strings for the error registry alone."""
+    found: list[str] = []
+    _check_errors(path, found)
+    return found
+
+
 def check_registry(errors: Path, attributes: Path) -> list[str]:
     """Return a list of error strings for the two registry files."""
     found: list[str] = []
