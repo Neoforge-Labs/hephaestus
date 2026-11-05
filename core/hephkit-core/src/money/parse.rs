@@ -25,7 +25,9 @@ pub(super) fn parse(s: &str, currency: Currency, rounding: Rounding) -> Result<M
     // the exponent is real precision and only a rounding mode may discard it.
     let lossy = excess.iter().any(|&d| d != b'0');
     if lossy && rounding == Rounding::Reject {
-        return Err(invalid("more fractional digits than the currency allows"));
+        return Err(invalid(
+            "fractional digits beyond the currency's exponent would lose value",
+        ));
     }
 
     // Digits of the magnitude in minor units, accumulated with overflow checks.
