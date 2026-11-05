@@ -202,6 +202,11 @@ def test_release_please_does_not_use_the_actions_token() -> None:
     assert "secrets.RELEASE_PLEASE_TOKEN" in token, token
     assert "GITHUB_TOKEN" not in token, token
     assert any("RELEASE_PLEASE_TOKEN is not set" in str(s.get("run", "")) for s in steps)
+    # Presence is not enough: the third release attempt failed with "Resource
+    # not accessible by personal access token" from a token that WAS set. The
+    # preflight must prove the token can write refs before release-please
+    # spends a minute discovering it cannot.
+    assert any("permissions.push" in str(s.get("run", "")) for s in steps)
 
 
 def test_breaking_changes_stay_in_zero_x() -> None:
