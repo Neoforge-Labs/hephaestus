@@ -197,6 +197,22 @@ def test_ecosystem_enables_no_row_yet() -> None:
     assert {e["name"] for e in include} >= {"examples/hello", "Collie", "Domus", "SAWA", "NeoRx"}
 
 
+def test_ecosystem_has_no_default_branch_privileged_trigger() -> None:
+    """The job checks out a third-party repository at `matrix.ref` and runs its
+    command. `schedule` and `workflow_dispatch` run in the default branch's
+    context, where the job can write the Actions cache, so that combination is
+    cache poisoning -- CodeQL alert 1,
+    actions/cache-poisoning/poisonable-step, high. `workflow_call` leaves the
+    context to the caller.
+
+    Re-adding a trigger to restore the weekly run must fail here rather than
+    quietly re-arm the alert. Running consumers on a timer needs them executed
+    outside this repository's default-branch context, which is a design change
+    and not a trigger."""
+    on = load_workflow("ecosystem.yml")["on"]
+    assert set(on) == {"workflow_call"}, on
+
+
 def test_release_publishes_with_trusted_publishing_and_no_token() -> None:
     text = (WORKFLOWS / "release.yml").read_text()
     assert "id-token: write" in text

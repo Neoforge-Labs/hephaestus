@@ -7,15 +7,24 @@
 # "skipped" notice instead of passing quietly. Flip `enabled` and set a real
 # `ref` and `command` when a product adopts hephkit.
 #
-# Runs weekly, on demand, and as a reusable workflow.
+# `workflow_call` ONLY, deliberately. It previously also ran on `schedule` and
+# `workflow_dispatch`, and CodeQL flagged that as cache poisoning
+# (actions/cache-poisoning/poisonable-step, high): those two triggers run in the
+# default branch's context, so the job holds write access to the Actions cache
+# while it checks out a third-party repository at `matrix.ref` and runs its
+# command. Untrusted code in a cache-writing job on the default branch can
+# poison a cache that trusted workflows later restore.
+#
+# Do NOT add `schedule` or `workflow_dispatch` back to get the weekly run. The
+# risk is the combination of untrusted execution and a privileged context, so
+# running consumers on a timer needs them executed somewhere other than this
+# repository's default-branch context — dispatched into each consumer's own
+# repository, for instance. That is a design change, not a trigger.
 #   uses: Neoforge-Labs/hephaestus/.github/workflows/ecosystem.yml@v0
 name: ecosystem
 
 on:
   workflow_call:
-  workflow_dispatch:
-  schedule:
-    - cron: '17 5 * * 1'
 
 permissions:
   contents: read
