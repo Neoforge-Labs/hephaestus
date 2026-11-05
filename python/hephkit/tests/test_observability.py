@@ -612,3 +612,14 @@ def test_enum_holding_a_secret_shaped_value_is_still_redacted(capsys: pytest.Cap
 def test_huge_int_value_does_not_raise(capsys: pytest.CaptureFixture[str]) -> None:
     line = _one(capsys, big=10**5000, ok=10**30, nested=[10**5000])
     assert line["big"] == "<int>" and line["ok"] == 10**30 and line["nested"] == ["<int>"]
+
+
+class _RaisingInt(int):
+    def __str__(self) -> str:
+        raise RuntimeError("no str")
+
+
+def test_key_whose_str_raises_does_not_collapse_the_mapping(capsys: pytest.CaptureFixture[str]) -> None:
+    line = _one(capsys, n={_RaisingInt(4): 1, "z": 2}, keep=1)
+    assert line["n"] == {"<_RaisingInt>": "[REDACTED]", "z": 2}
+    assert line["keep"] == 1

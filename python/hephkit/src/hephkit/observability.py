@@ -25,7 +25,10 @@ Redaction (decisions, each pinned by a test):
 * Dataclasses and pydantic models are dumped and redacted; sequences, sets,
   ``dict.items()``/``values()`` are expanded and redacted. Any other object is
   rendered as ``"<TypeName>"`` only, never ``repr``, so unanticipated shapes
-  cannot leak their fields. Dict keys that JSON cannot carry are stringified.
+  cannot leak their fields. Dict keys must be str, bytes, int, float, bool or
+  None; any other key type (date, UUID, Path, Enum, tuple, objects) renders as
+  ``<TypeName>`` and its value is withheld as ``[REDACTED]``, because such a key
+  cannot be checked against the redaction words. Key by string if you need both.
 * The rule is deliberately over-eager on prefixes: ``token_count`` is redacted
   (prefix ``token_``) while ``tokens_used`` is kept. LLM products that log token
   counts should name them ``tokens_used`` or ``input_tokens``, or accept the redaction.
@@ -98,7 +101,7 @@ def _is_redacted(key: object, words: frozenset[str]) -> bool:
     elif isinstance(key, _JSON_KEYS):
         try:
             k = _normalise(str(key))
-        except ValueError:  # integer beyond Python's int-to-str digit limit
+        except Exception:  # e.g. int beyond the digit limit, or a subclass whose __str__ raises
             return True
     else:
         # A key we cannot name (tuple, custom object) cannot be shown to be
@@ -126,7 +129,7 @@ def _emit_key(key: object) -> object:
     if isinstance(key, int) and not isinstance(key, bool):
         try:
             str(key)
-        except ValueError:  # beyond Python's int-to-str digit limit
+        except Exception:  # beyond the digit limit, or a subclass whose __str__ raises
             return _placeholder(key)
         return key
     if isinstance(key, _JSON_KEYS):
