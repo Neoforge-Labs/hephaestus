@@ -24,6 +24,14 @@ on:
         description: Extra image tag, e.g. the release version. Optional.
         type: string
         default: ''
+      tag-prefix:
+        description: >-
+          Prefix for the sha tag, so a caller's images are distinguishable in
+          the registry. ci.yml passes "ci-" for the images it publishes from
+          main; release.yml passes nothing, so a released image's sha tag is
+          bare and sits alongside its version tag.
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -95,8 +103,9 @@ jobs:
         id: tags
         env:
           VERSION_TAG: ${{ inputs.version-tag }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
         run: |
-          tags="$IMAGE:sha-${GITHUB_SHA::12}"
+          tags="$IMAGE:${TAG_PREFIX}sha-${GITHUB_SHA::12}"
           if [ -n "$VERSION_TAG" ]; then tags="$tags,$IMAGE:$VERSION_TAG"; fi
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
       - name: Build and push (linux/amd64, linux/arm64)

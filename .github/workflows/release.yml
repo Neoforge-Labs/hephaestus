@@ -16,6 +16,14 @@ on:
 permissions:
   contents: read
 
+# `major-tag` force-moves shared aliases, so two releases running at once could
+# interleave and leave an alias on the older tag. Serialise on the ref, and do
+# NOT cancel in progress: a cancelled release run leaves a tag cut with its
+# wheels unpublished and its aliases unmoved, which is worse than waiting.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release-please:
     runs-on: ubuntu-latest
@@ -52,8 +60,12 @@ jobs:
             exit 1
           fi
 
-  # Consumers reference these workflows as ...@v0; release-please makes no major
-  # alias, so move it here. contents: write is granted to this job alone.
+  # Two major aliases, because the repo is consumed two ways and neither is
+  # created by release-please. Reusable workflows resolve `...@v0` from the
+  # plain `v0` tag; the Go submodule resolves only from the `go/` prefixed
+  # tags this repo's release config cuts (component "go", tag-separator "/"),
+  # so `go install .../go/cmd/heph@v0` needs `go/v0`. One job for both, so
+  # contents: write is granted once and in one place.
   major-tag:
     needs: [release-please, verify-release]
     if: ${{ needs.release-please.outputs.released == 'true' }}
@@ -64,13 +76,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-please.outputs.tag }}
-      - name: Force-move the major alias tag
+      - name: Force-move the major alias tags
         env:
           VERSION: ${{ needs.release-please.outputs.version }}
         run: |
+          set -euo pipefail
           major="v${VERSION%%.*}"
           git tag -f "$major"
-          git push --force origin "refs/tags/$major"
+          git tag -f "go/$major"
+          # One push for both refs: the pair moves together or neither does,
+          # so a half-moved pair cannot be left behind by a partial failure.
+          git push --force origin "refs/tags/$major" "refs/tags/go/$major"
 
   wheels:
     needs: [release-please, verify-release]

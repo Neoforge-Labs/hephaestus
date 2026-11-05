@@ -1,0 +1,23 @@
+# Postgres 17 with pgvector. maturity: experimental
+# The relational home for every correctness module (money, ledger, audit,
+# outbox, idempotency, auth). Dev credentials only: user/password/db = heph.
+# Host port 54320 (the 54xxx block keeps Hephaestus stacks off other stacks).
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: heph
+      POSTGRES_PASSWORD: heph
+      POSTGRES_DB: heph
+    ports:
+      - "54320:5432"
+    volumes:
+      - heph-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U heph -d heph"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  heph-postgres-data:

@@ -1,0 +1,19 @@
+{
+  "_comment": [
+    "SeaweedFS S3 identities for LOCAL DEV ONLY.",
+    "These must match the access key and secret an ingot's settings default to",
+    "(heph / heph-dev-secret). Changing one side alone gives a silent 403 from S3."
+  ],
+  "identities": [
+    {
+      "name": "heph",
+      "credentials": [
+        {
+          "accessKey": "heph",
+          "secretKey": "heph-dev-secret"
+        }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

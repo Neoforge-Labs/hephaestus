@@ -1,9 +1,11 @@
 # Ecosystem CI: does a change here still work for what is built from it?
-# Runs each consumer at a pinned ref. Only examples/hello (this repo's own
-# five-minute path) is enabled in phase 1; the product repos are listed so the
-# matrix is complete, but `enabled: false` entries are NOT run: each one emits
-# a visible "skipped" notice instead of passing quietly. Flip `enabled` and set
-# a real `ref` and `command` when a product adopts hephkit.
+# Runs each consumer at a pinned ref. NO row is enabled yet: examples/hello
+# (this repo's own five-minute path) is the first candidate and its tutorial
+# script does not exist in the tree, so the row stays `enabled: false` rather
+# than make the job permanently red. The product repos are listed so the matrix
+# is complete. An `enabled: false` entry is NOT run: each one emits a visible
+# "skipped" notice instead of passing quietly. Flip `enabled` and set a real
+# `ref` and `command` when a product adopts hephkit.
 #
 # Runs weekly, on demand, and as a reusable workflow.
 #   uses: Neoforge-Labs/hephaestus/.github/workflows/ecosystem.yml@v0
@@ -27,8 +29,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Disabled until examples/hello exists. The row was enabled while its
+          # command named a tutorial_test.sh that is not in the tree, so the job
+          # could only ever be red -- and a gate that is always red is a gate
+          # people learn to ignore. Task 15 adds the tutorial; flip this back to
+          # true in the same change, and
+          # test_enabled_ecosystem_rows_are_pinned_and_runnable will then check
+          # that the script it names is really there.
           - name: examples/hello
-            enabled: true
+            enabled: false
             repo: Neoforge-Labs/hephaestus
             ref: ${{ github.sha }}
             command: bash examples/hello/tutorial_test.sh

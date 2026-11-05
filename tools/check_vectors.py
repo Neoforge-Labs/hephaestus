@@ -30,6 +30,7 @@ MIN_CASES = {
     "money.parse": 30,
     "money.format": 10,
     "money.arith": 8,
+    "money.compare": 20,
     "money.allocate": 10,
     "hashing.jcs": 12,
     "hashing.content": 6,

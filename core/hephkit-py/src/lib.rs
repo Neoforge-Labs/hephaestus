@@ -14,6 +14,7 @@ use pyo3::create_exception;
 use pyo3::exceptions::{PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBool;
+use std::cmp::Ordering;
 
 create_exception!(hephkit.money, MoneyError, PyValueError);
 create_exception!(hephkit.signatures, SignatureError, PyValueError);
@@ -150,6 +151,27 @@ fn money_sub(
     Ok(out(&a.checked_sub(&b).map_err(|e| map_err(py, e))?))
 }
 
+/// Ordering of `a` relative to `b` as -1, 0 or 1 (spec 3.8). The Python layer
+/// turns the sign into the four ordering operators; a currency mismatch
+/// arrives here as `MoneyError` with code `HEPH-MONEY-409`, like any other
+/// core error.
+#[pyfunction]
+fn money_cmp(
+    py: Python<'_>,
+    a_minor: &Bound<'_, PyAny>,
+    a_currency: &str,
+    b_minor: &Bound<'_, PyAny>,
+    b_currency: &str,
+) -> PyResult<i32> {
+    let a = money(py, a_minor, a_currency)?;
+    let b = money(py, b_minor, b_currency)?;
+    Ok(match a.checked_cmp(&b).map_err(|e| map_err(py, e))? {
+        Ordering::Less => -1,
+        Ordering::Equal => 0,
+        Ordering::Greater => 1,
+    })
+}
+
 #[pyfunction]
 fn money_neg(py: Python<'_>, minor: &Bound<'_, PyAny>, currency: &str) -> PyResult<(i64, String)> {
     let m = money(py, minor, currency)?;
@@ -268,6 +290,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(money_to_decimal, m)?)?;
     m.add_function(wrap_pyfunction!(money_add, m)?)?;
     m.add_function(wrap_pyfunction!(money_sub, m)?)?;
+    m.add_function(wrap_pyfunction!(money_cmp, m)?)?;
     m.add_function(wrap_pyfunction!(money_neg, m)?)?;
     m.add_function(wrap_pyfunction!(money_allocate, m)?)?;
     m.add_function(wrap_pyfunction!(money_from_wire, m)?)?;

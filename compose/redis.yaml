@@ -1,0 +1,19 @@
+# Redis. maturity: experimental
+# CONDITIONAL: not part of the default stack. Include it only when rate
+# limiting, caching or the Celery adapter is on. Nothing depends on it.
+# Host port 54379.
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "54379:6379"
+    volumes:
+      - heph-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  heph-redis-data:

@@ -16,8 +16,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// files is the copy of compose/ produced by `moon run heph-cli:sync-fragments`
-// (gitignored; .gitkeep keeps the directory so a fresh clone still compiles).
+// files is the copy of compose/ produced by `moon run heph-cli:sync-fragments`.
+// It is COMMITTED, not gitignored: go:embed reads the source tree, and the
+// module zip the Go proxy serves is the git tree, so a `go install`ed or
+// release-built heph gets exactly what is in version control. While it was
+// ignored, every binary built from a clean checkout embedded nothing and told
+// its user to run a moon task they do not have. `heph-cli:check-fragments`
+// (and TestEmbeddedCopyMatchesCompose) is the gate that keeps this copy and
+// compose/ identical; emptying the directory is now a compile error rather
+// than a silent empty embed, since go:embed rejects a directory with no
+// embeddable files.
 //
 //go:embed all:files
 var embedded embed.FS
@@ -161,9 +169,21 @@ func hostPort(n *yaml.Node) (int, error) {
 	return 0, fmt.Errorf("unsupported ports entry on line %d", n.Line)
 }
 
-// Materialize writes every file of fsys (fragments and the support files they
-// bind-mount, like seaweedfs-s3.json) into dir and returns the absolute paths
+// Materialize makes dir hold exactly fsys's files (the fragments and the support
+// files they bind-mount, like seaweedfs-s3.json) and returns the absolute paths
 // of the selected fragments, in order.
+//
+// dir is hephkit's alone — `<os.UserCacheDir>/heph/stacks/<project>`, written by
+// nothing else — so a top-level file that is not in fsys is one this function
+// wrote under an earlier heph whose fragment set has since changed. It is
+// deleted: left behind, a renamed or dropped fragment sits in the stack
+// directory looking current, and the next person debugging the stack has to
+// work out which files Compose was actually given.
+//
+// Writes happen before deletions, so a failed write leaves the previous good
+// state in place rather than a half-emptied directory. Subdirectories are never
+// touched. Callers must keep calling this before querying Compose for the
+// project's own containers: `docker compose ps -f ...` needs the files on disk.
 func Materialize(fsys fs.FS, dir string, selected []Fragment) ([]string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -172,8 +192,9 @@ func Materialize(fsys fs.FS, dir string, selected []Fragment) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
+	ours := make(map[string]bool, len(ents))
 	for _, e := range ents {
-		if e.IsDir() || e.Name() == ".gitkeep" {
+		if e.IsDir() {
 			continue
 		}
 		b, err := fs.ReadFile(fsys, e.Name())
@@ -183,10 +204,31 @@ func Materialize(fsys fs.FS, dir string, selected []Fragment) ([]string, error) 
 		if err := os.WriteFile(filepath.Join(dir, e.Name()), b, 0o644); err != nil {
 			return nil, err
 		}
+		ours[e.Name()] = true
+	}
+	if err := prune(dir, ours); err != nil {
+		return nil, err
 	}
 	paths := make([]string, len(selected))
 	for i, f := range selected {
 		paths[i] = filepath.Join(dir, f.Path)
 	}
 	return paths, nil
+}
+
+// prune removes every top-level file in dir that is not in keep.
+func prune(dir string, keep map[string]bool) error {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range ents {
+		if e.IsDir() || keep[e.Name()] {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, e.Name())); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("removing stale fragment %s: %w", e.Name(), err)
+		}
+	}
+	return nil
 }

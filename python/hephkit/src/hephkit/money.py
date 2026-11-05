@@ -1,8 +1,9 @@
 """Money as integer minor units plus a currency (spec section 3). Experimental.
 
-All parsing, rounding, arithmetic and wire rules live in the Rust core. This
-module converts types and adds ``Decimal`` ergonomics. Floating point never
-touches money: a ``float`` is a ``TypeError``.
+All parsing, rounding, arithmetic, comparison and wire rules live in the Rust
+core, the currency-mismatch check among them (spec 3.8). This module converts
+types and adds ``Decimal`` ergonomics. Floating point never touches money: a
+``float`` is a ``TypeError``.
 """
 
 from collections.abc import Mapping, Sequence
@@ -147,6 +148,44 @@ class Money:
 
     def __neg__(self) -> "Money":
         return Money._from_core(_core.money_neg(self._minor, self._currency))
+
+    def _cmp(self, other: "Money") -> int:
+        """-1, 0 or 1 from the core (spec 3.8).
+
+        The currency-mismatch check lives in the core, not here: this raises
+        ``MoneyError`` with code ``HEPH-MONEY-409`` only because the core
+        returned it.
+        """
+        return _core.money_cmp(
+            self._minor, self._currency, other._minor, other._currency
+        )
+
+    # Ordering (spec 3.8). Each operator returns ``NotImplemented`` for a
+    # non-Money operand, so ``money < 5`` is a ``TypeError`` from Python: that
+    # is a programming bug, not a money-domain error, and must not be dressed
+    # up as HEPH-MONEY-409. Two different currencies do raise that code.
+    # ``__eq__`` is deliberately not one of these: it answers every pair, so a
+    # Money stays usable as a dict key and in a set.
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, Money):
+            return NotImplemented
+        return self._cmp(other) < 0
+
+    def __le__(self, other: object) -> bool:
+        if not isinstance(other, Money):
+            return NotImplemented
+        return self._cmp(other) <= 0
+
+    def __gt__(self, other: object) -> bool:
+        if not isinstance(other, Money):
+            return NotImplemented
+        return self._cmp(other) > 0
+
+    def __ge__(self, other: object) -> bool:
+        if not isinstance(other, Money):
+            return NotImplemented
+        return self._cmp(other) >= 0
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Money):

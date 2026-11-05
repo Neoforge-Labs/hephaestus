@@ -3,6 +3,7 @@ mod common;
 use common::{assert_suites_covered, check, load, minor_str, Case};
 use hephkit_core::{CoreError, Currency, Money, Rounding};
 use serde_json::Value;
+use std::cmp::Ordering;
 
 /// Passes the vector's original bytes for `input.<member>` to the library: the
 /// text member `<member>_text` when present (a runner MUST pass those exact
@@ -18,12 +19,23 @@ fn from_wire(c: &Case, member: &str) -> Result<Money, CoreError> {
 fn every_suite_file_is_exercised() {
     assert_suites_covered(
         "money",
-        &["currency", "parse", "format", "arith", "allocate"],
+        &["currency", "parse", "format", "arith", "compare", "allocate"],
     );
 }
 
 fn wire(m: &Money) -> Value {
     serde_json::from_str(&m.to_wire_json()).unwrap()
+}
+
+/// The vector spelling of an `Ordering`, so a wrong answer prints as `lt`
+/// against `gt` rather than as two opaque enum variants.
+fn ordering_name(o: Ordering) -> String {
+    match o {
+        Ordering::Less => "lt",
+        Ordering::Equal => "eq",
+        Ordering::Greater => "gt",
+    }
+    .to_string()
 }
 
 fn rounding(s: &str) -> Rounding {
@@ -90,6 +102,18 @@ fn arith() {
             });
         check(&c.name, result.map(|m| wire(&m)), &c.expect, |e| {
             e["result"].clone()
+        });
+    }
+}
+
+#[test]
+fn compare() {
+    for c in load("money", "compare") {
+        let result = from_wire(&c, "a")
+            .and_then(|a| a.checked_cmp(&from_wire(&c, "b")?))
+            .map(ordering_name);
+        check(&c.name, result, &c.expect, |e| {
+            e["ordering"].as_str().unwrap().to_string()
         });
     }
 }

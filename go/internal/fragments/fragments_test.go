@@ -1,6 +1,7 @@
 package fragments
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -147,6 +148,68 @@ func TestSyncAndCheck(t *testing.T) {
 	must(os.Remove(filepath.Join(dst, "s.json")))
 	if err := Check(src, dst); err == nil || !strings.Contains(err.Error(), "s.json") {
 		t.Fatalf("missing file not detected: %v", err)
+	}
+}
+
+// A binary built from exactly what git serves — which is what `go install` and
+// a release build get — must carry the fragments. While files/ was gitignored
+// this held for no binary but a developer's own, and no gate caught it: `heph
+// dev up` answered "no fragments are embedded in this heph build: run `moon run
+// heph-cli:sync-fragments` and rebuild", advice a `go install` user cannot act
+// on. Unlike TestEmbeddedCopyMatchesCompose this needs no compose/ checkout, so
+// it cannot skip.
+func TestEmbeddedFragmentsShipInTheBinary(t *testing.T) {
+	got, err := Available(Embedded())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"mail", "objects", "postgres", "redis", "stripe", "telemetry"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("embedded fragments = %v, want %v", got, want)
+	}
+	// The support file objects.yaml bind-mounts must travel with them.
+	if _, err := fs.ReadFile(Embedded(), "seaweedfs-s3.json"); err != nil {
+		t.Fatalf("seaweedfs-s3.json is not embedded: %v", err)
+	}
+}
+
+// Materialize owns its directory, so a fragment that a later heph no longer
+// has must not be left looking current next to the ones Compose was given.
+func TestMaterializePrunesStaleFiles(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(dir, "mail.yaml")
+	if err := os.WriteFile(stale, []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(dir, "data")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fsys := fstest.MapFS{
+		"telemetry.yaml":    {Data: []byte("services:\n  g:\n    ports: [\"54300:3000\"]\n")},
+		"seaweedfs-s3.json": {Data: []byte("{}\n")},
+	}
+	frs, err := ResolveFrom(fsys, []string{"telemetry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := Materialize(fsys, dir, frs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 || filepath.Base(paths[0]) != "telemetry.yaml" {
+		t.Fatalf("selected paths = %v", paths)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale mail.yaml survived: %v", err)
+	}
+	for _, name := range []string{"telemetry.yaml", "seaweedfs-s3.json"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s was not written: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(sub); err != nil {
+		t.Errorf("a subdirectory must never be pruned: %v", err)
 	}
 }
 

@@ -1,0 +1,450 @@
+{
+  "suite": "money.compare",
+  "spec": "0.2.0",
+  "description": "Ordering of two amounts (spec 3.8). The expectation is the ordering of `a` relative to `b`: `lt`, `eq` or `gt`. Two different currencies are HEPH-MONEY-409 whatever the amounts, including when both are zero and when the minor units are equal. An operand that violates spec 3.1-3.3 is HEPH-MONEY-422 and is rejected before any ordering is decided. Each operand is given either as a money wire object `a`/`b` (spec 3.1) or as a JSON string `a_text`/`b_text`; when a text member is present a runner MUST pass those exact bytes to the library without parsing and re-serialising them, which is what exercises duplicate member names (spec 4.3), since standard JSON loaders collapse them.",
+  "source": "Hand-derived from spec section 3 and the i64 bounds; no Hephaestus implementation was run to produce any expectation. Every ordering is the comparison of the two signed integers written in `amount`, read as base-10 integers: 100 < 250, -250 < -100, -1 < 0, 0 > -1. The i64 bounds are -2^63 = -9223372036854775808 and 2^63-1 = 9223372036854775807, so i64-min-to-i64-max is a negative against a positive and therefore `lt`; their difference is -18446744073709551615, of magnitude 2^64-1, which no i64 holds, so a subtraction-based comparison overflows where this expectation does not. The exponents come from spec/currencies.yaml, which transcribes ISO 4217 List One: JPY 0, USD 2, KES 2, KWD 3. The exponent never enters the ordering, which is why jpy-nine-to-ten (minor 9 < 10) is `lt` even though the rendered decimals \"9\" and \"10\" sort the other way as text, and why jpy-to-kwd-equal-minor-units (minor 100 both sides) is a mismatch rather than `eq`. The two duplicate-member cases are hand-derived from spec 3.1 (a money wire object has exactly the members amount and currency), spec 4.3 (duplicate object member names MUST be rejected) and the last paragraph of spec 3.3 (a wire object violating 3.1 is HEPH-MONEY-422, and 409 is reserved for a currency mismatch between two amounts): a document that cannot be parsed never yields two amounts, so the answer is 422 and not 409 even in duplicate-currency-member-in-second-operand, where a loader that kept the last duplicate would see USD against KES and could be tempted into 409.",
+  "cases": [
+    {
+      "name": "lt-same-currency",
+      "input": {
+        "a": {
+          "amount": "100",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "250",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "lt"
+      }
+    },
+    {
+      "name": "gt-same-currency",
+      "input": {
+        "a": {
+          "amount": "250",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "100",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "gt"
+      }
+    },
+    {
+      "name": "eq-same-currency",
+      "input": {
+        "a": {
+          "amount": "1999",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "1999",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "eq"
+      }
+    },
+    {
+      "name": "eq-zero",
+      "input": {
+        "a": {
+          "amount": "0",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "0",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "eq"
+      }
+    },
+    {
+      "name": "lt-negative-one-to-zero",
+      "input": {
+        "a": {
+          "amount": "-1",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "0",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "lt"
+      }
+    },
+    {
+      "name": "gt-zero-to-negative-one",
+      "input": {
+        "a": {
+          "amount": "0",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "-1",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "gt"
+      }
+    },
+    {
+      "name": "lt-two-negatives",
+      "input": {
+        "a": {
+          "amount": "-250",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "-100",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "lt"
+      }
+    },
+    {
+      "name": "gt-two-negatives",
+      "input": {
+        "a": {
+          "amount": "-100",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "-250",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "gt"
+      }
+    },
+    {
+      "name": "lt-negative-to-positive",
+      "input": {
+        "a": {
+          "amount": "-1",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "1",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "lt"
+      }
+    },
+    {
+      "name": "lt-i64-min-to-i64-max",
+      "input": {
+        "a": {
+          "amount": "-9223372036854775808",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "9223372036854775807",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "lt"
+      }
+    },
+    {
+      "name": "gt-i64-max-to-i64-min",
+      "input": {
+        "a": {
+          "amount": "9223372036854775807",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "-9223372036854775808",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "gt"
+      }
+    },
+    {
+      "name": "eq-i64-min",
+      "input": {
+        "a": {
+          "amount": "-9223372036854775808",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "-9223372036854775808",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "eq"
+      }
+    },
+    {
+      "name": "eq-i64-max",
+      "input": {
+        "a": {
+          "amount": "9223372036854775807",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "9223372036854775807",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "eq"
+      }
+    },
+    {
+      "name": "lt-i64-min-to-min-plus-one",
+      "input": {
+        "a": {
+          "amount": "-9223372036854775808",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "-9223372036854775807",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "lt"
+      }
+    },
+    {
+      "name": "gt-i64-max-to-max-minus-one",
+      "input": {
+        "a": {
+          "amount": "9223372036854775807",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "9223372036854775806",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "ordering": "gt"
+      }
+    },
+    {
+      "name": "lt-jpy-zero-exponent",
+      "input": {
+        "a": {
+          "amount": "5000",
+          "currency": "JPY"
+        },
+        "b": {
+          "amount": "5001",
+          "currency": "JPY"
+        }
+      },
+      "expect": {
+        "ordering": "lt"
+      }
+    },
+    {
+      "name": "lt-jpy-nine-to-ten",
+      "input": {
+        "a": {
+          "amount": "9",
+          "currency": "JPY"
+        },
+        "b": {
+          "amount": "10",
+          "currency": "JPY"
+        }
+      },
+      "expect": {
+        "ordering": "lt"
+      }
+    },
+    {
+      "name": "lt-kwd-exponent-three",
+      "input": {
+        "a": {
+          "amount": "1",
+          "currency": "KWD"
+        },
+        "b": {
+          "amount": "2",
+          "currency": "KWD"
+        }
+      },
+      "expect": {
+        "ordering": "lt"
+      }
+    },
+    {
+      "name": "gt-kwd-crosses-a-major-unit",
+      "input": {
+        "a": {
+          "amount": "1000",
+          "currency": "KWD"
+        },
+        "b": {
+          "amount": "999",
+          "currency": "KWD"
+        }
+      },
+      "expect": {
+        "ordering": "gt"
+      }
+    },
+    {
+      "name": "mismatch-usd-to-kes",
+      "input": {
+        "a": {
+          "amount": "100",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "100",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-409"
+      }
+    },
+    {
+      "name": "mismatch-kes-to-usd",
+      "input": {
+        "a": {
+          "amount": "100",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "100",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-409"
+      }
+    },
+    {
+      "name": "mismatch-jpy-to-kwd-equal-minor-units",
+      "input": {
+        "a": {
+          "amount": "100",
+          "currency": "JPY"
+        },
+        "b": {
+          "amount": "100",
+          "currency": "KWD"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-409"
+      }
+    },
+    {
+      "name": "mismatch-both-zero",
+      "input": {
+        "a": {
+          "amount": "0",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "0",
+          "currency": "KES"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-409"
+      }
+    },
+    {
+      "name": "mismatch-outranks-an-obvious-ordering",
+      "input": {
+        "a": {
+          "amount": "1",
+          "currency": "KES"
+        },
+        "b": {
+          "amount": "999999",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-409"
+      }
+    },
+    {
+      "name": "invalid-first-operand-currency",
+      "input": {
+        "a": {
+          "amount": "1",
+          "currency": "XYZ"
+        },
+        "b": {
+          "amount": "1",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "invalid-second-operand-amount",
+      "input": {
+        "a": {
+          "amount": "1",
+          "currency": "USD"
+        },
+        "b": {
+          "amount": "01",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "duplicate-amount-member-in-first-operand",
+      "input": {
+        "a_text": "{\"amount\":\"1\",\"amount\":\"2\",\"currency\":\"USD\"}",
+        "b": {
+          "amount": "1",
+          "currency": "USD"
+        }
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "duplicate-currency-member-in-second-operand",
+      "input": {
+        "a": {
+          "amount": "1",
+          "currency": "USD"
+        },
+        "b_text": "{\"amount\":\"1\",\"currency\":\"USD\",\"currency\":\"KES\"}"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    }
+  ]
+}

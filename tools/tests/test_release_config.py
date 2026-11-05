@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from pathlib import Path
 
 import pytest
@@ -184,12 +185,16 @@ def test_wheels_cover_the_required_targets() -> None:
         assert needle in text, needle
 
 
-def test_ecosystem_enables_only_examples_hello() -> None:
+def test_ecosystem_enables_no_row_yet() -> None:
+    """No row is enabled: examples/hello is the only candidate and Task 15 has
+    not landed its tutorial script. This assertion used to read
+    `enabled == {"examples/hello"}` while that row's command ran a
+    tutorial_test.sh that does not exist -- a green test pinning a
+    guaranteed-red gate."""
     doc = load_workflow("ecosystem.yml")
     include = doc["jobs"]["matrix"]["strategy"]["matrix"]["include"]
-    enabled = {e["name"] for e in include if e["enabled"]}
-    assert enabled == {"examples/hello"}
-    assert {e["name"] for e in include} >= {"Collie", "Domus", "SAWA", "NeoRx"}
+    assert {e["name"] for e in include if e["enabled"]} == set()
+    assert {e["name"] for e in include} >= {"examples/hello", "Collie", "Domus", "SAWA", "NeoRx"}
 
 
 def test_release_publishes_with_trusted_publishing_and_no_token() -> None:
@@ -200,19 +205,71 @@ def test_release_publishes_with_trusted_publishing_and_no_token() -> None:
 
 
 def test_enabled_ecosystem_rows_are_pinned_and_runnable() -> None:
+    """An enabled row must be able to pass. Pinning the ref and requiring a
+    non-empty command was not enough: the command can name a script that is not
+    in the tree, which is how examples/hello sat enabled and unrunnable. For a
+    row that checks out THIS repo the paths its command names must exist, since
+    they are paths we control and can therefore check."""
     include = load_workflow("ecosystem.yml")["jobs"]["matrix"]["strategy"]["matrix"]["include"]
     for e in include:
         if e["enabled"]:
             assert re.fullmatch(r"[0-9a-f]{40}|\$\{\{ github\.sha \}\}", e["ref"]), e["name"]
             assert e["command"].strip(), e["name"]
+            if e["repo"] == "Neoforge-Labs/hephaestus":
+                for target in _command_paths(e["command"]):
+                    assert (ROOT / target).exists(), f"{e['name']} runs {target}, which is not in the tree"
         else:
             assert not re.fullmatch(r"[0-9a-f]{40}", e["ref"]) and e["ref"] != "main", e["name"]
+
+
+def _command_paths(command: str) -> list[str]:
+    """Repo-relative paths a shell command names: tokens holding a "/" that are
+    not flags. Enough for the `bash <script>` shape these commands use."""
+    return [t for t in shlex.split(command) if "/" in t and not t.startswith("-")]
+
+
+def test_the_runnable_guard_would_catch_a_missing_script() -> None:
+    """The guard above is the whole value of this change, so prove it fires
+    rather than trusting that it would."""
+    assert _command_paths("bash examples/hello/tutorial_test.sh") == ["examples/hello/tutorial_test.sh"]
+    assert _command_paths("pytest -q") == []
+    assert _command_paths("uv run --with pyyaml tools/check_registry.py") == ["tools/check_registry.py"]
+    assert not (ROOT / "examples/hello/tutorial_test.sh").exists()
+    assert (ROOT / "tools/check_registry.py").exists()
 
 
 def test_release_publishes_nothing_without_a_verified_version() -> None:
     jobs = load_workflow("release.yml")["jobs"]
     for job in ("wheels", "images"):
         assert "verify-release" in jobs[job]["needs"], job
+
+
+def test_release_moves_both_major_aliases() -> None:
+    """The repo is consumed two ways and release-please creates neither alias.
+    Reusable workflows resolve `...@v0` from the plain `v0` tag; the Go
+    submodule resolves only from the `go/`-prefixed tags the release config
+    cuts, so `go install .../go/cmd/heph@v0` needs `go/v0`. Both are moved by
+    one job, in one push, so a partial failure cannot leave a half-moved pair."""
+    job = load_workflow("release.yml")["jobs"]["major-tag"]
+    assert job["permissions"] == {"contents": "write"}
+    assert "verify-release" in job["needs"]
+    (script,) = [s["run"] for s in job["steps"] if "run" in s]
+    assert 'git tag -f "$major"' in script
+    assert 'git tag -f "go/$major"' in script
+    pushes = [line.strip() for line in script.splitlines() if "git push" in line]
+    assert len(pushes) == 1, f"both refs must move in one push, found {pushes}"
+    assert 'refs/tags/$major' in pushes[0] and 'refs/tags/go/$major' in pushes[0]
+    assert "set -euo pipefail" in script, "a failed tag must fail the job"
+
+
+def test_the_go_alias_prefix_matches_the_release_config() -> None:
+    """`go/v0` is only the right alias while the `go` package's released tags
+    are `go/vX.Y.Z`. If the tag-separator or component ever changed, the alias
+    would point at a prefix nothing resolves from."""
+    config = json.loads((ROOT / "release-please-config.json").read_text())
+    go = config["packages"]["go"]
+    assert go["component"] == "go" and go["tag-separator"] == "/"
+    assert config["include-component-in-tag"] is True
 
 
 def test_ci_never_cancels_runs_on_main() -> None:

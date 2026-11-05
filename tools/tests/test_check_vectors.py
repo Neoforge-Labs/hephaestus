@@ -19,6 +19,7 @@ MINIMUM_CASES = {
     "money.parse": 30,
     "money.format": 10,
     "money.arith": 8,
+    "money.compare": 20,
     "money.allocate": 10,
     "hashing.jcs": 12,
     "hashing.content": 6,
@@ -36,7 +37,7 @@ def _count(suite: str) -> int:
 def test_all_vector_files_match_schema() -> None:
     assert check_vectors(CONFORMANCE, ERRORS) == []
     files = sorted(p.relative_to(CONFORMANCE).as_posix() for p in CONFORMANCE.glob("*/*.json"))
-    assert len(files) == 10  # nine suites plus the schema
+    assert len(files) == 11  # ten suites plus the schema
 
 
 def test_minimum_case_counts() -> None:

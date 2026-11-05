@@ -46,6 +46,23 @@ proptest! {
     }
 
     #[test]
+    fn cmp_agrees_with_minor_units_over_the_whole_range(a in any::<i64>(), b in any::<i64>()) {
+        let (x, y) = (Money::new(a, kes()), Money::new(b, kes()));
+        // Ordering is the i64 ordering, for every pair including i64::MIN
+        // against i64::MAX, where the difference does not fit in an i64.
+        prop_assert_eq!(x.checked_cmp(&y).unwrap(), a.cmp(&b));
+        prop_assert_eq!(y.checked_cmp(&x).unwrap(), b.cmp(&a));
+    }
+
+    #[test]
+    fn cmp_across_currencies_is_always_a_mismatch(a in any::<i64>(), b in any::<i64>()) {
+        let usd = Currency::from_code("USD").unwrap();
+        let (x, y) = (Money::new(a, kes()), Money::new(b, usd));
+        prop_assert_eq!(x.checked_cmp(&y).unwrap_err().code(), "HEPH-MONEY-409");
+        prop_assert_eq!(y.checked_cmp(&x).unwrap_err().code(), "HEPH-MONEY-409");
+    }
+
+    #[test]
     fn parse_format_roundtrip(minor in any::<i64>()) {
         // One currency per exponent in the table: 0, 2, 3 and 4.
         for code in ["JPY", "USD", "KWD", "CLF"] {

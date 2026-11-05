@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import operator
 from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
@@ -107,11 +108,49 @@ def run_arith(case: Case) -> None:
     assert compute().to_wire() == case["expect"]["result"]
 
 
+#: The four ordering operators, in the order `_ORDERINGS` records them.
+_OPERATORS: tuple[Callable[[Money, Money], bool], ...] = (
+    operator.lt,
+    operator.le,
+    operator.gt,
+    operator.ge,
+)
+
+#: What each ordering a vector can expect means for those four operators, so
+#: one case pins all four: `lt` means `a < b` and `a <= b` hold while `a > b`
+#: and `a >= b` do not. No operator can drift from the spec on its own.
+_ORDERINGS: dict[str, tuple[bool, bool, bool, bool]] = {
+    "lt": (True, True, False, False),
+    "eq": (False, True, False, True),
+    "gt": (False, False, True, True),
+}
+
+
+def run_compare(case: Case) -> None:
+    i = case["input"]
+    expect = case["expect"]
+    if "error" in expect:
+        # Every operator must fail the same way: a correct `<` next to a `>=`
+        # that answers a currency mismatch anyway would otherwise pass.
+        for op in _OPERATORS:
+            with pytest.raises(MoneyError) as exc:
+                op(_operand(i, "a"), _operand(i, "b"))
+            assert getattr(exc.value, "code") == expect["error"]
+        return
+    a, b = _operand(i, "a"), _operand(i, "b")
+    assert tuple(op(a, b) for op in _OPERATORS) == _ORDERINGS[expect["ordering"]]
+
+
 def run_allocate(case: Case) -> None:
     i = case["input"]
 
     def compute() -> list[Money]:
-        return Money.from_wire(i["money"]).allocate(i["ratios"])
+        # `_operand` so `money_text` reaches the core's text entry point, as it
+        # already does in the Rust runner. Reading i["money"] only left the text
+        # spelling supported by the schema and unreachable from Python, so a
+        # vector using it would have failed with a KeyError rather than on the
+        # behaviour it pins.
+        return _operand(i, "money").allocate(i["ratios"])
 
     if expect_error(case, MoneyError, compute):
         return
@@ -187,6 +226,7 @@ RUNNERS: dict[str, Callable[[Case], None]] = {
     "money.parse": run_parse,
     "money.format": run_format,
     "money.arith": run_arith,
+    "money.compare": run_compare,
     "money.allocate": run_allocate,
     "hashing.jcs": run_jcs,
     "hashing.content": run_content,
@@ -214,7 +254,7 @@ def collect() -> list[Any]:
 
 
 def test_vector_files_are_found() -> None:
-    assert len(vector_files()) >= 9, vector_files()
+    assert len(vector_files()) >= 10, vector_files()
 
 
 def test_every_vector_file_has_a_runner() -> None:

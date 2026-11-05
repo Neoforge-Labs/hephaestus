@@ -17,6 +17,7 @@
         "money.parse",
         "money.format",
         "money.arith",
+        "money.compare",
         "money.allocate",
         "hashing.jcs",
         "hashing.content",
@@ -390,6 +391,109 @@
       "if": {
         "properties": {
           "suite": {
+            "const": "money.compare"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "a": {
+                      "type": "object"
+                    },
+                    "b": {
+                      "type": "object"
+                    },
+                    "a_text": {
+                      "type": "string"
+                    },
+                    "b_text": {
+                      "type": "string"
+                    }
+                  },
+                  "allOf": [
+                    {
+                      "oneOf": [
+                        {
+                          "required": [
+                            "a"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "a_text"
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "oneOf": [
+                        {
+                          "required": [
+                            "b"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "b_text"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "ordering"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "ordering": {
+                          "enum": [
+                            "lt",
+                            "eq",
+                            "gt"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "pattern": "^HEPH-[A-Z]{2,6}-[0-9]{3}$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "suite": {
             "const": "money.allocate"
           }
         },
@@ -405,13 +509,15 @@
                 "input": {
                   "type": "object",
                   "required": [
-                    "money",
                     "ratios"
                   ],
                   "additionalProperties": false,
                   "properties": {
                     "money": {
                       "type": "object"
+                    },
+                    "money_text": {
+                      "type": "string"
                     },
                     "ratios": {
                       "type": "array",
@@ -421,7 +527,19 @@
                         "maximum": 9007199254740991
                       }
                     }
-                  }
+                  },
+                  "oneOf": [
+                    {
+                      "required": [
+                        "money"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "money_text"
+                      ]
+                    }
+                  ]
                 },
                 "expect": {
                   "oneOf": [

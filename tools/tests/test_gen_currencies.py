@@ -17,6 +17,7 @@ from gen_currencies import (  # noqa: E402
     main,
     render,
     render_registry,
+    derivable,
     verify_source,
 )
 from check_registry import check_currencies  # noqa: E402
@@ -453,9 +454,55 @@ def test_transcribe_refuses_a_file_the_pin_does_not_cover(tmp_path: Path) -> Non
     assert registry.read_text(encoding="utf-8") == before  # never writes on a hash mismatch
 
 
+def test_derivable_separates_a_republication_from_a_200_that_is_not_list_one(tmp_path: Path) -> None:
+    """The currency-source workflow needs this split and cannot get it from
+    --verify-source, which returns on the sha256 mismatch before it parses.
+    A publisher that has moved on serves DIFFERENT List One bytes (news, and a
+    re-pin is the right advice); a rate-limit page or a Wayback error page
+    serves bytes that are not List One at all, and recommending a re-pin to
+    those would be the worst advice this job could give."""
+    root = _root(tmp_path)
+
+    # A genuine newer publication: differs from any pin, still derives.
+    newer = tmp_path / "newer.xml"
+    newer.write_bytes(SYNTHETIC_XML.replace(b"<CcyNm>Zed</CcyNm>", b"<CcyNm>Zedd</CcyNm>"))
+    assert derivable(newer) == []
+    assert main(["--derivable", str(newer)], root=root) == 0
+
+    # A 200 carrying something else. Both an unparseable body and a well-formed
+    # XML document that is not List One must be rejected.
+    for name, body in [
+        ("ratelimit.html", b"<html>429 Too Many Requests</html>"),
+        ("wellformed.xml", b'<?xml version="1.0"?><root><a/></root>'),
+        ("empty", b""),
+    ]:
+        path = tmp_path / name
+        path.write_bytes(body)
+        assert derivable(path) != [], name
+        assert main(["--derivable", str(path)], root=root) == 1, name
+
+    missing = tmp_path / "nope.xml"
+    assert any("cannot read" in f for f in derivable(missing))
+
+    # It must never consult the pin: that is the whole point of the mode.
+    (root / "spec" / "currencies.source.yaml").unlink()
+    assert main(["--derivable", str(newer)], root=root) == 0
+
+
+def test_derivable_rejects_a_list_one_shell_with_no_entries(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    shell = tmp_path / "shell.xml"
+    shell.write_bytes(b'<?xml version="1.0"?><ISO_4217><CcyTbl></CcyTbl></ISO_4217>')
+    findings = derivable(shell)
+    assert any("holds no currency entries" in f for f in findings), findings
+    assert main(["--derivable", str(shell)], root=root) == 1
+
+
 def test_mode_flags_need_a_path_and_do_not_combine_with_check(tmp_path: Path) -> None:
     root = _root(tmp_path)
     assert main(["--verify-source"], root=root) == 2
     assert main(["--transcribe"], root=root) == 2
+    assert main(["--derivable"], root=root) == 2
     assert main(["--check", "--verify-source", "x.xml"], root=root) == 2
+    assert main(["--check", "--derivable", "x.xml"], root=root) == 2
 

@@ -11,6 +11,7 @@ projects:
   hephkit: 'python/hephkit'
   spec: 'spec'
   docker: 'docker'
+  compose: 'compose'
   docs-site: 'docs/site'
   heph-cli: 'go'
 
