@@ -226,8 +226,12 @@ Proposed copy, correctable:
   spec-mandated `/errors/<code>`. `--check` runs in CI.
 - `reference/modules.mdx` — the maturity table from `spec/modules.yaml`.
 - `reference/conventions.mdx` — **generated** from `conventions/`.
-- `reference/errors.mdx` — an index that links to `/errors/<code>`; it does not
-  duplicate the pages.
+- `errors/index.mdx` — **generated** from the same registry, so `/errors` itself
+  resolves and the sidebar folder has a landing page. The first draft had a
+  hand-written `reference/errors.mdx` instead; that duplicated every code,
+  status and title with nothing checking them, so it was dropped during
+  implementation (ledger R25). `errors/_meta.ts` is generated too, for the same
+  reason (R21).
 - `spec/` and `adrs/` — **synced** from `spec/heph-spec.md` and `docs/adr/` by
   the same generator pass, with front-matter added, so the rendered copies
   cannot drift. Synced verbatim: the repo is already public, so the site adds no

@@ -119,7 +119,8 @@ Everything the landing page prints must resolve, so the release comes first. Thi
 ### Task 5: Generated error pages
 
 **Files:**
-- Create: `tools/gen_error_pages.py`, `tools/tests/test_gen_error_pages.py`, `docs/site/content/errors/_meta.ts`, `docs/site/content/reference/errors.mdx`
+- Create: `tools/gen_error_pages.py`, `tools/tests/test_gen_error_pages.py`
+- Generated: `docs/site/content/errors/HEPH-*.mdx` (12), `docs/site/content/errors/index.mdx`, `docs/site/content/errors/_meta.ts` — all committed and all covered by `--check`
 - Generated: `docs/site/content/errors/HEPH-*.mdx` (12 files, committed)
 
 **Interfaces:**
@@ -134,7 +135,7 @@ Everything the landing page prints must resolve, so the release comes first. Thi
   - `test_output_is_deterministic` — two calls produce identical bytes (no timestamps).
   - `test_every_registry_code_has_a_committed_page` — **Review Focus 1**: the committed `content/errors/` set equals the registry's code set; a registry code with no file fails.
 - [ ] **Step 2: Run to verify failure** — `uv run --with pyyaml pytest tools/tests/test_gen_error_pages.py -v` → FAIL.
-- [ ] **Step 3: Implement** the generator and run it to write the 12 pages. Each page: front-matter `title: <code> — <title>`, then the status, the caller-facing `detail_hint`, the developer `guidance`, and a link back to `spec/heph-spec.md` §1. Write `content/reference/errors.mdx` as a hand-written index that links to all twelve by code; `content/errors/_meta.ts` orders them by registry order.
+- [ ] **Step 3: Implement** the generator and run it to write the 12 pages. Each page: front-matter `title: <code> — <title>`, then the status, the caller-facing `detail_hint`, the developer `guidance`, and a link back to `spec/heph-spec.md` §1. `generate()` also emits `content/errors/index.mdx` (the `/errors` landing page, listing every code with its status and title) and `content/errors/_meta.ts` (registry order, index first). Nothing keyed to the registry is hand-maintained.
 - [ ] **Step 4: Run tests to verify they pass** — same command → PASS; `uv run tools/gen_error_pages.py --check` → exit 0.
 - [ ] **Step 5: Commit** — `feat(docs): generate one page per error code`
 
