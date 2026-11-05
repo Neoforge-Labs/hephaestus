@@ -10,7 +10,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from gen_error_pages import PAGES_RELDIR, generate, main  # noqa: E402
+from gen_error_pages import META_RELPATH, PAGES_RELDIR, generate, main  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ERRORS = REPO_ROOT / "spec" / "errors.yaml"
@@ -30,7 +30,9 @@ def test_one_page_per_code() -> None:
     pages = generate(REPO_ROOT)
     codes = [e["code"] for e in _entries()]
     assert len(codes) == 12
-    assert set(pages) == {REPO_ROOT / PAGES_RELDIR / f"{code}.mdx" for code in codes}
+    page_paths = {p for p in pages if p.suffix == ".mdx"}
+    assert page_paths == {REPO_ROOT / PAGES_RELDIR / f"{code}.mdx" for code in codes}
+    assert set(pages) - page_paths == {REPO_ROOT / META_RELPATH}  # the sidebar order file
     assert PAGES_RELDIR == Path("docs/site/content/errors")  # URL is /errors/<code> (spec 1.4)
 
 
@@ -48,6 +50,8 @@ def test_page_contains_registry_fields() -> None:
 
 def test_pages_carry_generated_header() -> None:
     for path, text in generate(REPO_ROOT).items():
+        if path.suffix != ".mdx":
+            continue
         head = text.split("\n---\n", 1)[0]
         assert "spec/errors.yaml" in head, path
         assert "do not edit" in head.lower(), path
@@ -57,6 +61,8 @@ def test_pages_carry_generated_header() -> None:
 def test_prose_is_mdx_safe() -> None:
     # No raw MDX-significant character may reach the compiler outside an escape or code span.
     for path, text in generate(REPO_ROOT).items():
+        if path.suffix != ".mdx":
+            continue
         body = text.split("\n---\n", 1)[1]
         body = re.sub(r"`[^`\n]*`", "", body)  # code spans are literal
         body = re.sub(r"\\.", "", body)  # backslash escapes are literal
@@ -82,6 +88,16 @@ def test_check_detects_drift(tmp_path: Path, capsys: pytest.CaptureFixture[str])
     assert main(["--check"], root=root) == 1
     assert "HEPH-IDEMP-409.mdx" in capsys.readouterr().err
     assert victim.read_text(encoding="utf-8").endswith("hand edit\n")  # --check never writes
+
+
+def test_check_detects_meta_drift(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _root(tmp_path)
+    assert main([], root=root) == 0
+    meta = root / META_RELPATH
+    meta.write_text(meta.read_text(encoding="utf-8") + "// hand edit\n", encoding="utf-8")
+    capsys.readouterr()
+    assert main(["--check"], root=root) == 1
+    assert "_meta.ts" in capsys.readouterr().err
 
 
 def test_check_detects_missing_and_orphan_pages(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -120,9 +136,10 @@ def test_every_registry_code_has_a_committed_page() -> None:
     assert committed - codes == set(), "committed page with no registry code"
 
 
-def test_meta_lists_pages_in_registry_order() -> None:
-    meta = (REPO_ROOT / PAGES_RELDIR / "_meta.ts").read_text(encoding="utf-8")
-    keys = re.findall(r"^\s*'?(HEPH-[A-Z]+-\d+)'?\s*:", meta, re.MULTILINE)
+def test_meta_is_generated_with_header_in_registry_order() -> None:
+    meta = generate(REPO_ROOT)[REPO_ROOT / META_RELPATH]
+    assert "GENERATED FILE - do not edit by hand" in meta and "spec/errors.yaml" in meta
+    keys = re.findall(r'^\s*"(HEPH-[A-Z]+-\d+)"\s*:', meta, re.MULTILINE)
     assert keys == [str(e["code"]) for e in _entries()]
 
 

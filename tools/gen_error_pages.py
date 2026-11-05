@@ -11,8 +11,7 @@ validated first; an invalid registry writes nothing.
 
 Pages live at ``docs/site/content/errors/<code>.mdx`` so the site serves them at
 ``/errors/<code>``, the URL heph-spec 1.4 requires in every problem ``type``.
-The hand-written ``_meta.ts`` beside them orders the sidebar; a test pins its
-keys to the registry.
+The generated ``_meta.ts`` beside them orders the sidebar in registry order.
 
 The registry prose is untrusted input to the MDX compiler, so every value is
 escaped before it is written. The output is a pure function of the registry:
@@ -31,6 +30,7 @@ import yaml
 from check_registry import check_errors
 
 PAGES_RELDIR = Path("docs/site/content/errors")
+META_RELPATH = PAGES_RELDIR / "_meta.ts"
 REGISTRY_RELDIR = Path("spec/errors.yaml")
 
 # Characters Markdown or MDX would interpret: JSX/expressions ({ } < >), emphasis
@@ -84,6 +84,23 @@ Defined in `spec/heph-spec.md` section 1. See all codes in the [error reference]
 """
 
 
+def render_meta(entries: list[dict[str, Any]]) -> str:
+    """The text of ``_meta.ts``: sidebar order is registry order."""
+    rows = ",\n".join(f"  {json.dumps(e['code'])}: {json.dumps(e['code'])}" for e in entries)
+    return f"""\
+import type {{ MetaRecord }} from 'nextra'
+
+// GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+// Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+// Sidebar order of the error pages: registry order.
+const meta: MetaRecord = {{
+{rows}
+}}
+
+export default meta
+"""
+
+
 def generate(repo_root: Path) -> dict[Path, str]:
     """Map each output path to its content, in registry order."""
     registry = repo_root / REGISTRY_RELDIR
@@ -91,7 +108,9 @@ def generate(repo_root: Path) -> dict[Path, str]:
     if problems:
         raise ValueError("\n".join(problems))
     entries = yaml.safe_load(registry.read_text(encoding="utf-8"))
-    return {repo_root / PAGES_RELDIR / f"{e['code']}.mdx": render(e) for e in entries}
+    out = {repo_root / PAGES_RELDIR / f"{e['code']}.mdx": render(e) for e in entries}
+    out[repo_root / META_RELPATH] = render_meta(entries)
+    return out
 
 
 def main(argv: list[str] | None = None, root: Path | None = None) -> int:
