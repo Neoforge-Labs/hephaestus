@@ -1,0 +1,39 @@
+# Module inventory. Checked by tools/check_modules.py; rendered by the docs site.
+# status: shipped (needs maturity) | planned (needs phase). Everything shipped is experimental.
+# spec_section is a section number of spec/heph-spec.md, or null.
+# Compose fragment rows (home: compose) are added when the fragments land; the check
+# fails until they are listed.
+
+# Python
+- {name: money, home: python, status: shipped, maturity: experimental, spec_section: "3"}
+- {name: hashing, home: python, status: shipped, maturity: experimental, spec_section: "4"}
+- {name: signatures, home: python, status: shipped, maturity: experimental, spec_section: "5"}
+- {name: errors, home: python, status: shipped, maturity: experimental, spec_section: "1"}
+- {name: settings, home: python, status: shipped, maturity: experimental, spec_section: null}
+- {name: observability, home: python, status: shipped, maturity: experimental, spec_section: null}
+
+# Rust core
+- {name: hephkit-core, home: rust, status: shipped, maturity: experimental, spec_section: null}
+- {name: hephkit-py, home: rust, status: shipped, maturity: experimental, spec_section: null}
+
+# Go
+- {name: heph, home: go, status: shipped, maturity: experimental, spec_section: null}
+- {name: cli, home: go, status: shipped, maturity: experimental, spec_section: null}
+- {name: compose, home: go, status: shipped, maturity: experimental, spec_section: null}
+- {name: fragments, home: go, status: shipped, maturity: experimental, spec_section: null}
+- {name: ingot, home: go, status: shipped, maturity: experimental, spec_section: null}
+
+# Base images
+- {name: node, home: docker, status: shipped, maturity: experimental, spec_section: null}
+- {name: python, home: docker, status: shipped, maturity: experimental, spec_section: null}
+
+# Planned
+- {name: idempotency, home: python, status: planned, phase: 2, spec_section: "2"}
+- {name: auth, home: python, status: planned, phase: 2, spec_section: null}
+- {name: ledger, home: python, status: planned, phase: 4, spec_section: null}
+- {name: outbox, home: python, status: planned, phase: 4, spec_section: null}
+- {name: webhooks, home: python, status: planned, phase: 4, spec_section: "5"}
+- {name: billing, home: python, status: planned, phase: 4, spec_section: null}
+- {name: registry, home: ts, status: planned, phase: 4, spec_section: null}
+- {name: heph new, home: go, status: planned, phase: 5, spec_section: null}
+- {name: lab.repro, home: python, status: planned, phase: 6, spec_section: "7"}
