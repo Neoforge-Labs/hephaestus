@@ -2,18 +2,20 @@
 
 import asyncio
 import json
+import pathlib
 import re
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 import httpx
 from opentelemetry.sdk.trace import TracerProvider
 from pydantic import BaseModel
 
 from hephkit import errors
 from hephkit.errors import HephError, _codes
-from hephkit.errors.fastapi import install_error_handlers
+from hephkit.errors.fastapi import install_error_handlers, problem_response
 from hephkit.hashing import HashingError, canonical_json
 from hephkit.money import Money, MoneyError
 from hephkit.signatures import SignatureError, verify
@@ -177,6 +179,40 @@ def test_heph_error_rejects_reserved_extension_names() -> None:
     for name in ("type", "title", "status", "trace_id"):
         with pytest.raises(ValueError, match=name):
             HephError("HEPH-GEN-500", **{name: "x"})
+
+
+def test_problem_response_cannot_be_made_to_fabricate_a_trace_id() -> None:
+    """A caller-supplied `trace_id` used to survive into the body whenever no
+    span was active, naming a trace that never existed. The other five
+    reserved members were already safe (they are assigned after the merge);
+    all six are now filtered, so the rule matches `HephError`'s."""
+    app = FastAPI()
+    install_error_handlers(app)
+
+    @app.get("/x")
+    def x() -> JSONResponse:
+        return problem_response(
+            _codes.NF_404,
+            extensions={"trace_id": "deadbeef", "status": 200, "hint": "kept"},
+        )
+
+    body = _body(TestClient(app).get("/x"))
+    assert "trace_id" not in body
+    assert body["status"] == 404
+    assert body["code"] == "HEPH-NF-404"
+    assert body["hint"] == "kept"
+
+
+def test_production_code_uses_the_generated_constants_not_literals() -> None:
+    """Codes live only in `spec/errors.yaml`, which is why `_codes.py` is
+    generated. Three literals in `errors/fastapi.py` re-typed codes while the
+    generated constants went unimported, so the generator enforced nothing."""
+    from hephkit.errors import fastapi as web
+
+    source = pathlib.Path(web.__file__).read_text(encoding="utf-8")
+    offenders = sorted(set(re.findall(r'"(HEPH-[A-Z]{2,6}-[0-9]{3})"', source)))
+    assert offenders == [], f"{web.__name__} re-types codes as literals: {offenders}"
+    assert web._GENERIC is _codes.GEN_500
 
 
 def test_generated_constants_match_registry() -> None:

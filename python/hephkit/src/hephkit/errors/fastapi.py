@@ -26,7 +26,16 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from hephkit.errors import DETAIL_HINTS, REGISTRY, TYPE_BASE_URL, HephError
+from hephkit.errors import (
+    DETAIL_HINTS,
+    GEN_500,
+    NF_404,
+    REGISTRY,
+    RESERVED_MEMBERS,
+    TYPE_BASE_URL,
+    VAL_422,
+    HephError,
+)
 from hephkit.hashing import HashingError
 from hephkit.money import MoneyError
 from hephkit.signatures import SignatureError
@@ -39,7 +48,7 @@ except ImportError:  # pragma: no cover - exercised by simulating absence in tes
 __all__ = ["install_error_handlers", "problem_response"]
 
 PROBLEM_JSON = "application/problem+json"
-_GENERIC = "HEPH-GEN-500"
+_GENERIC = GEN_500
 
 
 def _trace_id() -> str | None:
@@ -53,7 +62,13 @@ def _trace_id() -> str | None:
 def _render(code: str, detail: str | None, extensions: dict[str, Any] | None) -> JSONResponse:
     status, title = REGISTRY[code]
     body: dict[str, Any] = {
-        **(extensions or {}),
+        # Reserved members are owned by the registry and the active span, never
+        # by a caller. `type`, `title`, `status`, `detail` and `code` were
+        # already safe because they are assigned after this merge; `trace_id`
+        # was not, because it is only assigned when a span is active, so
+        # without one a caller-supplied value survived into the body and
+        # fabricated a trace that never existed.
+        **{k: v for k, v in (extensions or {}).items() if k not in RESERVED_MEMBERS},
         "type": TYPE_BASE_URL + code,
         "title": title,
         "status": status,
@@ -72,7 +87,10 @@ def problem_response(
     """A problem+json response for a registry ``code``.
 
     ``detail`` defaults to the registry ``detail_hint`` (the title if absent).
-    ``trace_id`` is a member only when a span is active. If the caller-supplied
+    ``trace_id`` is a member only when a span is active. Extensions named like
+    a reserved problem member (``RESERVED_MEMBERS``) are dropped rather than
+    honoured, so a caller cannot fabricate a ``trace_id``; ``HephError``
+    refuses the same names at construction, where a programmer sees it. If the caller-supplied
     ``detail`` or ``extensions`` cannot be serialised (including a nesting so
     deep it raises ``RecursionError``), the response is the ``HEPH-GEN-500``
     problem built from registry strings alone, with nothing caller-supplied.
@@ -93,7 +111,7 @@ async def _handle_exception(request: Request, exc: Exception) -> JSONResponse:
 async def _handle_http(request: Request, exc: Exception) -> Response:
     assert isinstance(exc, StarletteHTTPException)
     if exc.status_code == 404:
-        return problem_response("HEPH-NF-404")
+        return problem_response(NF_404)
     # No registry code for other statuses (see module docstring): unchanged.
     return await http_exception_handler(request, exc)
 
@@ -104,7 +122,7 @@ async def _handle_validation(request: Request, exc: Exception) -> JSONResponse:
     fields = [
         {"loc": list(e["loc"]), "msg": str(e["msg"]), "type": str(e["type"])} for e in exc.errors()
     ]
-    return problem_response("HEPH-VAL-422", extensions={"errors": fields})
+    return problem_response(VAL_422, extensions={"errors": fields})
 
 
 def install_error_handlers(app: FastAPI) -> None:
