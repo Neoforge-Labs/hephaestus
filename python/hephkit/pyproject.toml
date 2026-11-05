@@ -18,6 +18,13 @@ classifiers = [
 [project.optional-dependencies]
 fastapi = ["fastapi>=0.115"]
 settings = ["pydantic-settings>=2.6"]
+observability = [
+    "structlog>=24.4",
+    "opentelemetry-api>=1.28",
+    "opentelemetry-sdk>=1.28",
+    "opentelemetry-exporter-otlp-proto-http>=1.28",
+    "opentelemetry-instrumentation-fastapi>=0.49b0",
+]
 
 [dependency-groups]
 dev = [
@@ -31,6 +38,9 @@ dev = [
     "opentelemetry-api>=1.45.2",
     "opentelemetry-sdk>=1.45.2",
     "pydantic-settings>=2.6",
+    "structlog>=24.4",
+    "opentelemetry-exporter-otlp-proto-http>=1.28",
+    "opentelemetry-instrumentation-fastapi>=0.49b0",
 ]
 
 [tool.maturin]

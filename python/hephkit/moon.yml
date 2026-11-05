@@ -37,3 +37,12 @@ tasks:
       - '/tools/gen_errors.py'
       - '/tools/check_registry.py'
       - 'src/hephkit/errors/_codes.py'
+
+  gen-conventions:
+    # conventions.py is generated from conventions/attributes.yaml; fail if the committed file is stale.
+    command: 'uv run ../../tools/gen_conventions.py --check'
+    inputs:
+      - '/conventions/attributes.yaml'
+      - '/tools/gen_conventions.py'
+      - '/tools/check_registry.py'
+      - 'src/hephkit/conventions.py'

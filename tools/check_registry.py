@@ -94,6 +94,13 @@ def check_errors(path: Path) -> list[str]:
     return found
 
 
+def check_attributes(path: Path) -> list[str]:
+    """Return a list of error strings for the attribute registry alone."""
+    found: list[str] = []
+    _check_attributes(path, found)
+    return found
+
+
 def check_registry(errors: Path, attributes: Path) -> list[str]:
     """Return a list of error strings for the two registry files."""
     found: list[str] = []
