@@ -509,13 +509,15 @@
                 "input": {
                   "type": "object",
                   "required": [
-                    "money",
                     "ratios"
                   ],
                   "additionalProperties": false,
                   "properties": {
                     "money": {
                       "type": "object"
+                    },
+                    "money_text": {
+                      "type": "string"
                     },
                     "ratios": {
                       "type": "array",
@@ -525,7 +527,19 @@
                         "maximum": 9007199254740991
                       }
                     }
-                  }
+                  },
+                  "oneOf": [
+                    {
+                      "required": [
+                        "money"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "money_text"
+                      ]
+                    }
+                  ]
                 },
                 "expect": {
                   "oneOf": [

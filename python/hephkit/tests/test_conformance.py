@@ -145,7 +145,12 @@ def run_allocate(case: Case) -> None:
     i = case["input"]
 
     def compute() -> list[Money]:
-        return Money.from_wire(i["money"]).allocate(i["ratios"])
+        # `_operand` so `money_text` reaches the core's text entry point, as it
+        # already does in the Rust runner. Reading i["money"] only left the text
+        # spelling supported by the schema and unreachable from Python, so a
+        # vector using it would have failed with a KeyError rather than on the
+        # behaviour it pins.
+        return _operand(i, "money").allocate(i["ratios"])
 
     if expect_error(case, MoneyError, compute):
         return
