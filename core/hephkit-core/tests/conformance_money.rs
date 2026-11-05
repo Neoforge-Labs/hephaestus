@@ -1,14 +1,15 @@
 mod common;
 
-use common::{check, load, minor_str, money_from_wire};
+use common::{check, load, minor_str};
 use hephkit_core::{CoreError, Currency, Money, Rounding};
-use serde_json::{json, Value};
+use serde_json::Value;
+
+fn from_wire(v: &Value) -> Result<Money, CoreError> {
+    Money::from_wire_json(&v.to_string())
+}
 
 fn wire(m: &Money) -> Value {
-    json!({
-        "amount": m.minor.to_string(),
-        "currency": std::str::from_utf8(&m.currency.code).unwrap(),
-    })
+    serde_json::from_str(&m.to_wire_json()).unwrap()
 }
 
 fn rounding(s: &str) -> Rounding {
@@ -67,10 +68,10 @@ fn arith() {
     for c in load("money", "arith") {
         let i = &c.input;
         let result: Result<Money, CoreError> =
-            money_from_wire(&i["a"]).and_then(|a| match i["op"].as_str().unwrap() {
+            from_wire(&i["a"]).and_then(|a| match i["op"].as_str().unwrap() {
                 "neg" => a.checked_neg(),
                 op => {
-                    let b = money_from_wire(&i["b"])?;
+                    let b = from_wire(&i["b"])?;
                     if op == "add" {
                         a.checked_add(&b)
                     } else {
@@ -88,7 +89,7 @@ fn arith() {
 fn allocate() {
     for c in load("money", "allocate") {
         let i = &c.input;
-        let result = money_from_wire(&i["money"]).and_then(|m| {
+        let result = from_wire(&i["money"]).and_then(|m| {
             let ratios: Vec<u64> = i["ratios"]
                 .as_array()
                 .unwrap()

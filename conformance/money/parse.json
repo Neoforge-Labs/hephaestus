@@ -2,7 +2,7 @@
   "suite": "money.parse",
   "spec": "0.1.0",
   "description": "Human-facing decimal strings (spec 3.6): strict ASCII, excess precision rejected unless a rounding mode is given. `minor` is a decimal string so i64 extremes survive JavaScript numbers. Rounding modes are defined in spec 3.6 (down truncates toward zero).",
-  "source": "Hand-derived from ISO 4217 exponents and spec 3.2/3.6; no implementation consulted. kes-down-negative: -1029.5 truncated toward zero is -1029 (a floor would give -1030).",
+  "source": "Hand-derived from ISO 4217 exponents and spec 3.2/3.6; no implementation consulted. kes-down-negative: -1029.5 truncated toward zero is -1029 (a floor would give -1030). Trailing-zero cases (added after review, spec 3.6): KES has exponent 2, so \"10.290\" has 3 fractional digits, one more than allowed; reject therefore fails on the digit count alone, and with half_up the dropped digit 0 is below half so the result is 1029 (10.29 -> 1029 minor units); the negative case is rejected by the same count rule.",
   "cases": [
     {
       "name": "kes-reject-10",
@@ -607,6 +607,39 @@
       },
       "expect": {
         "minor": "-1029"
+      }
+    },
+    {
+      "name": "kes-reject-trailing-zero-excess-digit",
+      "input": {
+        "amount": "10.290",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-half-up-accepts-trailing-zero-excess-digit",
+      "input": {
+        "amount": "10.290",
+        "currency": "KES",
+        "rounding": "half_up"
+      },
+      "expect": {
+        "minor": "1029"
+      }
+    },
+    {
+      "name": "kes-reject-negative-trailing-zero-excess-digit",
+      "input": {
+        "amount": "-10.290",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
       }
     }
   ]

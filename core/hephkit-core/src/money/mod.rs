@@ -3,6 +3,7 @@
 mod allocate;
 mod currency;
 mod parse;
+mod wire;
 
 pub use currency::Currency;
 
@@ -47,6 +48,17 @@ impl Money {
     /// Parses a decimal string such as `"19.99"` (spec 3.6).
     pub fn parse(s: &str, currency: Currency, rounding: Rounding) -> Result<Money, CoreError> {
         parse::parse(s, currency, rounding)
+    }
+
+    /// Parses a spec 3.1 wire object, e.g. `{"amount":"1999","currency":"USD"}`.
+    /// Every violation is `HEPH-MONEY-422`.
+    pub fn from_wire_json(json: &str) -> Result<Money, CoreError> {
+        wire::from_wire_json(json)
+    }
+
+    /// Inverse of [`Money::from_wire_json`].
+    pub fn to_wire_json(&self) -> String {
+        wire::to_wire_json(self)
     }
 
     /// Formats with exactly `exponent` fractional digits and never `-0`.

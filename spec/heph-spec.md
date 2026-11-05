@@ -99,7 +99,7 @@ A wire object that violates 3.1 (missing member, extra member, or a value of the
 
 3.5. Implementations hold money as a signed 64-bit integer of minor units plus a currency. Arithmetic across two currencies MUST fail with `HEPH-MONEY-409`. Overflow MUST fail rather than wrap.
 
-3.6. **Parsing and formatting decimals.** Parsing a decimal string such as `"19.99"` (a human-facing input, not the wire format) MUST be strict ASCII and MUST reject more fractional digits than the currency's exponent with `HEPH-MONEY-422`, unless the caller supplies an explicit rounding mode. A rounding mode applies only when the input has more fractional digits than the exponent, and is one of:
+3.6. **Parsing and formatting decimals.** Parsing a decimal string such as `"19.99"` (a human-facing input, not the wire format) MUST be strict ASCII and MUST reject more fractional digits than the currency's exponent with `HEPH-MONEY-422`, unless the caller supplies an explicit rounding mode. The rule is about the digit count as written, not the value: `reject` rejects any input whose fractional digit count exceeds the exponent, including trailing zeros (KES `10.290` is rejected), and supplying a rounding mode is how a caller accepts such input. A rounding mode applies only when the input has more fractional digits than the exponent, and is one of:
 
 - `half_up`: a tie (exactly half a minor unit) rounds away from zero; anything else rounds to the nearest minor unit.
 - `half_even`: a tie rounds to the even minor unit; anything else rounds to the nearest.
