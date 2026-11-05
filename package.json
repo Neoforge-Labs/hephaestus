@@ -1,4 +1,5 @@
 {
+  "//": "Root declares the workspace only, with one exception: the zod override below. bun reads overrides only from the root. zod 4.6.7 breaks nextra-theme-docs' Layout schema ('expected nonoptional at children') and fails every prerender. 4.3.6 is a known-good version, NOT a bisected upper bound; the real boundary was never established. Revisit when nextra-theme-docs ships a fix.",
   "private": true,
   "workspaces": ["docs/site"],
   "overrides": {

@@ -2,8 +2,9 @@
   "name": "@hephkit/docs-site",
   "private": true,
   "type": "module",
+  "//typescript": "Pinned to 6.x: TypeScript 7 removed the JS compiler API (ts.sys) that Nextra twoslash depends on. Keep ^6 until Nextra adapts.",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 54400",
     "build": "next build",
     "postbuild": "pagefind --site .next/server/app --output-path out/_pagefind"
   },
