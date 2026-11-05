@@ -4,7 +4,7 @@
 title: "heph-spec"
 ---
 
-> **Two version numbers.** This page is version 0.2.0 of the specification. The packages (`hephkit`, `hephkit-core` and the Go module) are versioned independently: a change to the specification bumps the spec version, while package releases follow their own commit history, so the two numbers need not match. For the current package version, see the project's releases.
+> **Two version numbers.** This page is version 0.2.0 of the specification. The packages (`hephkit`, `hephkit-core` and the Go module) are versioned independently: a change to the specification bumps the spec version, while package releases follow their own commit history, so the two numbers need not match. Package versions are published with the project's releases.
 
 # heph-spec
 

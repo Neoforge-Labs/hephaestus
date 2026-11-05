@@ -136,8 +136,25 @@ def test_spec_page_is_the_spec_body() -> None:
 def test_spec_page_note_names_the_spec_version_and_says_the_two_are_independent() -> None:
     note = _spec_note(generate(REPO_ROOT))
     assert _spec_version(REPO_ROOT) in note
-    assert not re.search(r"\b\d+\.\d+\.\d+\b", note.replace(_spec_version(REPO_ROOT), ""))  # no package number
+    # the spec version is the only version-like token, and appears once: no package number
+    assert _version_tokens(note) == [_spec_version(REPO_ROOT)]
+    assert note.count(_spec_version(REPO_ROOT)) == 1
     assert "independent" in note
+
+
+def _version_tokens(text: str) -> list[str]:
+    return re.findall(r"(?<![\w.])v?\d+(?:\.\d+)+", text)
+
+
+@pytest.mark.parametrize("extra", ["v0.1.0", "0.1.0", "0.1", "v1.2", "the 3.4.5 release"])
+def test_version_guard_catches_any_added_version_form(extra: str) -> None:
+    note = _spec_note(generate(REPO_ROOT))
+    assert _version_tokens(note + f" Package {extra}.") != [_spec_version(REPO_ROOT)]
+
+
+def test_version_guard_catches_a_package_version_equal_to_the_spec_version() -> None:
+    note = _spec_note(generate(REPO_ROOT)) + f" Package {_spec_version(REPO_ROOT)}."
+    assert _version_tokens(note) != [_spec_version(REPO_ROOT)]
 
 
 def test_spec_page_note_follows_the_spec_version(tmp_path: Path) -> None:
