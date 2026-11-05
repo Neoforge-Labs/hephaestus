@@ -2,8 +2,10 @@
 # Codes match ^HEPH-[A-Z]{2,6}-\d{3}$ and `area` is the code's middle segment.
 # `detail_hint` is the DEFAULT CONSUMER-FACING `detail` of the problem+json response
 # and is sent verbatim to API callers: write it to the caller (what happened, what
-# they can do), never as guidance to the implementer. Developer guidance belongs on
-# the generated docs pages.
+# they can do), never as guidance to the implementer. `guidance` is that developer
+# guidance: written to the engineer who hit the code (what causes it, what to
+# change), it is never sent on the wire, must differ from `detail_hint`, and is
+# published on the generated docs page for the code.
 # Generates per-language constants and one docs page per code. Do not add codes
 # here that a task has not specified: every entry is a promise implementations keep.
 - code: HEPH-GEN-500
@@ -11,58 +13,70 @@
   title: Internal error
   area: GEN
   detail_hint: Something went wrong on our side. Try again later. If this response has a trace_id, quote it if you contact support.
+  guidance: The service hit an unhandled failure that no more specific code describes. The caller sees only the generic detail, so the cause is in your own telemetry. Take the trace_id from the response, find that trace and its logs, and fix the underlying exception. If you are raising this deliberately for an expected condition, map the condition to a specific registry code instead. Never put stack traces, SQL or file paths in detail.
 - code: HEPH-VAL-422
   status: 422
   title: Validation failed
   area: VAL
   detail_hint: The request failed validation. Each offending field and the rule it broke is listed under errors.
+  guidance: The request parsed but broke a validation rule, or a JSON document could not be canonicalised (for example an integer literal above 2^53-1, a duplicate member name or nesting deeper than 128). Fix the offending field in the request; the response lists each field and the rule it broke under errors. When your own handler rejects input, return this code with one entry per field rather than inventing a new code. It is also what signing a webhook with an unusable secret returns, which is a configuration fault, so fix the secret.
 - code: HEPH-NF-404
   status: 404
   title: Resource not found
   area: NF
   detail_hint: The requested resource was not found.
+  guidance: The route matched but the resource it names does not exist, or the principal is not allowed to learn that it exists. Check the identifier you are passing, that it belongs to the tenant of the authenticated principal, and that it has not been deleted. Return this code, rather than HEPH-AUTH-403, when revealing that a resource exists would itself leak information. An unknown route is a different problem, so check the path.
 - code: HEPH-AUTH-401
   status: 401
   title: Authentication required
   area: AUTH
   detail_hint: Authentication is required. Your credentials are missing, malformed or expired.
+  guidance: No valid credentials were presented, because the Authorization header or token is absent, malformed, signed with the wrong key, or past its expiry. Send credentials with the request, refresh an expired token, and check that the client and the server agree on the issuer and signing key. This code means the caller is unidentified; if the caller is identified but not allowed, the code is HEPH-AUTH-403.
 - code: HEPH-AUTH-403
   status: 403
   title: Permission denied
   area: AUTH
   detail_hint: You are authenticated but do not have permission to perform this action.
+  guidance: The principal was authenticated but lacks the permission this action needs. Do not retry with the same credentials. Check the roles or scopes granted to the principal and the tenant it is acting in, and grant the missing permission if the access is intended. If the caller should not learn whether the resource exists, return HEPH-NF-404 instead.
 - code: HEPH-RATE-429
   status: 429
   title: Rate limit exceeded
   area: RATE
   detail_hint: Too many requests. Wait before trying again; if the response has a Retry-After header, wait that long.
+  guidance: The caller exceeded a rate limit. Back off and retry after the number of seconds in the Retry-After header, using exponential backoff with jitter if there is none, and never retry in a tight loop. If legitimate traffic is hitting the limit, batch requests, cache responses, or raise the limit for that tenant in the rate limiter configuration.
 - code: HEPH-IDEMP-400
   status: 400
   title: Idempotency key missing or malformed
   area: IDEMP
   detail_hint: The Idempotency-Key header is missing, empty, or not 1-255 printable ASCII characters without whitespace.
+  guidance: An endpoint that requires an Idempotency-Key received none, an empty one, or one that is not 1 to 255 printable ASCII characters (0x21-0x7E) with no whitespace. Send the header on every mutating request to such an endpoint, using a fresh opaque value such as a UUID per logical operation. Do not put personal data in the key; it is recorded as the idempotency.key telemetry attribute without redaction. Endpoints that do not require a key ignore a malformed one.
 - code: HEPH-IDEMP-409
   status: 409
   title: Original request still in flight
   area: IDEMP
   detail_hint: A request with this key is still being processed. Retry after it completes.
+  guidance: A request with the same Idempotency-Key and the same fingerprint is still being processed, and its lease (60 seconds by default) has not expired. This is a retry-later condition, not a failure, so wait and retry with the same key, which replays the stored response once the original completes. If you see it constantly, the client is retrying too fast or the operation outlasts the lease, so shorten the work or lengthen the configured lease. Do not generate a new key to get past it, which would run the operation twice.
 - code: HEPH-IDEMP-422
   status: 422
   title: Idempotency key reused with a different payload
   area: IDEMP
   detail_hint: This Idempotency-Key was already used for a different request. Use a new key for a new request.
+  guidance: The Idempotency-Key was already used for a request with a different fingerprint (method, raw request target including the query string, or body). One key means one payload for the whole retention window (24 hours by default), whether the original is in flight or complete. This is a client bug, caused either by one key being reused for different operations or by a retry that does not send the same bytes, for example because query parameters were reordered or the body was rebuilt. Use a new key for each new operation and resend an identical request when retrying.
 - code: HEPH-MONEY-422
   status: 422
   title: Invalid money amount
   area: MONEY
   detail_hint: The amount is not a valid integer minor-units string, or has more precision than its currency allows.
+  guidance: A money value or decimal input was rejected. On the wire, amount must be a JSON string matching ^(0|-?[1-9][0-9]*)$, an integer count of minor units with no decimal point, no leading zeros, no plus sign and no JSON number, and it must fit in a signed 64-bit integer. The object must have exactly the members amount and currency, and currency must be a code that ISO 4217 List One gives a numeric exponent. When parsing decimal text, strict ASCII is required and input with more fractional digits than the currency allows is rejected unless every excess digit is zero or you pass an explicit rounding mode (half_up, half_even or down). Convert to integer minor units before sending, and never use floating point.
 - code: HEPH-MONEY-409
   status: 409
   title: Currency mismatch
   area: MONEY
   detail_hint: This operation mixes two different currencies; both amounts must use the same currency.
+  guidance: An operation combined two amounts in different currencies, such as adding USD to EUR. The core never converts. Make sure both operands carry the same currency, or convert one explicitly, at a rate and rounding you choose, before the operation. A malformed money object is HEPH-MONEY-422, not this code.
 - code: HEPH-WH-401
   status: 401
   title: Webhook signature invalid or expired
   area: WH
   detail_hint: The webhook signature is invalid or has expired.
+  guidance: A webhook could not be verified. The response deliberately does not say which check failed, so work through the causes yourself. Check that the secret is the one issued for this endpoint, with any whsec_ prefix handled as Standard Webhooks specifies. Check that the signature was computed over webhook-id, webhook-timestamp and the raw request body exactly as received, not a re-serialised copy. Check that your clock is within 300 seconds of webhook-timestamp, and that the signature is v1 followed by canonically padded base64.

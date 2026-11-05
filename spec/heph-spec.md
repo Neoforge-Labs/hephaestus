@@ -36,7 +36,7 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 
 1.7. `detail` is for the caller. It MUST NOT contain stack traces, SQL, file paths, secrets or personal data. When the implementation supplies no more specific text, `detail` MUST be the registry `detail_hint`, which is written for the caller and sent verbatim.
 
-1.8. A registry entry is permanent: a code's meaning and status MUST NOT change after release. A retired code stays in the registry.
+1.8. A registry entry is permanent: a code's meaning and status MUST NOT change after release. A retired code stays in the registry. Each registry entry carries a caller-facing `detail_hint` (see 1.7) and a developer-facing `guidance`, which explains the cause and the fix to the implementer, is never sent on the wire, and is published on the docs page for the code.
 
 Example:
 
