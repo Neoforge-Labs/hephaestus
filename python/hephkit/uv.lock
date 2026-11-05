@@ -261,6 +261,11 @@ name = "hephkit"
 version = "0.1.0"
 source = { editable = "." }
 
+[package.optional-dependencies]
+fastapi = [
+    { name = "fastapi" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "fastapi" },
@@ -275,6 +280,8 @@ dev = [
 ]
 
 [package.metadata]
+requires-dist = [{ name = "fastapi", marker = "extra == 'fastapi'", specifier = ">=0.115" }]
+provides-extras = ["fastapi"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -62,8 +62,11 @@ def test_missing_registry_is_reported(tmp_path: Path) -> None:
 
 
 def test_real_core_is_consistent() -> None:
-    # Skipped when the extension is not importable (bare tools environment).
     import pytest
 
-    pytest.importorskip("hephkit._core")
+    pytest.importorskip(
+        "hephkit._core",
+        reason="expected to run under the hephkit moon task `core-codes`, "
+        "which has the built extension; skipped in a bare tools environment",
+    )
     assert main() == 0

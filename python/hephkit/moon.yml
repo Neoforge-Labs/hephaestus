@@ -16,3 +16,15 @@ tasks:
     inputs:
       - 'src/**/*'
       - 'pyproject.toml'
+
+  core-codes:
+    # Every code exposed by the Rust core must be in spec/errors.yaml, and the
+    # real-core test (skipped in a bare tools environment) must actually run.
+    script: 'uv run maturin develop --uv && uv run --with pyyaml python ../../tools/check_core_codes.py && uv run --with pyyaml --with pytest pytest -rs ../../tools/tests/test_check_core_codes.py'
+    inputs:
+      - '/spec/errors.yaml'
+      - '/tools/check_core_codes.py'
+      - '/tools/check_registry.py'
+      - '/tools/tests/test_check_core_codes.py'
+      - '/core/hephkit-py/**/*'
+      - '/core/hephkit-core/**/*'

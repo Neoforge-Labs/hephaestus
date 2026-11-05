@@ -10,9 +10,9 @@ from typing import Any
 
 from hephkit.errors import _codes
 from hephkit.errors._codes import *  # noqa: F403 - the generated code constants
-from hephkit.errors._codes import REGISTRY
+from hephkit.errors._codes import DETAIL_HINTS, REGISTRY
 
-__all__ = ["REGISTRY", "TYPE_BASE_URL", "HephError", *[n for n in dir(_codes) if n[:1].isupper() and n != "Final"]]
+__all__ = ["DETAIL_HINTS", "REGISTRY", "TYPE_BASE_URL", "HephError", *[n for n in dir(_codes) if n[:1].isupper() and n != "Final"]]
 
 TYPE_BASE_URL = "https://heph.neoforgelabs.tech/errors/"
 

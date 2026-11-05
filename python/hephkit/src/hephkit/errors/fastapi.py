@@ -3,18 +3,35 @@
 Every exception is mapped by its ``.code``: ``HephError``, ``MoneyError``,
 ``SignatureError`` and ``HashingError`` all carry a registry code, and the
 registry gives the status, so no per-class table exists. An exception without a
-registered code is ``HEPH-GEN-500``. Only the registry title is ever sent for an
-exception that is not a ``HephError``; its message may hold internals.
+registered code is ``HEPH-GEN-500``. For an exception that is not a ``HephError``
+the message is never sent (it may hold internals); ``detail`` is the registry
+``detail_hint`` for its code.
+
+Known gap: Starlette ``HTTPException`` with status 404 (unknown route) becomes
+``HEPH-NF-404``. Other statuses, such as 405, pass through unchanged in this
+phase: the registry has no code for them, adding codes is out of scope here, and
+the response shape for uncovered statuses is better decided alongside the auth
+and idempotency middleware in a later phase. A 405 is not a server error, so it
+is deliberately not mapped to ``HEPH-GEN-500``.
+
+``opentelemetry-api`` is optional: without it ``trace_id`` is omitted, exactly as
+when no span is active.
 """
 
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from opentelemetry import trace
+from fastapi.responses import JSONResponse, Response
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from hephkit.errors import REGISTRY, TYPE_BASE_URL, HephError
+from hephkit.errors import DETAIL_HINTS, REGISTRY, TYPE_BASE_URL, HephError
+
+try:
+    from opentelemetry import trace
+except ImportError:  # pragma: no cover - exercised by simulating absence in tests
+    trace = None  # type: ignore[assignment]
 
 __all__ = ["install_error_handlers", "problem_response"]
 
@@ -24,6 +41,8 @@ _GENERIC = "HEPH-GEN-500"
 
 def _trace_id() -> str | None:
     """Trace id of the active span, or ``None`` when no valid span is active."""
+    if trace is None:
+        return None
     ctx = trace.get_current_span().get_span_context()
     return format(ctx.trace_id, "032x") if ctx.is_valid else None
 
@@ -33,7 +52,7 @@ def problem_response(
 ) -> JSONResponse:
     """A problem+json response for a registry ``code``.
 
-    ``detail`` defaults to the registry title. ``trace_id`` is a member only
+    ``detail`` defaults to the registry ``detail_hint`` (the title if absent). ``trace_id`` is a member only
     when a span is active.
     """
     status, title = REGISTRY[code]
@@ -42,7 +61,7 @@ def problem_response(
         "type": TYPE_BASE_URL + code,
         "title": title,
         "status": status,
-        "detail": detail or title,
+        "detail": detail or DETAIL_HINTS.get(code) or title,
         "code": code,
     }
     trace_id = _trace_id()
@@ -58,6 +77,14 @@ async def _handle_exception(request: Request, exc: Exception) -> JSONResponse:
     return problem_response(code if isinstance(code, str) and code in REGISTRY else _GENERIC)
 
 
+async def _handle_http(request: Request, exc: Exception) -> Response:
+    assert isinstance(exc, StarletteHTTPException)
+    if exc.status_code == 404:
+        return problem_response("HEPH-NF-404")
+    # No registry code for other statuses (see module docstring): unchanged.
+    return await http_exception_handler(request, exc)
+
+
 async def _handle_validation(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, RequestValidationError)
     # loc/msg/type only: `input` and `ctx` can echo the submitted value.
@@ -70,4 +97,5 @@ async def _handle_validation(request: Request, exc: Exception) -> JSONResponse:
 def install_error_handlers(app: FastAPI) -> None:
     """Route validation errors, ``HephError`` and any other exception to problem+json."""
     app.add_exception_handler(RequestValidationError, _handle_validation)
+    app.add_exception_handler(StarletteHTTPException, _handle_http)
     app.add_exception_handler(Exception, _handle_exception)

@@ -52,6 +52,10 @@ def render(entries: list[dict[str, Any]]) -> str:
     for entry in entries:
         lines.append(f'    {json.dumps(entry["code"])}: ({entry["status"]}, {json.dumps(entry["title"])}),\n')
     lines.append("}\n")
+    lines.append("\n# code -> guidance for the caller, used as the default problem `detail`\nDETAIL_HINTS: dict[str, str] = {\n")
+    for entry in entries:
+        lines.append(f'    {json.dumps(entry["code"])}: {json.dumps(entry["detail_hint"])},\n')
+    lines.append("}\n")
     return "".join(lines)
 
 

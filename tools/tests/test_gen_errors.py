@@ -45,6 +45,8 @@ def test_output_has_header_constants_and_registry() -> None:
     assert 'MONEY_422: Final = "HEPH-MONEY-422"' in text
     assert "REGISTRY: dict[str, tuple[int, str]]" in text
     assert '"HEPH-IDEMP-409": (409, "Original request still in flight")' in text
+    assert "DETAIL_HINTS: dict[str, str]" in text
+    assert '"HEPH-IDEMP-409": "A request with this key is still being processed. Retry after it completes."' in text
     compile(text, "_codes.py", "exec")
 
 

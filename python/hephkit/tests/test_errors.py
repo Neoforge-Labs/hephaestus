@@ -1,6 +1,7 @@
 """hephkit.errors: HephError, generated codes and the FastAPI problem+json layer."""
 
 import asyncio
+import json
 import re
 from typing import Any
 
@@ -171,6 +172,8 @@ def test_heph_error_rejects_reserved_extension_names() -> None:
 def test_generated_constants_match_registry() -> None:
     assert _codes.IDEMP_409 == "HEPH-IDEMP-409"
     assert _codes.GEN_500 == "HEPH-GEN-500"
+    assert _codes.DETAIL_HINTS["HEPH-IDEMP-409"].startswith("A request with this key")
+    assert set(_codes.DETAIL_HINTS) == set(_codes.REGISTRY)
     assert _codes.REGISTRY["HEPH-IDEMP-409"] == (409, "Original request still in flight")
     for code, (status, title) in _codes.REGISTRY.items():
         assert re.fullmatch(r"HEPH-[A-Z]{2,6}-[0-9]{3}", code)
@@ -196,7 +199,7 @@ def test_heph_error_response_shape(client: TestClient) -> None:
         "type": TYPE_BASE + "HEPH-IDEMP-409",
         "title": "Original request still in flight",
         "status": 409,
-        "detail": "Original request still in flight",
+        "detail": _codes.DETAIL_HINTS["HEPH-IDEMP-409"],
         "code": "HEPH-IDEMP-409",
     }
 
@@ -219,6 +222,44 @@ def test_detail_and_extensions_are_carried(client: TestClient) -> None:
     assert body["detail"] == "Invoice not found."
     assert body["invoice"] == "inv_1"
     assert body["code"] == "HEPH-NF-404"
+
+
+def test_default_detail_is_the_registry_hint_and_differs_from_title(client: TestClient) -> None:
+    body = _body(client.get("/heph"))
+    assert body["detail"] == "A request with this key is still being processed. Retry after it completes."
+    assert body["detail"] != body["title"]
+
+
+def test_detail_falls_back_to_title_when_hint_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hephkit.errors import fastapi as web
+
+    monkeypatch.setattr(web, "DETAIL_HINTS", {})
+    assert json.loads(web.problem_response("HEPH-IDEMP-409").body)["detail"] == "Original request still in flight"
+
+
+def test_trace_id_omitted_when_opentelemetry_is_absent(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+    from hephkit.errors import fastapi as web
+
+    monkeypatch.setattr(web, "trace", None)  # what a failed import leaves behind
+    body = _body(TestClient(SpanApp(app)).get("/heph"))
+    assert "trace_id" not in body
+    assert body["code"] == "HEPH-IDEMP-409"
+
+
+def test_unknown_route_is_problem_json_nf_404(client: TestClient) -> None:
+    response = client.get("/no/such/route")
+    assert response.status_code == 404
+    body = _body(response)
+    assert body["code"] == "HEPH-NF-404"
+    assert body["type"] == TYPE_BASE + "HEPH-NF-404"
+    assert body["detail"] == _codes.DETAIL_HINTS["HEPH-NF-404"]
+
+
+def test_other_http_exceptions_pass_through_unchanged(client: TestClient) -> None:
+    response = client.post("/heph")  # route exists for GET only -> 405
+    assert response.status_code == 405
+    assert response.headers["content-type"] == "application/json"
+    assert "code" not in response.json()
 
 
 def test_money_error_maps_to_422(client: TestClient) -> None:
@@ -277,7 +318,7 @@ def test_unhandled_exception_is_500_and_does_not_leak(client: TestClient) -> Non
         "type": TYPE_BASE + "HEPH-GEN-500",
         "title": "Internal error",
         "status": 500,
-        "detail": "Internal error",
+        "detail": _codes.DETAIL_HINTS["HEPH-GEN-500"],
         "code": "HEPH-GEN-500",
     }
     for fragment in ("hunter2", "/srv/app", "secret.py", "RuntimeError", "Traceback"):
