@@ -10,6 +10,8 @@
 #   compose  `maturity: <level>` at the end of the first-line `#` header comment of the fragment
 #   docker   NOT checked: a Dockerfile has no doc-comment convention yet, so these rows are
 #            recorded here but unverified against the image source.
+#   ts       NOT checked: no `ts` row is shipped yet. Its marker convention is decided, and the
+#            check added, when the first shipped `ts` module exists.
 # Change the row and the in-source label together.
 # `planned` rows are the headline modules named in the design's rollout and are deliberately
 # NOT exhaustive; do not read them as the full scope (see the roadmap page).

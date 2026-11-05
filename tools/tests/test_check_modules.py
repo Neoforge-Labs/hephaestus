@@ -10,7 +10,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from check_modules import check_modules  # noqa: E402
+from check_modules import LABELLED_HOMES, check_modules  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -320,8 +320,9 @@ def test_ts_and_planned_rows_are_not_label_checked(tmp_path):
 _REAL_ROWS = [
     (e["home"], e["name"])
     for e in yaml.safe_load((REPO_ROOT / "spec" / "modules.yaml").read_text(encoding="utf-8"))
-    if e.get("status") == "shipped" and e.get("home") in ("rust", "python", "go")
+    if e.get("status") == "shipped" and e.get("home") in LABELLED_HOMES
 ]
+assert _REAL_ROWS, "no shipped rows parsed from spec/modules.yaml; the label tests would cover nothing"
 _LABEL_RE = re.compile(r"[ \t]*Maturity:\s*[a-z]+\.?")
 
 

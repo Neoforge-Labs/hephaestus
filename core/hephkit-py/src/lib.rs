@@ -1,4 +1,4 @@
-//! PyO3 glue for `hephkit-core`, exposed to Python as `hephkit._core`.
+//! PyO3 glue for `hephkit-core`, exposed to Python as `hephkit._core`. Maturity: experimental.
 //!
 //! This crate converts types and maps errors and nothing else: every parse
 //! rule, rounding decision and signature comparison lives in the core
@@ -8,8 +8,6 @@
 //! Error mapping follows the rule documented on `CoreError`: the variant
 //! selects the exception class and the registry code is exposed verbatim as
 //! `.code`.
-//!
-//! Maturity: experimental.
 
 use hephkit_core::{CoreError, Currency, Money, Rounding};
 use pyo3::create_exception;

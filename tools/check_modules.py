@@ -43,7 +43,9 @@ HEADER_MATURITY_RE = re.compile(r"maturity:\s*([a-z]+)\s*$")
 # The in-source label. Case-sensitive on purpose: ``Maturity: Experimental`` is a mismatch.
 LABEL_RE = re.compile(r"\bMaturity:\s*([A-Za-z]+)")
 # Shipped rows whose source must carry a label. ``docker`` is deliberately absent: a Dockerfile
-# has no doc-comment convention and inventing one is an undecided design question.
+# has no doc-comment convention and inventing one is an undecided design question. ``ts`` is
+# absent too: no ``ts`` row is shipped and ``_scan`` does not scan it, so its marker convention
+# is deferred until the first shipped ``ts`` module exists.
 LABELLED_HOMES = ("rust", "python", "go")
 
 # Directories that sit where modules live but are not modules themselves.
