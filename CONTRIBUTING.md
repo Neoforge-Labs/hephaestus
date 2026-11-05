@@ -57,11 +57,23 @@ you must not take on trust:
    either the wrong file or the wrong URL.
 4. **Reject a pin move bundled with anything else**, per rule 3 above.
 
-A scheduled CI job (`.github/workflows/currency-source.yml`) re-derives the
-registry from the pinned publication weekly, and the same job runs on any pull
-request touching the registry, its pin or the generator. Neither run removes the
-reviewer's duty above: both fetch over the network with no independent witness,
-so they confirm the pin is self-consistent, not that it is honest.
+`.github/workflows/currency-source.yml` runs this check for you. It reports on
+every pull request, and does the network part only when the registry, its pin or
+the generator actually changed. On a pull request it fetches `archive_url`
+first, because that capture is immutable and the question is whether the
+*committed* registry matches the bytes it claims; the weekly run fetches the
+live URL first instead, because noticing that the publisher has republished is
+the one thing only the live file can tell us. So a red pull-request check means
+the registry really does not match its pin, while the weekly job is what tells
+you a new publication exists.
+
+None of that removes the reviewer's duty above. Both runs fetch over the network
+with no independent witness, so they confirm the pin is self-consistent, not
+that it is honest. Four things they cannot catch at all, and which are therefore
+yours: a pin and its data moved together to a self-consistent but non-genuine
+set, a change that weakens this gate in the same pull request it would have
+caught, the check not being marked required, and a commit pushed straight to the
+default branch.
 
 ## Conventions
 

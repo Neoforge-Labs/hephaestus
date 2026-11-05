@@ -5,28 +5,21 @@
 # check_registry passes, and the table regenerates, so gen_currencies --check
 # passes too.
 #
-# Own workflow rather than a job in ci.yml because GitHub filters paths at the
-# workflow level, and this needs the network: on a pull request it runs only when
-# the registry, its source pin or the generator changes, so flakiness cannot
-# reach unrelated work. The schedule run has no path filter on purpose -- it is
-# what notices that SIX has republished, which no PR would.
+# This job is shaped to be a REQUIRED check. It therefore reports a status on
+# every pull request, and decides inside the job whether the pinned publication
+# is in scope; only the network steps are skipped when nothing relevant changed.
+# Filtering at the `on:` level would leave the check permanently pending on
+# every unrelated pull request, which blocks them instead of passing them.
+#
+# Fetch order depends on the event, because the two kinds of run are asking
+# different questions. See the comments on the fetch step.
 name: currency-source
 
 on:
   pull_request:
-    paths:
-      - 'spec/currencies.yaml'
-      - 'spec/currencies.source.yaml'
-      - 'tools/gen_currencies.py'
-      - '.github/workflows/currency-source.yml'
   push:
     branches:
       - main
-    paths:
-      - 'spec/currencies.yaml'
-      - 'spec/currencies.source.yaml'
-      - 'tools/gen_currencies.py'
-      - '.github/workflows/currency-source.yml'
   schedule:
     - cron: '17 5 * * 1' # weekly, on main: catches upstream republication
   workflow_dispatch:
@@ -46,38 +39,144 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0 # the scope step diffs against the base commit
+
+      - name: Is the pinned publication in scope for this run?
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # A scheduled or manual run always checks: noticing that the publisher
+          # has republished is its whole job, and no file in this repo changes
+          # when that happens.
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
+            echo "in_scope=true" >> "$GITHUB_OUTPUT"
+            echo "${EVENT} run: always in scope"
+            exit 0
+          fi
+          case "$EVENT" in
+            pull_request) from="${BASE_SHA:-}" ;;
+            *) from="${BEFORE:-}" ;;
+          esac
+          # Anything we cannot diff counts as in scope. A needless network check
+          # costs a minute; a wrongly skipped one is the hole this job exists to
+          # close, so the bias has to point this way.
+          if [ -z "$from" ] || ! git cat-file -e "${from}^{commit}" 2>/dev/null; then
+            echo "in_scope=true" >> "$GITHUB_OUTPUT"
+            echo "cannot resolve base commit '${from}'; treating this run as in scope"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$from" HEAD -- \
+            spec/currencies.yaml \
+            spec/currencies.source.yaml \
+            tools/gen_currencies.py \
+            .github/workflows/currency-source.yml)"
+          if [ -n "$changed" ]; then
+            echo "in_scope=true" >> "$GITHUB_OUTPUT"
+            echo "in scope; this run changes:"
+            echo "$changed"
+          else
+            echo "in_scope=false" >> "$GITHUB_OUTPUT"
+            echo "not in scope: the currency registry, its source pin and the generator are untouched"
+          fi
+
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        if: steps.scope.outputs.in_scope == 'true'
         with:
           version: '0.13.6' # keep equal to uv in .prototools
           python-version: '3.12'
-      # `url` is a rolling current-list file, so once SIX republishes it stops
-      # serving the pinned bytes; `archive_url` is an immutable capture of them.
-      # Try the live file first so a scheduled run reports a new publication,
-      # then fall back so the committed registry stays checkable either way.
-      # --compressed because the archive stores the response gzip-encoded.
-      - name: Fetch the pinned ISO 4217 List One
+
+      # Two questions, two fetch orders.
+      #
+      # On a pull request or a push we are checking a COMMITTED registry against
+      # the publication it is pinned to, so the immutable Wayback capture comes
+      # first. `url` is a rolling "current list": after the publisher
+      # republishes it still answers 200, with NEW bytes, which would fail the
+      # sha256 for a reason the pull request did not cause and turn this gate
+      # permanently red until someone moved the pin. Archive-first makes a PR
+      # run deterministic and immune to upstream churn.
+      #
+      # A scheduled run fetches `url` first for exactly the opposite reason:
+      # detecting republication is the only thing the live file can tell us, and
+      # it cannot do so if we never look at it. When live disagrees, the run then
+      # checks the capture to tell the two causes apart -- a registry that does
+      # not match its pin is our defect, a live file that has moved on is news.
+      #
+      # --compressed because the capture stores the response gzip-encoded; a
+      # plain fetch yields 5640 unparseable bytes and fails the hash for the
+      # wrong reason.
+      - name: Check the registry against its pinned publication
+        if: steps.scope.outputs.in_scope == 'true'
+        env:
+          EVENT: ${{ github.event_name }}
         run: |
+          set -uo pipefail
           pin() {
             uv run --with pyyaml python -c 'import pathlib, sys, yaml; print(yaml.safe_load(pathlib.Path("spec/currencies.source.yaml").read_text())[sys.argv[1]])' "$1"
           }
           live="$(pin url)"
           archived="$(pin archive_url)"
-          for candidate in "$live" "$archived"; do
-            echo "::group::GET $candidate"
-            if curl -sSfL --compressed --retry 3 --max-time 120 \
-                 -o "$RUNNER_TEMP/list-one.xml" "$candidate"; then
-              echo "fetched $(wc -c < "$RUNNER_TEMP/list-one.xml") bytes"
+
+          fetch() { # fetch <label> <url> -> writes $RUNNER_TEMP/<label>.xml
+            echo "::group::GET $1 <- $2"
+            if curl -sSfL --compressed --retry 3 --max-time 120 -o "$RUNNER_TEMP/$1.xml" "$2"; then
+              echo "fetched $(wc -c < "$RUNNER_TEMP/$1.xml") bytes"
               echo "::endgroup::"
-              exit 0
+              return 0
             fi
             echo "::endgroup::"
-            echo "could not fetch $candidate"
-          done
-          echo "::error::neither the live nor the archived List One could be fetched"
+            echo "could not fetch the $1 location"
+            return 1
+          }
+          verify() { # verify <label>
+            echo "::group::--verify-source against the $1 copy"
+            uv run tools/gen_currencies.py --verify-source "$RUNNER_TEMP/$1.xml"
+            status=$?
+            echo "::endgroup::"
+            return $status
+          }
+          drifted() {
+            echo "::error title=Currency registry does not match its pinned publication::spec/currencies.yaml is not what the pinned bytes derive to. Something was hand-edited, or the pin was moved without re-transcribing. Fix it with: uv run tools/gen_currencies.py --transcribe <file>. Never edit one exponent by hand. See CONTRIBUTING.md."
+          }
+          republished() {
+            echo "::notice title=ISO 4217 has been republished::The registry still matches its pinned publication, so nothing here is broken; the live list has simply moved on."
+            echo "::error title=Live ISO 4217 publication has changed::spec/currencies.yaml is intact and verifies against its pinned bytes, but ${live} no longer serves them. Adopt the new publication deliberately: fetch it, update spec/currencies.source.yaml (url, published, retrieved, amendment, sha256, bytes, archive_url), run --transcribe, then --verify-source. A reviewer must independently fetch and confirm the new hash. See CONTRIBUTING.md."
+          }
+
+          if [ "$EVENT" = schedule ]; then
+            if fetch live "$live" && verify live; then
+              echo "the registry matches its pin, and the live publication still serves those bytes"
+              exit 0
+            fi
+            echo "the live file did not verify; checking the immutable capture to find out why"
+            if ! fetch archive "$archived"; then
+              echo "::error title=Cannot tell the two causes apart::The live file did not verify and the archived capture could not be fetched, so this run cannot say whether the registry drifted or the publication changed. Re-run, or check by hand per CONTRIBUTING.md."
+              exit 1
+            fi
+            if verify archive; then republished; else drifted; fi
+            exit 1
+          fi
+
+          # pull_request / push: archive first.
+          if fetch archive "$archived"; then
+            if verify archive; then
+              echo "the registry is exactly what its pinned publication derives to"
+              exit 0
+            fi
+            drifted
+            exit 1
+          fi
+          echo "the archived capture is unreachable; falling back to the live file"
+          if ! fetch live "$live"; then
+            echo "::error title=Neither location could be fetched::Both the archived capture and the live file failed to download, so the pin could not be checked at all. This is a fetch failure, not a finding."
+            exit 1
+          fi
+          if verify live; then
+            echo "the registry verifies against the live file (the archived capture was unreachable)"
+            exit 0
+          fi
+          echo "::error title=Registry did not verify, and the capture was unreachable::The live file did not verify and the archived capture could not be fetched, so this run cannot say whether the registry drifted or the publication changed. Check by hand per CONTRIBUTING.md."
           exit 1
-      # Asserts the file hashes to the pin, then that every one of the 178
-      # entries is exactly what those bytes derive to, N.A. rows included.
-      # A failure means our registry drifted or SIX published a new list. Both
-      # want a human: the fix is --transcribe, never a hand-edited exponent.
-      - name: Registry is derivable from it, code by code
-        run: uv run tools/gen_currencies.py --verify-source "$RUNNER_TEMP/list-one.xml"
