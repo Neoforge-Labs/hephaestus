@@ -1,4 +1,4 @@
-//! Hephaestus correctness core. Experimental.
+//! Hephaestus correctness core. Maturity: experimental.
 //!
 //! No I/O, no global state, no panics on input: every fallible function
 //! returns `Result<_, CoreError>`.

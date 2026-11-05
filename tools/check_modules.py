@@ -15,10 +15,19 @@ is ``planned``. Every module found on disk must have a ``shipped`` entry, a
 Compose fragment's ``maturity:`` header comment must agree with its entry, and
 at least one entry must be ``planned`` so the ledger has both sides. Directories
 that do not exist contribute no required entries.
+
+A ``shipped`` rust, python or go module must also carry ``Maturity: <level>`` in
+its source documentation, matching its entry: the crate's ``//!`` doc comment
+(``src/lib.rs``, else ``src/main.rs``), the module docstring (``<name>.py`` or
+``<name>/__init__.py``), or a Go package comment (the comment block directly
+above ``package`` in any non-test file, as in ``go/internal/ingot/config.go``).
+``docker`` images are not checked: a Dockerfile has no doc-comment convention
+and none has been decided.
 """
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 from pathlib import Path
@@ -31,6 +40,11 @@ STATUSES = ("shipped", "planned")
 MATURITIES = ("experimental", "beta", "stable")
 SECTION_RE = re.compile(r"^## (\d+)\. ", re.MULTILINE)
 HEADER_MATURITY_RE = re.compile(r"maturity:\s*([a-z]+)\s*$")
+# The in-source label. Case-sensitive on purpose: ``Maturity: Experimental`` is a mismatch.
+LABEL_RE = re.compile(r"\bMaturity:\s*([A-Za-z]+)")
+# Shipped rows whose source must carry a label. ``docker`` is deliberately absent: a Dockerfile
+# has no doc-comment convention and inventing one is an undecided design question.
+LABELLED_HOMES = ("rust", "python", "go")
 
 # Directories that sit where modules live but are not modules themselves.
 NOT_MODULES = {
@@ -155,6 +169,95 @@ def _compose_header_maturity(path: Path) -> tuple[str | None, str | None]:
     return (match.group(1) if match else None), None
 
 
+def _rust_doc(text: str) -> str:
+    """The crate's leading ``//!`` inner-doc block, skipping blank lines and plain ``//`` comments."""
+    doc: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("//!"):
+            doc.append(stripped[3:])
+        elif doc or (stripped and not stripped.startswith("//")):
+            break
+    return "\n".join(doc)
+
+
+def _go_doc(text: str) -> str:
+    """The ``//`` comment block directly above the first ``package`` clause (no blank line between)."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith("package "):
+            doc: list[str] = []
+            for prev in reversed(lines[:i]):
+                if not prev.startswith("//"):
+                    break
+                doc.append(prev[2:])
+            return "\n".join(reversed(doc))
+    return ""
+
+
+def _source_docs(repo_root: Path, home: str, name: str) -> tuple[list[tuple[str, str]], str | None]:
+    """The ``(repo-relative path, documentation text)`` pairs that may carry the module's label.
+
+    Returns an error message instead when the source cannot be located or read.
+    """
+    if home == "rust":
+        candidates = [repo_root / "core" / name / "src" / "lib.rs", repo_root / "core" / name / "src" / "main.rs"]
+        files = [c for c in candidates if c.is_file()][:1]
+    elif home == "python":
+        base = repo_root / "python" / "hephkit" / "src" / "hephkit"
+        files = [c for c in (base / f"{name}.py", base / name / "__init__.py") if c.is_file()][:1]
+    else:
+        files = []
+        for d in (repo_root / "go" / "internal" / name, repo_root / "go" / "cmd" / name):
+            if d.is_dir():
+                files.extend(sorted(f for f in d.glob("*.go") if not f.name.endswith("_test.go")))
+    if not files:
+        return [], f"modules.yaml: {name}: shipped {home} module has no source on disk to carry its Maturity label"
+    docs: list[tuple[str, str]] = []
+    for f in files:
+        rel = f.relative_to(repo_root).as_posix()
+        try:
+            text = f.read_text(encoding="utf-8")
+            if home == "python":
+                doc = ast.get_docstring(ast.parse(text)) or ""
+            else:
+                doc = _rust_doc(text) if home == "rust" else _go_doc(text)
+        except (OSError, UnicodeDecodeError) as exc:
+            return [], f"modules.yaml: {name}: cannot read {rel}: {exc}"
+        except (SyntaxError, ValueError) as exc:
+            return [], f"modules.yaml: {name}: cannot parse {rel} to find its module docstring: {exc}"
+        docs.append((rel, doc))
+    return docs, None
+
+
+def _check_source_label(repo_root: Path, home: str, name: str, entry: dict) -> list[str]:
+    """Errors for one shipped rust/python/go row whose in-source label is missing or disagrees."""
+    docs, problem = _source_docs(repo_root, home, name)
+    if problem:
+        return [problem]
+    where = {"rust": "//! crate doc comment", "python": "module docstring", "go": "package comment"}[home]
+    expected = entry.get("maturity")
+    errors: list[str] = []
+    found = False
+    for rel, doc in docs:
+        match = LABEL_RE.search(doc)
+        if match is None:
+            continue
+        found = True
+        if match.group(1) != expected:
+            errors.append(
+                f"modules.yaml: {name}: maturity mismatch: {rel} {where} says {match.group(1)!r}, "
+                f"entry says {expected!r}"
+            )
+    if not found:
+        files = ", ".join(rel for rel, _ in docs)
+        errors.append(
+            f"modules.yaml: {name}: no Maturity label in the {where} of {files}; "
+            f"add 'Maturity: {expected}.' to it (entry says {expected!r})"
+        )
+    return errors
+
+
 def check_modules(repo_root: Path) -> list[str]:
     """Return human-readable errors for spec/modules.yaml; empty when valid."""
     path = repo_root / "spec" / "modules.yaml"
@@ -201,6 +304,11 @@ def check_modules(repo_root: Path) -> list[str]:
                     f"modules.yaml: {name}: compose header says maturity {header!r}, "
                     f"entry says {entry.get('maturity')!r}"
                 )
+    # In-source labels. Driven by the rows, not the scan, so a shipped row whose source is gone is
+    # reported too. docker rows are intentionally not checked (see LABELLED_HOMES).
+    for (home, name), entry in sorted(by_key.items()):
+        if entry.get("status") == "shipped" and home in LABELLED_HOMES and entry.get("maturity") in MATURITIES:
+            errors.extend(_check_source_label(repo_root, home, name, entry))
     return errors
 
 

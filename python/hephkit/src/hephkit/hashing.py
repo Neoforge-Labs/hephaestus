@@ -1,4 +1,4 @@
-"""Canonical JSON, content hashes and UUIDv7 (spec section 4). Experimental.
+"""Canonical JSON, content hashes and UUIDv7 (spec section 4). Maturity: experimental.
 
 Every rule lives in the Rust core. This module only turns a Python object into
 JSON text for the core; nothing is canonicalised or validated here, so NaN,

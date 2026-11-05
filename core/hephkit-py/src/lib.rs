@@ -8,6 +8,8 @@
 //! Error mapping follows the rule documented on `CoreError`: the variant
 //! selects the exception class and the registry code is exposed verbatim as
 //! `.code`.
+//!
+//! Maturity: experimental.
 
 use hephkit_core::{CoreError, Currency, Money, Rounding};
 use pyo3::create_exception;

@@ -1,4 +1,4 @@
-"""Standard Webhooks signing and verification (spec section 5). Experimental.
+"""Standard Webhooks signing and verification (spec section 5). Maturity: experimental.
 
 The HMAC, the base64 rules, the timestamp window and the constant-time
 comparison are all in the Rust core.

@@ -1,4 +1,4 @@
-// Command heph is the Hephaestus CLI.
+// Command heph is the Hephaestus CLI. Maturity: experimental.
 package main
 
 import (

@@ -1,4 +1,4 @@
-"""Registry-backed errors (spec section 1). Experimental.
+"""Registry-backed errors (spec section 1). Maturity: experimental.
 
 ``HephError`` is an exception that carries a code from ``spec/errors.yaml``. The
 code constants and the ``REGISTRY`` of ``(status, title)`` are generated into
