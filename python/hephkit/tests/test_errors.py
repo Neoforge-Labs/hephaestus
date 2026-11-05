@@ -423,3 +423,13 @@ def test_validation_error_on_malformed_json(client: TestClient) -> None:
     response = client.post("/items", content=b"{nope", headers={"content-type": "application/json"})
     assert response.status_code == 422
     assert _body(response)["code"] == "HEPH-VAL-422"
+
+
+@pytest.mark.parametrize("bad", [object(), _deep()], ids=["object", "deeply-nested"])
+def test_problem_response_itself_never_raises_on_bad_extensions(bad: Any) -> None:
+    from hephkit.errors.fastapi import problem_response
+
+    response = problem_response("HEPH-NF-404", extensions={"leaky": bad})
+    assert response.status_code == 500
+    assert response.media_type == PROBLEM
+    assert b"leaky" not in response.body
