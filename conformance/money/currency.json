@@ -1,8 +1,8 @@
 {
   "suite": "money.currency",
   "spec": "0.2.0",
-  "description": "Representative cases for the ISO 4217 minor-unit exponents the core accepts (spec 3.3). The complete accepted set is spec/currencies.yaml, the normative registry; this file pins a sample of it plus every rejection boundary. A code whose List One minor-unit field is 'N.A.', a code the standard has retired from List One, and anything that is not a List One code at all are each rejected with HEPH-MONEY-422.",
-  "source": "ISO 4217 List One, 'Current currency & funds code list', as published by SIX Group in its capacity as the ISO 4217 Maintenance Agency: https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml, XML root Pblshd=2026-09-17, retrieved on 2026-11-05. It incorporates ISO 4217 Amendment 180 of 22 September 2025 (Bulgaria to EUR), the latest amendment SIX publishes. Every exponent here is the CcyMnrUnts field of that publication, transcribed into spec/currencies.yaml and cross-checked against it; none is derived by running a heph implementation. ISO defines no exponent-1 code, so no case asserts one; the exponents in use are 0, 2, 3 and 4.",
+  "description": "Representative cases for the ISO 4217 minor-unit exponents the core accepts (spec 3.3). The complete accepted set is spec/currencies.yaml, the normative registry; this file pins a sample of it plus every rejection boundary. A code whose List One minor-unit field is 'N.A.', a code the standard has retired from List One (each accepted successor is paired with its retired predecessor here), and anything that is not a List One code at all are each rejected with HEPH-MONEY-422.",
+  "source": "ISO 4217 List One, 'Current currency & funds code list', as published by SIX Group in its capacity as the ISO 4217 Maintenance Agency: https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml, XML root Pblshd=2026-09-17, retrieved on 2026-11-05, sha256 33139b438657d1cee116ba737807ea71d19d6de4b90f799a09c56f0cc6a1b0ff. That hash is pinned in spec/currencies.source.yaml, and `tools/gen_currencies.py --verify-source <file>` re-derives the registry from a local copy of those exact bytes, so these exponents are reproducible from the publication rather than taken on trust. It incorporates ISO 4217 Amendment 180 of 22 September 2025 (Bulgaria to EUR), the latest amendment SIX publishes. Every exponent here is the CcyMnrUnts field of that publication, transcribed into spec/currencies.yaml and cross-checked against it; none is derived by running a heph implementation. ISO defines no exponent-1 code, so no case asserts one; the exponents in use are 0, 2, 3 and 4.",
   "cases": [
     {
       "name": "usd-exponent-2",
@@ -656,6 +656,42 @@
       "name": "historical-zwl-replaced-by-zwg",
       "input": {
         "code": "ZWL"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "historical-sll-replaced-by-sle",
+      "input": {
+        "code": "SLL"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "historical-mro-replaced-by-mru",
+      "input": {
+        "code": "MRO"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "historical-vef-replaced-by-ved",
+      "input": {
+        "code": "VEF"
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "historical-std-replaced-by-stn",
+      "input": {
+        "code": "STD"
       },
       "expect": {
         "error": "HEPH-MONEY-422"

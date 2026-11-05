@@ -34,6 +34,18 @@ jobs:
       # The core's currency table is generated from spec/currencies.yaml; fail
       # if the committed file is stale. Also runs locally as core:gen-currencies.
       - run: uv run tools/gen_currencies.py --check
+      # The exponents must stay reproducible from the standard itself, not just
+      # from this repo: fetch the pinned List One and re-derive the registry from
+      # it, code by code. Weekly only, because it needs the network and because a
+      # new publication upstream must not fail an unrelated PR. A failure means
+      # either our registry drifted or SIX published a new list; both need a
+      # human to look, and the fix is --transcribe, never a hand edit.
+      - name: Currency registry is derivable from the pinned ISO 4217 publication
+        if: github.event_name == 'schedule'
+        run: |
+          url="$(uv run --with pyyaml python -c 'import pathlib, yaml; print(yaml.safe_load(pathlib.Path("spec/currencies.source.yaml").read_text())["url"])')"
+          curl -sSfL --retry 3 --max-time 60 -o "$RUNNER_TEMP/list-one.xml" "$url"
+          uv run tools/gen_currencies.py --verify-source "$RUNNER_TEMP/list-one.xml"
       # check_vectors.py runs in python-ci as conformance:check.
 
   rust:

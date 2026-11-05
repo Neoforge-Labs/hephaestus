@@ -25,6 +25,7 @@ tasks:
     command: 'uv run ../tools/gen_currencies.py --check'
     inputs:
       - '/spec/currencies.yaml'
+      - '/spec/currencies.source.yaml'
       - '/tools/gen_currencies.py'
       - '/tools/check_registry.py'
       - 'hephkit-core/src/money/currency_table.rs'

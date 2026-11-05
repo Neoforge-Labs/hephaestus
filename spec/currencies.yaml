@@ -1,30 +1,37 @@
 # ISO 4217 currency registry. Source of truth for every minor-unit exponent the
-# heph core accepts (spec 3.3), and the only input to tools/gen_currencies.py.
+# heph core accepts (spec 3.3), and the only input to the generated table in
+# core/hephkit-core/src/money/currency_table.rs.
 #
-# Source: ISO 4217 List One, "Current currency & funds code list", as published
-# by SIX Group in its capacity as the ISO 4217 Maintenance Agency.
+# Source: ISO 4217 List One, "Current currency & funds code list",
+#         as published by SIX Group, in its capacity as the ISO 4217 Maintenance Agency.
 #   URL:       https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml
 #   Published: 2026-09-17 (the XML root's Pblshd attribute)
 #   Retrieved: 2026-11-05
-#   Amendment: 180, dated 22 September 2025, is the latest amendment SIX
+#   Amendment: 180, dated 2025-09-22, is the latest amendment SIX
 #              publishes (181 does not exist). This list incorporates it:
-#              Bulgaria reads EUR, and BGN has moved to List Three.
+#              Bulgaria reads EUR, and BGN has moved to the historical list.
+#   sha256:    33139b438657d1cee116ba737807ea71d19d6de4b90f799a09c56f0cc6a1b0ff  (47491 bytes)
+#
+# NOT hand-written. This file is transcribed from the XML above by
+# `uv run tools/gen_currencies.py --transcribe <file>`, and
+# `--verify-source <file>` asserts both that the file hashes to the sha256 above
+# and that every entry below is exactly what it derives to. Update it by
+# re-transcribing a newer List One in full, never by editing one code's
+# exponent: a single hand-edited number is a claim about the standard that
+# nothing checks. spec/currencies.source.yaml records why the XML itself is not
+# committed beside this file.
 #
 # Transcription: one entry per distinct alphabetic code in <CcyTbl>, ordered by
 # code. List One carries one <CcyNtry> per country, so a shared code such as EUR
-# or XOF appears many times; every duplicate row was verified to carry identical
-# Ccy, CcyNbr, CcyMnrUnts and CcyNm, so collapsing them loses nothing. Three
-# country rows (Antarctica, the State of Palestine, South Georgia and the South
-# Sandwich Islands) carry no <Ccy> at all and have no entry here.
+# or XOF appears many times; every duplicate row is required to carry identical
+# Ccy, CcyNbr, CcyMnrUnts and CcyNm, so collapsing them loses nothing. Country
+# rows carrying no <Ccy> at all (Antarctica, the State of Palestine, South
+# Georgia and the South Sandwich Islands) have no entry here.
 #
 # `minor_units` is CcyMnrUnts verbatim: an integer, or the string 'N.A.' where
 # the standard defines no exponent. Which of these the core accepts is decided
 # by tools/gen_currencies.py, not here: a code is accepted if and only if its
 # minor_units is numeric (ADR 0017).
-#
-# NOT a generated file, and not hand-tuned either. Update it by re-transcribing
-# a newer List One in full, never by editing one code's exponent: a single
-# hand-edited number is a claim about the standard that nothing checks.
 - code: AED
   numeric: '784'
   name: UAE Dirham
@@ -372,6 +379,7 @@
 - code: MGA
   numeric: '969'
   name: Malagasy Ariary
+  # the ariary divides into five iraimbilanja, but the standard publishes 2, not 1
   minor_units: 2
 - code: MKD
   numeric: '807'
@@ -392,6 +400,7 @@
 - code: MRU
   numeric: '929'
   name: Ouguiya
+  # the ouguiya divides into five khoums, but the standard publishes 2, not 1
   minor_units: 2
 - code: MUR
   numeric: '480'

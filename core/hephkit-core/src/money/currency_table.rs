@@ -12,6 +12,17 @@
 //!
 //! Entries are ordered by code, which `Currency::from_code` relies on to
 //! binary search; `money::currency` tests that invariant.
+//!
+//! Derived from ISO 4217 List One, "Current currency & funds code list",
+//! published by SIX Group, in its capacity as the ISO 4217 Maintenance Agency:
+//!   url       https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml
+//!   published 2026-09-17 (the XML root's Pblshd attribute)
+//!   retrieved 2026-11-05
+//!   amendment 180 of 2025-09-22
+//!   sha256    33139b438657d1cee116ba737807ea71d19d6de4b90f799a09c56f0cc6a1b0ff
+//! The published file is not vendored (its terms of use do not clearly permit
+//! redistribution); `uv run tools/gen_currencies.py --verify-source <file>`
+//! checks a local copy against that hash and re-derives the registry from it.
 
 /// Every ISO 4217 code with a defined minor-unit exponent, ordered by code.
 pub(super) const TABLE: [([u8; 3], u8); 165] = [

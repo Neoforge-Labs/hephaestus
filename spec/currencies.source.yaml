@@ -1,0 +1,52 @@
+# Provenance of spec/currencies.yaml. Machine-readable on purpose: the header of
+# the registry, the banner of the generated Rust table and the --verify-source
+# check all read this file, so the publication the exponents came from is pinned
+# in one place and cannot drift from the data.
+#
+# WHY THE XML IS NOT VENDORED HERE. The obvious way to make the transcription
+# reproducible is to commit the retrieved list-one.xml beside this file. We did
+# not, because SIX's terms of use do not clearly permit redistributing it: they
+# state that the entire content of the SIX website is protected by copyright,
+# that content may not be "reproduced or reused in any way or used for
+# commercial purposes", and that the information is provided "exclusively for
+# personal use as well as information purposes". Nothing on the currency-code
+# pages grants a redistribution licence; the only statement there is that SIX
+# makes the lists "available online and free of charge", which is a statement
+# about price, not about rights. hephaestus is MIT-licensed and the ingots built
+# from it are commercial, so vendoring the file would be redistribution we have
+# no permission for. The individual exponents are facts about the standard and
+# are ours to record; the published file as a compilation is not.
+#
+# So instead the exact bytes are pinned by hash, and the derivation from them is
+# executable:
+#
+#   curl -sSL -o list-one.xml "$(uv run python -c \
+#     'import yaml,pathlib; print(yaml.safe_load(pathlib.Path("spec/currencies.source.yaml").read_text())["url"])')"
+#   uv run tools/gen_currencies.py --verify-source list-one.xml
+#
+# That asserts the file hashes to `sha256` below and that spec/currencies.yaml is
+# exactly what the file derives to, code by code, including the N.A. rows. It is
+# a diff, not an act of trust: a one-digit slip anywhere in the 178 entries fails
+# it by name.
+#
+# To move to a newer publication: fetch it, run --verify-source to see it reject
+# the new hash, update the five fields below, run
+# `--transcribe list-one.xml` to rewrite spec/currencies.yaml from it, then
+# `--verify-source` and the generator's --check. Never hand-edit one exponent.
+
+standard: 'ISO 4217 List One, "Current currency & funds code list"'
+publisher: 'SIX Group, in its capacity as the ISO 4217 Maintenance Agency'
+url: 'https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml'
+
+# The XML root's Pblshd attribute, not the day we fetched it.
+published: '2026-09-17'
+retrieved: '2026-11-05'
+
+# The latest amendment SIX publishes; 181 does not exist. This list incorporates
+# it: its Bulgaria row reads EUR, and BGN has moved to the historical list.
+amendment: '180'
+amendment_date: '2025-09-22'
+
+# sha256 of the retrieved file, verified identical across two separate fetches.
+sha256: '33139b438657d1cee116ba737807ea71d19d6de4b90f799a09c56f0cc6a1b0ff'
+bytes: 47491
