@@ -11,6 +11,7 @@ projects:
   hephkit: 'python/hephkit'
   docs: 'docs'
   spec: 'spec'
+  docker: 'docker'
 
 vcs:
   client: 'git'
