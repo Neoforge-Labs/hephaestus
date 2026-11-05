@@ -166,7 +166,7 @@ def test_non_pii_attributes_are_kept_in_both_forms(capsys: pytest.CaptureFixture
 def test_mixed_case_and_hyphens(capsys: pytest.CaptureFixture[str]) -> None:
     line = _one(capsys, Password="p", USER_ID="u", **{"API-Key": "k", "Set-Cookie": "c"})
     assert line["Password"] == line["USER_ID"] == line["API-Key"] == "[REDACTED]"
-    assert line["Set-Cookie"] == "c"  # exact matching only; not a registered name
+    assert line["Set-Cookie"] == "[REDACTED]"
 
 
 def test_nested_dict_and_list_of_dicts(capsys: pytest.CaptureFixture[str]) -> None:
@@ -186,13 +186,33 @@ def test_non_string_values_are_redacted_whatever_their_type(capsys: pytest.Captu
     assert [line[k] for k in ("password", "token", "secret", "cookie", "user_id")] == ["[REDACTED]"] * 5
 
 
-def test_keys_that_merely_contain_a_redacted_word_are_kept(capsys: pytest.CaptureFixture[str]) -> None:
-    # Documented decision: exact match only. Substring matching would blank
-    # fields like my_token_count and make the boundary unpredictable.
-    line = _one(capsys, password_hint="h", my_token_count=3, tokens_used=4)
-    assert line["password_hint"] == "h"
-    assert line["my_token_count"] == 3
-    assert line["tokens_used"] == 4
+@pytest.mark.parametrize(
+    "key",
+    ["access_token", "set-cookie", "refresh_token", "api_key_id", "password_hint", "authorization_header",
+     "X-Api-Key", "card_number_last4", "user.id.hash"],
+)
+def test_word_boundary_keys_are_redacted(capsys: pytest.CaptureFixture[str], key: str) -> None:
+    assert _one(capsys, **{key: "v"})[key] == "[REDACTED]"
+
+
+@pytest.mark.parametrize("key", ["amount", "my_token_count", "account_id", "tokens_used", "secretary", "mycookie"])
+def test_keys_with_the_word_only_in_the_middle_or_inside_another_word_are_kept(
+    capsys: pytest.CaptureFixture[str], key: str
+) -> None:
+    assert _one(capsys, **{key: "v"})[key] == "v"
+
+
+def test_caller_added_keys_are_redacted_and_defaults_kept(capsys: pytest.CaptureFixture[str]) -> None:
+    setup_observability(_settings(), span_exporter=InMemorySpanExporter(), redact_keys=["mpesa_passkey", "Paystack-Secret-Key"])
+    line = _one(capsys, mpesa_passkey="a", paystack_secret_key="b", PAYSTACK_SECRET_KEY_LIVE="c", password="d", amount="1")
+    assert line["mpesa_passkey"] == line["paystack_secret_key"] == line["PAYSTACK_SECRET_KEY_LIVE"] == "[REDACTED]"
+    assert line["password"] == "[REDACTED]" and line["amount"] == "1"
+
+
+def test_second_setup_with_different_redact_keys_raises() -> None:
+    setup_observability(_settings(), span_exporter=InMemorySpanExporter(), redact_keys=["a_key"])
+    with pytest.raises(RuntimeError, match="different settings"):
+        setup_observability(_settings(), redact_keys=["b_key"])
 
 
 def test_redaction_does_not_touch_values_that_look_secret(capsys: pytest.CaptureFixture[str]) -> None:
@@ -292,6 +312,81 @@ def test_setup_with_unreachable_collector_neither_blocks_nor_raises() -> None:
     assert isinstance(o, Observability)
     assert TestClient(app).get("/p").status_code == 200
     assert time.monotonic() - started < 2.0
+
+
+def test_shutdown_is_bounded_with_an_unreachable_collector() -> None:
+    o = setup_observability(_settings(otlp_endpoint="http://127.0.0.1:1"))
+    o.tracer_provider.get_tracer("t").start_span("pending").end()
+    started = time.monotonic()
+    o.shutdown(timeout=1.0)
+    assert time.monotonic() - started < 2.0
+
+
+def test_default_shutdown_bound_is_two_seconds() -> None:
+    assert obs_module.SHUTDOWN_TIMEOUT == 2.0
+    o = setup_observability(_settings(otlp_endpoint="http://127.0.0.1:1"))
+    o.tracer_provider.get_tracer("t").start_span("pending").end()
+    started = time.monotonic()
+    o.shutdown()
+    assert time.monotonic() - started < 4.0
+
+
+def test_shutdown_flushes_promptly_to_a_reachable_collector() -> None:
+    import http.server
+    import threading
+
+    received: list[str] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers["Content-Length"]))
+            received.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        o = setup_observability(_settings(otlp_endpoint=f"http://127.0.0.1:{server.server_port}"))
+        o.tracer_provider.get_tracer("t").start_span("sent").end()
+        started = time.monotonic()
+        o.shutdown()
+        assert time.monotonic() - started < 1.5
+        assert received == ["/v1/traces"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_setup_after_shutdown_installs_a_working_global_tracer() -> None:
+    from opentelemetry import trace
+
+    first_exporter, second_exporter = InMemorySpanExporter(), InMemorySpanExporter()
+    first = setup_observability(_settings(), span_exporter=first_exporter)
+    held = trace.get_tracer("held-across-restart")
+    held.start_span("one").end()
+    first.shutdown()
+    held.start_span("while-down").end()  # no-op, must not raise
+    setup_observability(_settings(), span_exporter=second_exporter)
+    held.start_span("two").end()
+    trace.get_tracer("fresh").start_span("three").end()
+    assert [s.name for s in first_exporter.get_finished_spans()] == ["one"]
+    assert [s.name for s in second_exporter.get_finished_spans()] == ["two", "three"]
+
+
+def test_global_tracer_start_as_current_span_goes_through_the_switch() -> None:
+    from opentelemetry import trace
+
+    exporter = InMemorySpanExporter()
+    setup_observability(_settings(), span_exporter=exporter)
+    with trace.get_tracer("t").start_as_current_span("cm") as span:
+        assert span.get_span_context().is_valid
+    assert [s.name for s in exporter.get_finished_spans()] == ["cm"]
 
 
 def test_default_exporter_targets_the_settings_endpoint() -> None:
