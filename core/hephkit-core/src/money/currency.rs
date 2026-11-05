@@ -26,6 +26,7 @@ const TABLE: [([u8; 3], u8); 19] = [
 
 /// An ISO 4217 currency with a defined minor-unit exponent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct Currency {
     pub code: [u8; 3],
     pub exponent: u8,

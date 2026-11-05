@@ -2,7 +2,7 @@
   "suite": "money.parse",
   "spec": "0.1.0",
   "description": "Human-facing decimal strings (spec 3.6): strict ASCII, excess precision rejected unless a rounding mode is given. `minor` is a decimal string so i64 extremes survive JavaScript numbers. Rounding modes are defined in spec 3.6 (down truncates toward zero).",
-  "source": "Hand-derived from ISO 4217 exponents and spec 3.2/3.6; no implementation consulted. kes-down-negative: -1029.5 truncated toward zero is -1029 (a floor would give -1030). Trailing-zero cases (added after review, spec 3.6): KES has exponent 2, so \"10.290\" has 3 fractional digits, one more than allowed; reject therefore fails on the digit count alone, and with half_up the dropped digit 0 is below half so the result is 1029 (10.29 -> 1029 minor units); the negative case is rejected by the same count rule.",
+  "source": "Hand-derived from ISO 4217 exponents and spec 3.2/3.6; no implementation consulted. kes-down-negative: -1029.5 truncated toward zero is -1029 (a floor would give -1030). Trailing-zero cases (added after review, spec 3.6): KES has exponent 2, so \"10.290\" has 3 fractional digits, one more than allowed; reject therefore fails on the digit count alone, and with half_up the dropped digit 0 is below half so the result is 1029 (10.29 -> 1029 minor units); the negative case is rejected by the same count rule. Decimal-grammar edges (added after review): spec 3.6 gives the decimal grammar as optional minus, digits, optional dot and digits; the no-leading-zero and no-negative-zero rules of 3.2 govern the wire integer only, so \"007\" is the integer 7, i.e. 700 KES minor units, and \"-0.00\" is zero (an integer has no sign of zero), i.e. 0.",
   "cases": [
     {
       "name": "kes-reject-10",
@@ -640,6 +640,28 @@
       },
       "expect": {
         "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-reject-leading-zeros-allowed-in-decimal-grammar",
+      "input": {
+        "amount": "007",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": "700"
+      }
+    },
+    {
+      "name": "kes-reject-negative-zero-decimal-is-zero",
+      "input": {
+        "amount": "-0.00",
+        "currency": "KES",
+        "rounding": "reject"
+      },
+      "expect": {
+        "minor": "0"
       }
     }
   ]

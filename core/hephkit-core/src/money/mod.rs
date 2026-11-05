@@ -35,6 +35,7 @@ pub enum Rounding {
 
 /// A signed amount of minor units in one currency.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Money {
     pub minor: i64,
     pub currency: Currency,

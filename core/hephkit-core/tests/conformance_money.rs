@@ -1,11 +1,20 @@
 mod common;
 
-use common::{check, load, minor_str};
+use common::{assert_suites_covered, check, load, minor_str, Case};
 use hephkit_core::{CoreError, Currency, Money, Rounding};
 use serde_json::Value;
 
-fn from_wire(v: &Value) -> Result<Money, CoreError> {
-    Money::from_wire_json(&v.to_string())
+/// Passes the vector's original bytes for `input.<member>` to the library.
+fn from_wire(c: &Case, member: &str) -> Result<Money, CoreError> {
+    Money::from_wire_json(c.raw_object(member))
+}
+
+#[test]
+fn every_suite_file_is_exercised() {
+    assert_suites_covered(
+        "money",
+        &["currency", "parse", "format", "arith", "allocate"],
+    );
 }
 
 fn wire(m: &Money) -> Value {
@@ -68,16 +77,11 @@ fn arith() {
     for c in load("money", "arith") {
         let i = &c.input;
         let result: Result<Money, CoreError> =
-            from_wire(&i["a"]).and_then(|a| match i["op"].as_str().unwrap() {
+            from_wire(&c, "a").and_then(|a| match i["op"].as_str().unwrap() {
                 "neg" => a.checked_neg(),
-                op => {
-                    let b = from_wire(&i["b"])?;
-                    if op == "add" {
-                        a.checked_add(&b)
-                    } else {
-                        a.checked_sub(&b)
-                    }
-                }
+                "add" => a.checked_add(&from_wire(&c, "b")?),
+                "sub" => a.checked_sub(&from_wire(&c, "b")?),
+                other => panic!("{}: unknown op {other}", c.name),
             });
         check(&c.name, result.map(|m| wire(&m)), &c.expect, |e| {
             e["result"].clone()
@@ -89,7 +93,7 @@ fn arith() {
 fn allocate() {
     for c in load("money", "allocate") {
         let i = &c.input;
-        let result = from_wire(&i["money"]).and_then(|m| {
+        let result = from_wire(&c, "money").and_then(|m| {
             let ratios: Vec<u64> = i["ratios"]
                 .as_array()
                 .unwrap()
