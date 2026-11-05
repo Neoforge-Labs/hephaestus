@@ -58,14 +58,19 @@ you must not take on trust:
 4. **Reject a pin move bundled with anything else**, per rule 3 above.
 
 `.github/workflows/currency-source.yml` runs this check for you. It reports on
-every pull request, and does the network part only when the registry, its pin or
-the generator actually changed. On a pull request it fetches `archive_url`
-first, because that capture is immutable and the question is whether the
-*committed* registry matches the bytes it claims; the weekly run fetches the
-live URL first instead, because noticing that the publisher has republished is
-the one thing only the live file can tell us. So a red pull-request check means
-the registry really does not match its pin, while the weekly job is what tells
-you a new publication exists.
+every pull request, and does the network part only when the registry, its pin,
+the generator or `tools/check_registry.py` actually changed. On a pull request
+or a push it fetches `archive_url` first, because that capture is immutable and
+the question is whether the *committed* registry matches the bytes it claims.
+The weekly run fetches the live URL first instead, because noticing that the
+publisher has republished is the one thing only the live file can tell us -- and
+so does a manual `workflow_dispatch`, which is how you ask that question on
+demand rather than waiting for Monday. So a red pull-request check means the
+registry really does not match its pin, while the weekly or dispatched run is
+what tells you a new publication exists. If the live file simply will not
+download, those runs say so and stop: a fetch failure is never reported as a
+republication, because moving the pin is the last thing you should do on the
+strength of a timeout.
 
 None of that removes the reviewer's duty above. Both runs fetch over the network
 with no independent witness, so they confirm the pin is self-consistent, not

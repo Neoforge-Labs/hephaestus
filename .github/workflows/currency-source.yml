@@ -12,7 +12,10 @@
 # every unrelated pull request, which blocks them instead of passing them.
 #
 # Fetch order depends on the event, because the two kinds of run are asking
-# different questions. See the comments on the fetch step.
+# different questions: a pull request or a push is VERIFYING a committed
+# registry, while a schedule or a manual dispatch is CHECKING whether the
+# publisher has moved on. Every step that branches on the event must agree on
+# that split. See the comments on the fetch step.
 name: currency-source
 
 on:
@@ -51,7 +54,9 @@ jobs:
           set -euo pipefail
           # A scheduled or manual run always checks: noticing that the publisher
           # has republished is its whole job, and no file in this repo changes
-          # when that happens.
+          # when that happens. The fetch step below splits the events the same
+          # way; the two conditions must stay identical or a dispatch would be
+          # in scope yet take the verifying path and never look at the live file.
           if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
             echo "in_scope=true" >> "$GITHUB_OUTPUT"
             echo "${EVENT} run: always in scope"
@@ -69,10 +74,14 @@ jobs:
             echo "cannot resolve base commit '${from}'; treating this run as in scope"
             exit 0
           fi
+          # Every file --verify-source reads or imports, plus this workflow.
+          # tools/check_registry.py is here because gen_currencies.py imports
+          # from it, so a change there can alter this gate.
           changed="$(git diff --name-only "$from" HEAD -- \
             spec/currencies.yaml \
             spec/currencies.source.yaml \
             tools/gen_currencies.py \
+            tools/check_registry.py \
             .github/workflows/currency-source.yml)"
           if [ -n "$changed" ]; then
             echo "in_scope=true" >> "$GITHUB_OUTPUT"
@@ -99,11 +108,16 @@ jobs:
       # permanently red until someone moved the pin. Archive-first makes a PR
       # run deterministic and immune to upstream churn.
       #
-      # A scheduled run fetches `url` first for exactly the opposite reason:
-      # detecting republication is the only thing the live file can tell us, and
-      # it cannot do so if we never look at it. When live disagrees, the run then
-      # checks the capture to tell the two causes apart -- a registry that does
-      # not match its pin is our defect, a live file that has moved on is news.
+      # A scheduled run, and a manual dispatch, fetch `url` first for exactly
+      # the opposite reason: detecting republication is the only thing the live
+      # file can tell us, and it cannot do so if we never look at it. "Has the
+      # publisher republished?" is the reason a human dispatches this by hand,
+      # so a dispatch must not take the archive-first path. When live disagrees,
+      # the run then checks the capture to tell the two causes apart -- a
+      # registry that does not match its pin is our defect, a live file that has
+      # moved on is news. A live file that would not download is neither: it is
+      # reported as a fetch failure, because recommending a re-pin on the
+      # strength of a 5xx would be the worst advice this job could give.
       #
       # --compressed because the capture stores the response gzip-encoded; a
       # plain fetch yields 5640 unparseable bytes and fails the hash for the
@@ -146,12 +160,17 @@ jobs:
             echo "::error title=Live ISO 4217 publication has changed::spec/currencies.yaml is intact and verifies against its pinned bytes, but ${live} no longer serves them. Adopt the new publication deliberately: fetch it, update spec/currencies.source.yaml (url, published, retrieved, amendment, sha256, bytes, archive_url), run --transcribe, then --verify-source. A reviewer must independently fetch and confirm the new hash. See CONTRIBUTING.md."
           }
 
-          if [ "$EVENT" = schedule ]; then
-            if fetch live "$live" && verify live; then
+          # Keep this condition identical to the scope step's.
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
+            if ! fetch live "$live"; then
+              echo "::error title=Could not fetch the live ISO 4217 publication::${live} would not download, so this run cannot say whether the publication has changed. This is a fetch failure, not a finding: the committed registry is not implicated and the pin does not need moving. Re-run, or check by hand per CONTRIBUTING.md."
+              exit 1
+            fi
+            if verify live; then
               echo "the registry matches its pin, and the live publication still serves those bytes"
               exit 0
             fi
-            echo "the live file did not verify; checking the immutable capture to find out why"
+            echo "the live file downloaded but did not verify; checking the immutable capture to find out why"
             if ! fetch archive "$archived"; then
               echo "::error title=Cannot tell the two causes apart::The live file did not verify and the archived capture could not be fetched, so this run cannot say whether the registry drifted or the publication changed. Re-run, or check by hand per CONTRIBUTING.md."
               exit 1
