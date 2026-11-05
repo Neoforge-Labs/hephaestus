@@ -541,10 +541,74 @@ def test_failing_dump_falls_back_to_type_name(capsys: pytest.CaptureFixture[str]
 
 def test_non_json_dict_keys_do_not_raise(capsys: pytest.CaptureFixture[str]) -> None:
     line = _one(capsys, d={("a", 1): "t", b"k": "b", 7: "i", None: "n", "ok": 1})
-    assert line["d"] == {"('a', 1)": "t", "b'k'": "b", "7": "i", "null": "n", "ok": 1}
+    assert line["d"] == {"<tuple>": "[REDACTED]", "k": "b", "7": "i", "null": "n", "ok": 1}
 
 
 def test_redacted_bytes_key_is_still_redacted(capsys: pytest.CaptureFixture[str]) -> None:
     out = _rendered(capsys, d={b"password": "BYTESLEAK", b"access_token": "T2"})
     assert "BYTESLEAK" not in out and "T2" not in out
-    assert json.loads(out)["d"] == {"b'password'": "[REDACTED]", "b'access_token'": "[REDACTED]"}
+    assert json.loads(out)["d"] == {"password": "[REDACTED]", "access_token": "[REDACTED]"}
+
+
+class _RG:
+    def __repr__(self) -> str:
+        return "RG(password='RGLEAK')"
+
+    __str__ = __repr__
+
+
+class _BadClass:
+    @property  # type: ignore[misc]
+    def __class__(self) -> type:  # type: ignore[override]
+        raise RuntimeError("no class")
+
+
+def test_object_and_tuple_keys_never_leak_through_repr(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _rendered(capsys, a={_RG(): "VALLEAK"}, b={("password", "TUPLEAK"): "V2"})
+    assert "RGLEAK" not in out and "TUPLEAK" not in out and "VALLEAK" not in out and "V2" not in out
+    assert json.loads(out)["a"] == {"<_RG>": "[REDACTED]"}
+    assert json.loads(out)["b"] == {"<tuple>": "[REDACTED]"}
+
+
+def test_huge_int_keys_do_not_raise(capsys: pytest.CaptureFixture[str]) -> None:
+    assert json.loads(_rendered(capsys, d={10**5000: "x"}))["d"] == {"<int>": "[REDACTED]"}
+
+
+def test_memoryview_is_opaque(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _rendered(capsys, mv=memoryview(b"MVLEAK"))
+    assert json.loads(out)["mv"] == "<memoryview>"
+    assert "77" not in out.split('"event"')[0]
+
+
+def test_object_whose_class_raises_does_not_drop_the_line(capsys: pytest.CaptureFixture[str]) -> None:
+    line = _one(capsys, bad=_BadClass(), keep="yes")
+    assert line["keep"] == "yes" and line["event"] == "x"
+    assert isinstance(line["bad"], str) and line["bad"].startswith("<")
+
+
+def test_enum_and_timedelta_keep_their_values(capsys: pytest.CaptureFixture[str]) -> None:
+    import datetime
+    import enum
+
+    class Color(enum.Enum):
+        RED = "red"
+
+    class Level(enum.IntEnum):
+        HIGH = 3
+
+    line = _one(capsys, c=Color.RED, i=Level.HIGH, td=datetime.timedelta(seconds=90))
+    assert line["c"] == "red" and line["i"] == 3 and line["td"] == "0:01:30"
+
+
+def test_enum_holding_a_secret_shaped_value_is_still_redacted(capsys: pytest.CaptureFixture[str]) -> None:
+    import enum
+
+    class E(enum.Enum):
+        V = {"password": "ENUMLEAK"}
+
+    assert "ENUMLEAK" not in _rendered(capsys, e=E.V)
+
+
+def test_huge_int_value_does_not_raise(capsys: pytest.CaptureFixture[str]) -> None:
+    line = _one(capsys, big=10**5000, ok=10**30, nested=[10**5000])
+    assert line["big"] == "<int>" and line["ok"] == 10**30 and line["nested"] == ["<int>"]

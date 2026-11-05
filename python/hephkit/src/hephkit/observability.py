@@ -51,6 +51,7 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import decimal
+import enum
 import logging
 import threading
 import uuid
@@ -92,7 +93,17 @@ REDACTED_KEYS: Final[frozenset[str]] = frozenset(
 
 
 def _is_redacted(key: object, words: frozenset[str]) -> bool:
-    k = _normalise(key.decode("utf-8", "replace") if isinstance(key, bytes) else str(key))
+    if isinstance(key, bytes):
+        k = _normalise(key.decode("utf-8", "replace"))
+    elif isinstance(key, _JSON_KEYS):
+        try:
+            k = _normalise(str(key))
+        except ValueError:  # integer beyond Python's int-to-str digit limit
+            return True
+    else:
+        # A key we cannot name (tuple, custom object) cannot be shown to be
+        # safe, so its value is withheld rather than risk leaking it.
+        return True
     return any(k == w or k.startswith(w + "_") or k.endswith("_" + w) for w in words)
 
 
@@ -103,15 +114,35 @@ def _placeholder(obj: object) -> str:
 
 
 _JSON_KEYS: Final = (str, int, float, bool, type(None))
-_STRINGIFIED: Final = (datetime.date, datetime.time, decimal.Decimal, uuid.UUID, PurePath)
+_STRINGIFIED: Final = (datetime.date, datetime.time, datetime.timedelta, decimal.Decimal, uuid.UUID, PurePath)
+_OPAQUE_BYTES: Final = (bytearray, memoryview)
+
+
+def _emit_key(key: object) -> object:
+    """The key as the renderer will see it. Never ``str()``/``repr()`` an
+    arbitrary object: that is the leak the type-name fallback exists to close."""
+    if isinstance(key, bytes):
+        return key.decode("utf-8", "replace")
+    if isinstance(key, int) and not isinstance(key, bool):
+        try:
+            str(key)
+        except ValueError:  # beyond Python's int-to-str digit limit
+            return _placeholder(key)
+        return key
+    if isinstance(key, _JSON_KEYS):
+        return key
+    return _placeholder(key)
 
 
 def _redact_value(value: object, depth: int, words: frozenset[str]) -> object:
     if depth > _MAX_DEPTH:
         return _TRUNCATED
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
     try:
+        if value is None or isinstance(value, (str, float, bool)):
+            return value
+        if isinstance(value, int):
+            str(value)  # raises beyond Python's int-to-str digit limit
+            return value
         return _redact_container(value, depth, words)
     except Exception:  # a logging call must never raise
         return _placeholder(value)
@@ -123,15 +154,15 @@ def _redact_container(value: object, depth: int, words: frozenset[str]) -> objec
 
     if isinstance(value, Mapping):
         return {
-            (k if isinstance(k, _JSON_KEYS) else str(k)): REDACTED if _is_redacted(k, words) else sub(v)
+            _emit_key(k): REDACTED if _is_redacted(k, words) else sub(v)
             for k, v in value.items()
         }
     if isinstance(value, ItemsView):
         return sub(dict(value))
     if isinstance(value, tuple):
         return tuple(sub(v) for v in value)
-    if isinstance(value, (str, bytes, bytearray)):
-        return _placeholder(value) if not isinstance(value, str) else value
+    if isinstance(value, (bytes, *_OPAQUE_BYTES)):
+        return _placeholder(value)
     if isinstance(value, (Sequence, AbstractSet, ValuesView)):
         return [sub(v) for v in value]
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
@@ -139,6 +170,8 @@ def _redact_container(value: object, depth: int, words: frozenset[str]) -> objec
     dump = getattr(type(value), "model_dump", None)  # pydantic models, without importing pydantic
     if callable(dump):
         return sub(dump(value))
+    if isinstance(value, enum.Enum):
+        return sub(value.value)
     if isinstance(value, _STRINGIFIED):
         return value.isoformat() if isinstance(value, (datetime.date, datetime.time)) else str(value)
     return value  # left to the renderer, whose fallback is the type name
