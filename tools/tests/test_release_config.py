@@ -185,6 +185,21 @@ def test_wheels_cover_the_required_targets() -> None:
         assert needle in text, needle
 
 
+def test_breaking_changes_stay_in_zero_x() -> None:
+    """Release-please's default for a 0.x version is to bump a breaking change
+    to 1.0.0. Phase 1 carries two `feat(money)!:` commits, so without this the
+    first published version is 1.0.0 -- and the first release run computed
+    exactly that before it was blocked.
+
+    1.0.0 is the semver claim that the API is committed. ADR 0015 says the
+    opposite: "Everything in Phase 1 ships labelled `experimental`", and
+    `stable` requires "use by two ingots in production, and passing ecosystem
+    CI" -- there are no production ingots and every ecosystem row is disabled.
+    So the version must stay in 0.x until the maturity labels say otherwise."""
+    cfg = json.loads((ROOT / "release-please-config.json").read_text())
+    assert cfg["bump-minor-pre-major"] is True
+
+
 def test_ecosystem_enables_no_row_yet() -> None:
     """No row is enabled: examples/hello is the only candidate and Task 15 has
     not landed its tutorial script. This assertion used to read
