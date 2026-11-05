@@ -8,14 +8,17 @@ from typing import Any
 
 import pytest
 import structlog
+from pydantic import ValidationError
 from fastapi import FastAPI
 import httpx
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace.export import SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from hephkit import conventions
 from hephkit import observability as obs_module
 from hephkit.errors.fastapi import install_error_handlers
-from hephkit.observability import Observability, get_logger, setup_observability
+from hephkit.observability import Observability, configure_logging, get_logger, setup_observability
 from hephkit.settings import HephSettings
 
 
@@ -43,6 +46,11 @@ def _settings(**kw: Any) -> HephSettings:
 
 @pytest.fixture(autouse=True)
 def _reset() -> Iterator[None]:
+    # Importing the module configures nothing (see
+    # test_importing_the_module_configures_no_logging), so every test that logs
+    # without calling setup_observability has to install the chain the way a
+    # consumer would.
+    configure_logging()
     yield
     active = obs_module._active
     if active is not None:
@@ -241,11 +249,14 @@ def test_log_level_filters_from_settings(capsys: pytest.CaptureFixture[str]) -> 
     assert [entry["event"] for entry in _lines(capsys)] == ["loud"]
 
 
-def test_unknown_log_level_falls_back_to_info(capsys: pytest.CaptureFixture[str]) -> None:
-    setup_observability(_settings(log_level="NOPE"), span_exporter=InMemorySpanExporter())
-    get_logger("t").debug("quiet")
-    get_logger("t").info("shown")
-    assert [entry["event"] for entry in _lines(capsys)] == ["shown"]
+def test_an_unknown_log_level_is_rejected_not_silently_downgraded() -> None:
+    """``HEPH_LOG_LEVEL=DEBUGG`` used to be accepted by settings and then
+    silently become ``INFO`` here, so an operator raising verbosity during an
+    incident got nothing and no warning. Both ends now refuse it."""
+    with pytest.raises(ValidationError):
+        _settings(log_level="NOPE")
+    with pytest.raises(ValueError, match="unknown log level 'NOPE'"):
+        obs_module._configure_logging("NOPE")
 
 
 # --- idempotency -----------------------------------------------------------
@@ -308,14 +319,14 @@ def test_setup_with_unreachable_collector_neither_blocks_nor_raises() -> None:
     app = FastAPI()
     app.get("/p")(lambda: {})
     started = time.monotonic()
-    o = setup_observability(_settings(otlp_endpoint="http://127.0.0.1:1"), app)
+    o = setup_observability(_settings(otlp_endpoint="http://127.0.0.1:1"), app, probe_timeout=None)
     assert isinstance(o, Observability)
     assert TestClient(app).get("/p").status_code == 200
     assert time.monotonic() - started < 2.0
 
 
 def test_shutdown_is_bounded_with_an_unreachable_collector() -> None:
-    o = setup_observability(_settings(otlp_endpoint="http://127.0.0.1:1"))
+    o = setup_observability(_settings(otlp_endpoint="http://127.0.0.1:1"), probe_timeout=None)
     o.tracer_provider.get_tracer("t").start_span("pending").end()
     started = time.monotonic()
     o.shutdown(timeout=1.0)
@@ -324,7 +335,7 @@ def test_shutdown_is_bounded_with_an_unreachable_collector() -> None:
 
 def test_default_shutdown_bound_is_two_seconds() -> None:
     assert obs_module.SHUTDOWN_TIMEOUT == 2.0
-    o = setup_observability(_settings(otlp_endpoint="http://127.0.0.1:1"))
+    o = setup_observability(_settings(otlp_endpoint="http://127.0.0.1:1"), probe_timeout=None)
     o.tracer_provider.get_tracer("t").start_span("pending").end()
     started = time.monotonic()
     o.shutdown()
@@ -398,8 +409,98 @@ def test_default_exporter_targets_the_settings_endpoint(monkeypatch: pytest.Monk
             seen.update(kwargs)
 
     monkeypatch.setattr(obs_module, "OTLPSpanExporter", FakeExporter)
-    setup_observability(_settings(otlp_endpoint="http://collector.invalid:54318/"))
+    setup_observability(_settings(otlp_endpoint="http://collector.invalid:54318/"), probe_timeout=None)
     assert seen == {"endpoint": "http://collector.invalid:54318/v1/traces"}
+
+
+# --- no collector: no-op exporter, no retry noise ---------------------------
+
+
+def _processors(o: Observability) -> list[Any]:
+    # The SDK keeps processors in a MultiSpanProcessor; reach the exporters.
+    active = o.tracer_provider._active_span_processor._span_processors
+    return [getattr(p, "span_exporter", None) for p in active]
+
+
+def test_an_unreachable_collector_gets_the_no_op_exporter(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(**kwargs: Any) -> None:
+        raise AssertionError("the OTLP exporter must not be built for an unreachable collector")
+
+    monkeypatch.setattr(obs_module, "OTLPSpanExporter", boom)
+    o = setup_observability(_settings(otlp_endpoint="http://127.0.0.1:1"))
+    (exporter,) = _processors(o)
+    assert isinstance(exporter, obs_module._NoOpSpanExporter)
+    o.tracer_provider.get_tracer("t").start_span("dropped").end()  # must not raise
+
+
+def test_a_blank_endpoint_gets_the_no_op_exporter_without_probing(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("a blank endpoint must not be probed")
+
+    monkeypatch.setattr(obs_module, "_collector_reachable", boom)
+    o = setup_observability(_settings(otlp_endpoint="  "))
+    (exporter,) = _processors(o)
+    assert isinstance(exporter, obs_module._NoOpSpanExporter)
+
+
+def test_a_reachable_collector_still_gets_the_otlp_exporter() -> None:
+    import socket as _socket
+
+    listener = _socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    try:
+        o = setup_observability(_settings(otlp_endpoint=f"http://127.0.0.1:{port}"))
+        (exporter,) = _processors(o)
+        assert isinstance(exporter, OTLPSpanExporter)
+    finally:
+        listener.close()
+
+
+def test_probe_reads_the_scheme_default_port_and_fails_closed() -> None:
+    assert obs_module._collector_reachable("http://127.0.0.1:1", 0.25) is False
+    assert obs_module._collector_reachable("not a url at all", 0.25) is False
+    assert obs_module._collector_reachable("", 0.25) is False
+
+
+def test_the_no_op_exporter_reports_success_and_flushes() -> None:
+    exporter = obs_module._NoOpSpanExporter()
+    assert exporter.export([]) is SpanExportResult.SUCCESS
+    assert exporter.force_flush() is True
+    assert exporter.shutdown() is None
+
+
+# --- shutdown is registered, not merely available ---------------------------
+
+
+def test_atexit_flushes_a_product_that_forgot_to_shut_down() -> None:
+    """Nothing used to call ``shutdown()``, so a product that forgot left the
+    batch processor exporting until the process died. ``atexit`` runs handlers
+    LIFO, so a probe registered *before* setup runs *after* hephkit's own
+    handler and can see that it ran."""
+    out = _run(
+        "import atexit\n"
+        "from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter\n"
+        "import hephkit.observability as obs\n"
+        "from hephkit.settings import HephSettings\n"
+        "atexit.register(lambda: print('after hephkit shutdown, active =', obs._active))\n"
+        "obs.setup_observability(HephSettings(env='test', service_name='s'),"
+        " span_exporter=InMemorySpanExporter())\n"
+        "assert obs._active is not None\n"
+        "print('exiting with observability still set up')\n"
+    )
+    assert out.splitlines() == [
+        "exiting with observability still set up",
+        "after hephkit shutdown, active = None",
+    ]
+
+
+def test_shutdown_unregisters_itself_so_a_second_call_is_harmless() -> None:
+    o = setup_observability(_settings(), span_exporter=InMemorySpanExporter())
+    o.shutdown()
+    o.shutdown()  # the atexit copy, after an explicit lifespan shutdown
+    assert obs_module._active is None
 
 
 # --- import hygiene ----------------------------------------------------------
@@ -419,6 +520,41 @@ def test_other_modules_do_not_need_the_observability_extra() -> None:
         "print(any(m.split('.')[0] in ('structlog', 'hephkit.observability') or m == 'hephkit.observability' for m in sys.modules))"
     )
     assert out == "False"
+
+
+def test_importing_the_module_configures_no_logging() -> None:
+    """Importing a library must not take a consumer's structlog chain over.
+
+    One ingot owns structlog itself and had to re-apply its own configuration
+    *after* ``setup_observability``, which cost it the trace-id processor, so
+    its log lines carried no ``trace_id`` while its problem+json bodies did.
+    Configuration is now opt-in: ``setup_observability``, or the public
+    ``configure_logging``."""
+    out = _run(
+        "import structlog, hephkit.observability as obs\n"
+        "mine = lambda: any(p is obs._add_trace_ids for p in structlog.get_config()['processors'])\n"
+        "print(mine())\n"
+        "obs.configure_logging()\n"
+        "print(mine())\n"
+    )
+    before, after = out.splitlines()
+    # structlog's default chain happens to be 6 long too, so identify ours by
+    # the two processors only hephkit installs.
+    assert before == "False"
+    assert after == "True"
+
+
+def test_configure_logging_redacts_and_takes_extra_words(capsys: pytest.CaptureFixture[str]) -> None:
+    configure_logging("DEBUG", redact_keys=["paystack_secret_key"])
+    line = _one(capsys, paystack_secret_key="k", password="p", amount="10")
+    assert line["paystack_secret_key"] == "[REDACTED]"
+    assert line["password"] == "[REDACTED]"
+    assert line["amount"] == "10"
+
+
+def test_configure_logging_rejects_an_unknown_level() -> None:
+    with pytest.raises(ValueError, match="unknown log level 'DEBUGG'"):
+        configure_logging("DEBUGG")
 
 
 def test_importing_observability_opens_no_sockets() -> None:

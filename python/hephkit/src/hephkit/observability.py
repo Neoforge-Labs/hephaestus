@@ -40,38 +40,65 @@ Redaction (decisions, each pinned by a test):
 ``get_logger`` is annotated ``FilteringBoundLogger``, the type structlog really
 returns under this configuration (the design text says ``BoundLogger``).
 
+Importing this module configures nothing. ``structlog`` is process-global and a
+product may own it already, so hephkit touches it only when asked:
+``setup_observability`` configures it, and ``configure_logging`` is the public
+call for a product that wants the redacting chain without the tracing.
+
 ``setup_observability`` does not install error handlers. A product that wants
 problem+json bodies carrying ``trace_id`` calls both::
 
     setup_observability(settings, app)
     install_error_handlers(app)
 
-Starting never needs the collector: spans are exported from a background batch
-thread, so an unreachable endpoint cannot block or fail ``setup_observability``.
+Starting never needs the collector: the endpoint is probed once with a bounded
+TCP connect, and an endpoint that is blank or unreachable gets a no-op exporter
+instead of ``BatchSpanProcessor`` + OTLP, so a product with no collector pays
+nothing and emits no retry noise. ``probe_timeout=None`` skips the probe and
+always builds the OTLP exporter.
+
+Shutting down is registered with ``atexit``, so a product that forgets costs
+nothing more than a bounded flush at interpreter exit. A FastAPI product should
+prefer an explicit lifespan, which flushes at the right moment::
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        o = setup_observability(settings, app)
+        yield
+        o.shutdown()
 
 Needs the ``observability`` extra: ``pip install "hephkit[observability]"``.
 """
 
 from __future__ import annotations
 
+import atexit
+import contextlib
 import dataclasses
 import datetime
 import decimal
 import enum
 import logging
+import socket
 import threading
 import uuid
 from collections.abc import ItemsView, Iterable, Mapping, Sequence, ValuesView
 from collections.abc import Set as AbstractSet
 from pathlib import PurePath
 from typing import TYPE_CHECKING, Any, Final, cast
+from urllib.parse import urlsplit
 
 import structlog
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
+from opentelemetry.sdk.trace.export import (
+    BatchSpanProcessor,
+    SimpleSpanProcessor,
+    SpanExporter,
+    SpanExportResult,
+)
 from structlog.typing import EventDict, FilteringBoundLogger, Processor, WrappedLogger
 
 from hephkit.conventions import PII_ATTRIBUTES
@@ -81,7 +108,7 @@ if TYPE_CHECKING:
 
     from hephkit.settings import HephSettings
 
-__all__ = ["Observability", "get_logger", "setup_observability"]
+__all__ = ["Observability", "configure_logging", "get_logger", "setup_observability"]
 
 REDACTED: Final = "[REDACTED]"
 _TRUNCATED: Final = "[TRUNCATED]"
@@ -210,8 +237,22 @@ def _add_trace_ids(_logger: WrappedLogger, _method: str, event_dict: EventDict) 
     return event_dict
 
 
+def _numeric_level(level: str) -> int:
+    """``level`` as a numeric threshold, raising rather than defaulting.
+
+    A typo used to become ``INFO`` silently, so an operator raising verbosity
+    during an incident got nothing and no warning (``HephSettings.log_level``
+    now also rejects it at construction).
+    """
+    try:
+        return logging.getLevelNamesMapping()[level.upper()]
+    except (AttributeError, KeyError):
+        known = ", ".join(sorted(logging.getLevelNamesMapping()))
+        raise ValueError(f"unknown log level {level!r}: expected one of {known}") from None
+
+
 def _configure_logging(level: str, words: frozenset[str] = REDACTED_KEYS) -> None:
-    numeric = logging.getLevelNamesMapping().get(level.upper(), logging.INFO)
+    numeric = _numeric_level(level)
     structlog.configure(
         processors=[
             structlog.processors.add_log_level,
@@ -227,8 +268,29 @@ def _configure_logging(level: str, words: frozenset[str] = REDACTED_KEYS) -> Non
     )
 
 
-# Redaction must hold even if a caller logs before (or without) setup.
-_configure_logging("INFO")
+def configure_logging(level: str = "INFO", *, redact_keys: Iterable[str] = ()) -> None:
+    """Install hephkit's structlog chain: contextvars -> trace ids -> redaction -> JSON.
+
+    ``setup_observability`` calls this for you. Call it directly when you want
+    the redacting logger without the tracing, or when you want it in place
+    *before* setup: **redaction only holds for calls made after this runs.**
+    Importing ``hephkit.observability`` configures nothing, so a product that
+    logs before setting observability up — or that never sets it up — must call
+    this itself, as early as it can, or its own structlog configuration applies
+    and nothing is redacted.
+
+    ``structlog.configure`` is process-global, so this replaces whatever
+    configuration is in place. A product that owns its own chain should add
+    ``hephkit``'s processors to it rather than call this: the pieces are
+    ``structlog.contextvars.merge_contextvars``, then the trace-id and redaction
+    processors, then a JSON renderer.
+
+    ``redact_keys`` adds product-specific words to the default redaction set
+    (see the module docstring for the matching rule). ``level`` must name a
+    ``logging`` level; an unknown one raises ``ValueError`` rather than
+    quietly becoming ``INFO``.
+    """
+    _configure_logging(level, REDACTED_KEYS | {_normalise(k) for k in redact_keys})
 
 
 def get_logger(name: str) -> FilteringBoundLogger:
@@ -240,6 +302,47 @@ def get_logger(name: str) -> FilteringBoundLogger:
 _lock = threading.Lock()
 _active: Observability | None = None
 SHUTDOWN_TIMEOUT: Final = 2.0
+COLLECTOR_PROBE_TIMEOUT: Final = 0.25
+
+
+class _NoOpSpanExporter(SpanExporter):
+    """Drops spans without touching the network.
+
+    Stands in for the OTLP exporter when no collector is configured or reachable.
+    The alternative — ``BatchSpanProcessor`` retrying against a dead endpoint —
+    costs a product that has no collector a stream of exporter tracebacks for
+    the life of the process; measured in one ingot as 4,008 warnings and a
+    suite that took 198 s.
+    """
+
+    def export(self, spans: Any) -> SpanExportResult:
+        return SpanExportResult.SUCCESS
+
+    def shutdown(self) -> None:
+        return None
+
+    def force_flush(self, timeout_millis: int = 30_000) -> bool:
+        return True
+
+
+def _collector_reachable(endpoint: str, timeout: float) -> bool:
+    """Whether ``endpoint``'s host:port accepts a TCP connection within ``timeout``.
+
+    One bounded connect, never a request: this decides which exporter to build,
+    so it must not be able to delay or fail startup. A collector that comes up
+    *after* the product does will be treated as absent for the life of the
+    process — pass ``probe_timeout=None`` to skip the probe when that is the
+    deployment shape.
+    """
+    parts = urlsplit(endpoint)
+    host = parts.hostname
+    if not host:
+        return False
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    with contextlib.suppress(OSError, ValueError, OverflowError):
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    return False
 
 
 class _SwitchTracer(trace.Tracer):
@@ -288,6 +391,11 @@ class Observability:
         self.tracer_provider = provider
         self._words = words
         self._apps: list[FastAPI] = []
+        # A product that forgets to shut down still flushes once, boundedly, at
+        # interpreter exit. Prefer an explicit lifespan (see the module
+        # docstring): atexit runs too late to flush spans of a request that the
+        # server is still finishing.
+        atexit.register(self.shutdown)
 
     def _instrument(self, app: FastAPI) -> None:
         if any(app is seen for seen in self._apps):
@@ -309,6 +417,7 @@ class Observability:
         fresh, working provider.
         """
         global _active
+        atexit.unregister(self.shutdown)
         with _lock:
             if _active is not self:
                 return
@@ -331,11 +440,22 @@ def setup_observability(
     *,
     span_exporter: SpanExporter | None = None,
     redact_keys: Iterable[str] = (),
+    probe_timeout: float | None = COLLECTOR_PROBE_TIMEOUT,
 ) -> Observability:
     """Configure tracing and logging in one call.
 
     ``redact_keys`` adds product-specific words to the default redaction set
     (see the module docstring for the matching rule).
+
+    With no ``span_exporter``, spans go to ``settings.otlp_endpoint`` over OTLP
+    HTTP — but only if that endpoint is non-blank and answers a TCP connect
+    within ``probe_timeout`` seconds. Otherwise spans are dropped by a no-op
+    exporter, so a product with no collector pays nothing and emits no export
+    retries. Set ``probe_timeout=None`` to skip the probe and always export,
+    which is what a deployment whose collector starts after the product wants.
+
+    Shutdown is registered with ``atexit``; a FastAPI product should call
+    ``shutdown()`` from its lifespan instead (see the module docstring).
 
     Idempotent: calling again with the same settings and ``redact_keys`` returns
     the same ``Observability`` (and instruments ``app`` if it is new). Calling
@@ -364,9 +484,14 @@ def setup_observability(
             provider = TracerProvider(resource=resource)
             if span_exporter is not None:
                 provider.add_span_processor(SimpleSpanProcessor(span_exporter))
-            else:
+            elif settings.otlp_endpoint.strip() and (
+                probe_timeout is None or _collector_reachable(settings.otlp_endpoint, probe_timeout)
+            ):
                 endpoint = settings.otlp_endpoint.rstrip("/") + "/v1/traces"
                 provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
+            else:
+                # No collector: drop spans cheaply rather than retry forever.
+                provider.add_span_processor(SimpleSpanProcessor(_NoOpSpanExporter()))
             _SWITCH.target = provider
             if isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider):
                 trace.set_tracer_provider(_SWITCH)

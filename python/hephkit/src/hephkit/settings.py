@@ -15,7 +15,12 @@ from typing import Any, ClassVar, Literal, Self
 from pydantic import SecretStr, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-__all__ = ["HephSettings", "SettingsError"]
+__all__ = ["HephSettings", "LogLevel", "SettingsError"]
+
+# The levels hephkit configures structlog with. A typo used to be accepted here
+# and then silently became INFO in `observability._configure_logging`, so an
+# operator raising verbosity during an incident got nothing and no warning.
+LogLevel = Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
 
 
 class SettingsError(RuntimeError):
@@ -60,7 +65,7 @@ class HephSettings(BaseSettings):
     service_name: str
     otlp_endpoint: str = "http://localhost:54318"
     database_url: SecretStr | None = None
-    log_level: str = "INFO"
+    log_level: LogLevel = "INFO"
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
