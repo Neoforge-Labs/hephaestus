@@ -1,0 +1,29 @@
+# Stripe webhook forwarder. maturity: experimental
+# Deliberately different from the other fragments: it needs a real
+# STRIPE_API_KEY (test-mode key), so the compose run fails fast without one,
+# and nothing depends on it, so a product that does not use Stripe is never
+# blocked by it. The boot test brings up everything except this fragment.
+# Set STRIPE_FORWARD_TO to the app's webhook URL; the default targets a
+# host-run app on port 8000.
+services:
+  stripe:
+    image: stripe/stripe-cli:v1.55.8
+    command:
+      - listen
+      - --api-key
+      - ${STRIPE_API_KEY:?STRIPE_API_KEY is required for the stripe fragment}
+      - --forward-to
+      - ${STRIPE_FORWARD_TO:-http://host.docker.internal:8000/webhooks/stripe}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - heph-stripe-config:/root/.config/stripe
+    healthcheck:
+      # The CLI exposes no health endpoint; liveness of the listener process.
+      test: ["CMD-SHELL", "pidof stripe >/dev/null 2>&1 || ps | grep -q '[s]tripe listen'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  heph-stripe-config:

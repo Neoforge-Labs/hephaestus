@@ -1,0 +1,12 @@
+language: 'unknown'
+layer: 'tool'
+
+tasks:
+  test:
+    command: 'bash test/boot_test.sh'
+    inputs:
+      - '*.yaml'
+      - 'seaweedfs-s3.json'
+      - 'test/boot_test.sh'
+    options:
+      cache: false

@@ -1,0 +1,22 @@
+# Traces, metrics, logs and profiles in one container. maturity: experimental
+# DEV AND TEST ONLY. grafana/otel-lgtm bundles the OTel Collector, Prometheus,
+# Tempo, Loki, Pyroscope and Grafana into a single container: right for a
+# laptop, wrong for production. Never deploy this fragment.
+# Host ports: 54300 Grafana, 54317 OTLP gRPC, 54318 OTLP HTTP.
+services:
+  otel-lgtm:
+    image: grafana/otel-lgtm:0.39.0
+    ports:
+      - "54300:3000"   # Grafana
+      - "54317:4317"   # OTLP gRPC
+      - "54318:4318"   # OTLP HTTP
+    volumes:
+      - heph-lgtm-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/health && curl -s -o /dev/null http://localhost:4318/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  heph-lgtm-data:
