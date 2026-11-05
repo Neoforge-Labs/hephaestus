@@ -41,12 +41,24 @@
 //! **Limits, so the next reader treats this as a tripwire and not a proof.** It
 //! reads text, not a parse tree. It does not see an ordering reached through a
 //! blanket impl in another crate, a macro that expands to one, an `Ord` bound
-//! satisfied outside `src/money/`, or an ordering added to a type the money
-//! types merely contain. Its literal handling covers line comments, nested block
-//! comments, escaped strings and raw strings, but not a `'"'` char literal
-//! (none exists here). The second test in this file guards against the guard
+//! satisfied outside `src/money/`, an alias import such as
+//! `use std::cmp::PartialOrd as P`, or an ordering added to a type the money
+//! types merely contain. The second test in this file guards against the guard
 //! going vacuous, which is the failure mode that would otherwise hide all of
 //! the above.
+//!
+//! One limit is not merely missed but *blinding*, so it is refused outright
+//! rather than documented. The stripper handles line comments, nested block
+//! comments, escaped strings and raw strings, but a `'"'` char literal would
+//! open a phantom string: everything after it **in that file** is discarded, so
+//! every derive and impl below it becomes invisible and the scan passes in
+//! silence — the one outcome a guard must never produce. Since a new ordering
+//! impl would most likely be appended at the end of a file, below any helper
+//! that introduced the literal, this is the live shape of the risk rather than
+//! a theoretical one. [`money_sources`] therefore refuses to run if any source
+//! holds such a literal, so the blindness surfaces as a stop with instructions.
+//! None exists today; the plausible route in is a JSON-escape helper needing
+//! `c == '"'`.
 
 use std::path::{Path, PathBuf};
 
@@ -54,10 +66,23 @@ use std::path::{Path, PathBuf};
 /// `PartialOrd`, but both are listed so a failure names the one it found.
 const FORBIDDEN: [&str; 2] = ["PartialOrd", "Ord"];
 
-/// Every `.rs` file under `src/money/`, as (path relative to the crate, code).
-/// The text has been through [`code_only`], so comments and literals are gone.
-/// Recurses, so a future submodule directory is covered.
-fn money_sources() -> Vec<(String, String)> {
+/// One scanned file: its path relative to the crate, its text as written, and
+/// that text with comments and string literals removed by [`code_only`].
+struct Source {
+    file: String,
+    raw: String,
+    code: String,
+}
+
+/// A char literal holding a double quote defeats [`code_only`] silently, so
+/// finding one is a hard stop rather than a documented limit. Both spellings
+/// are listed; `b'"'` contains the first.
+const BLINDING: [&str; 2] = ["'\"'", "'\\\"'"];
+
+/// Every `.rs` file under `src/money/`. Recurses, so a future submodule
+/// directory is covered, and refuses to return anything at all if a source
+/// holds a sequence that would blind the scan.
+fn money_sources() -> Vec<Source> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut found = Vec::new();
     collect(&root.join("src/money"), &root, &mut found);
@@ -65,11 +90,32 @@ fn money_sources() -> Vec<(String, String)> {
         !found.is_empty(),
         "no .rs files found under src/money: this guard is reading the wrong place"
     );
-    found.sort();
+    found.sort_by(|a, b| a.file.cmp(&b.file));
+    for source in &found {
+        if let Some(sequence) = blinding_sequence(&source.raw) {
+            panic!(
+                "{}: holds the char literal {sequence}, which this guard cannot read past.\n\n\
+                 `code_only` treats the double quote as the start of a string literal, so \
+                 everything after it in this file is discarded: every derive and impl below it \
+                 goes unseen and the scan passes in silence, while the module may derive an \
+                 ordering. Stopping here instead, because a guard that goes quiet is worse than \
+                 no guard.\n\
+                 To fix: teach `code_only` to consume char literals (after `'`, a `\\` escape or \
+                 a single character followed by `'` is a literal; anything else is a lifetime), \
+                 then drop this check. Do not work around it by rewriting the source.",
+                source.file
+            );
+        }
+    }
     found
 }
 
-fn collect(dir: &Path, root: &Path, out: &mut Vec<(String, String)>) {
+/// The first sequence in `source` that would blind [`code_only`], if any.
+fn blinding_sequence(source: &str) -> Option<&'static str> {
+    BLINDING.into_iter().find(|s| source.contains(s))
+}
+
+fn collect(dir: &Path, root: &Path, out: &mut Vec<Source>) {
     let entries =
         std::fs::read_dir(dir).unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
     for entry in entries {
@@ -83,8 +129,12 @@ fn collect(dir: &Path, root: &Path, out: &mut Vec<(String, String)>) {
                 .strip_prefix(root)
                 .unwrap_or(&path)
                 .to_string_lossy()
-                .into_owned();
-            out.push((label, code_only(&text)));
+                .replace('\\', "/");
+            out.push(Source {
+                file: label,
+                code: code_only(&text),
+                raw: text,
+            });
         }
     }
 }
@@ -260,11 +310,12 @@ fn has_identifier(haystack: &str, needle: &str) -> bool {
 
 #[test]
 fn the_money_module_derives_and_implements_no_ordering() {
-    for (file, source) in money_sources() {
-        let constructs = derive_spans(&source)
+    for source in money_sources() {
+        let file = &source.file;
+        let constructs = derive_spans(&source.code)
             .into_iter()
             .map(|d| ("derive", d))
-            .chain(impl_headers(&source).into_iter().map(|i| ("impl", i)));
+            .chain(impl_headers(&source.code).into_iter().map(|i| ("impl", i)));
         for (kind, text) in constructs {
             for trait_name in FORBIDDEN {
                 assert!(
@@ -292,10 +343,10 @@ fn the_money_module_derives_and_implements_no_ordering() {
 #[test]
 fn the_guard_still_sees_what_it_claims_to_see() {
     let sources = money_sources();
-    let names: Vec<&str> = sources.iter().map(|(f, _)| f.as_str()).collect();
+    let names: Vec<&str> = sources.iter().map(|s| s.file.as_str()).collect();
     for required in ["src/money/mod.rs", "src/money/currency.rs"] {
         assert!(
-            names.iter().any(|n| n.replace('\\', "/") == required),
+            names.contains(&required),
             "{required} is not among the files scanned ({names:?})"
         );
     }
@@ -306,16 +357,16 @@ fn the_guard_still_sees_what_it_claims_to_see() {
         ("src/money/mod.rs", "Money"),
         ("src/money/currency.rs", "Currency"),
     ] {
-        let (_, source) = sources
+        let source = sources
             .iter()
-            .find(|(f, _)| f.replace('\\', "/") == file)
+            .find(|s| s.file == file)
             .unwrap_or_else(|| panic!("{file} not scanned"));
         assert!(
-            source.contains(&format!("pub struct {struct_name}")),
+            source.code.contains(&format!("pub struct {struct_name}")),
             "{file}: no `pub struct {struct_name}`; this guard has lost its target"
         );
         assert!(
-            !derive_spans(source).is_empty(),
+            !derive_spans(&source.code).is_empty(),
             "{file}: no `derive(...)` found; this guard would pass vacuously"
         );
     }
@@ -347,13 +398,32 @@ fn the_guard_still_sees_what_it_claims_to_see() {
         derive_spans(&code_only("let s = r#\"derive(Ord)\"#;")).is_empty(),
         "a raw string must not contribute a derive"
     );
+
+    // The blinding sequence, recorded rather than described: a `'"'` char
+    // literal really does make the scan see nothing, and the check really does
+    // catch it. These two assertions are why `money_sources` refuses to run on
+    // a source holding one.
+    let blinded = "let q = '\"';\n#[derive(Ord)]\npub struct X;";
+    assert!(
+        derive_spans(&code_only(blinded)).is_empty(),
+        "the premise of the blinding check has changed: code_only now reads past a '\\\"' char \
+         literal, so the hard stop in money_sources is obsolete and should be replaced by \
+         proper char-literal handling"
+    );
+    assert_eq!(blinding_sequence(blinded), Some("'\"'"));
+    assert_eq!(blinding_sequence("let q = '\\\"';"), Some("'\\\"'"));
+    assert_eq!(blinding_sequence("let c = 'a'; let l: &'static str = \"x\";"), None);
+    // The real sources are clean, which is what lets the scan above mean anything.
+    for source in &sources {
+        assert_eq!(blinding_sequence(&source.raw), None, "{}", source.file);
+    }
     // The real sources still carry their code after stripping.
-    let (_, wire) = sources
+    let wire = sources
         .iter()
-        .find(|(f, _)| f.replace('\\', "/") == "src/money/wire.rs")
+        .find(|s| s.file == "src/money/wire.rs")
         .expect("wire.rs is scanned; it holds the raw strings the stripper must survive");
     assert!(
-        wire.contains("pub(super) fn to_wire_json"),
+        wire.code.contains("pub(super) fn to_wire_json"),
         "stripping literals in wire.rs must not have eaten its code"
     );
 
