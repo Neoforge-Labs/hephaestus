@@ -28,7 +28,7 @@ Redaction (decisions, each pinned by a test):
   cannot leak their fields. Dict keys that JSON cannot carry are stringified.
 * The rule is deliberately over-eager on prefixes: ``token_count`` is redacted
   (prefix ``token_``) while ``tokens_used`` is kept. LLM products that log token
-  counts should name them ``tokens_used`` / ``input_tokens``... or accept it.
+  counts should name them ``tokens_used`` or ``input_tokens``, or accept the redaction.
 * Only keys are inspected. Secrets embedded inside free-text values are not found.
 
 ``get_logger`` is annotated ``FilteringBoundLogger``, the type structlog really
