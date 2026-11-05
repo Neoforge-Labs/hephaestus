@@ -1,0 +1,138 @@
+"""Wrapper-level behaviour for hephkit.hashing and hephkit.signatures."""
+
+import re
+
+import pytest
+
+from hephkit.hashing import (
+    HashingError,
+    canonical_json,
+    content_hash,
+    content_hash_bytes,
+    new_uuid7,
+)
+from hephkit.signatures import SignatureError, sign, verify
+
+SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
+
+
+def test_canonical_json_objects() -> None:
+    assert canonical_json({"b": 1, "a": [True, None, "é", 1.5]}) == (
+        '{"a":[true,null,"é",1.5],"b":1}'
+    )
+    assert content_hash({"a": 2, "b": 1}) == content_hash({"b": 1, "a": 2})
+
+
+def test_nan_and_infinity_are_rejected_by_the_core() -> None:
+    for bad in (float("nan"), float("inf"), {"x": float("-inf")}):
+        with pytest.raises(HashingError) as exc:
+            canonical_json(bad)
+        assert exc.value.code == "HEPH-VAL-422"
+
+
+def test_lone_surrogate_and_duplicate_keys_are_rejected() -> None:
+    with pytest.raises(HashingError) as exc:
+        canonical_json("\ud800")
+    assert exc.value.code == "HEPH-VAL-422"
+    with pytest.raises(HashingError):
+        canonical_json({1: "a", "1": "b"})  # both coerce to member name "1"
+
+
+def test_unserialisable_object_is_a_type_error() -> None:
+    with pytest.raises(TypeError):
+        canonical_json({"x": object()})
+
+
+def test_pathological_nesting_is_an_exception_not_an_abort() -> None:
+    deep: object = []
+    for _ in range(100_000):
+        deep = [deep]
+    with pytest.raises((RecursionError, HashingError)):
+        canonical_json(deep)
+
+
+def test_content_hash_bytes_and_type() -> None:
+    assert content_hash_bytes(b"") == (
+        "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    )
+    with pytest.raises(TypeError):
+        content_hash_bytes("text")  # type: ignore[arg-type]
+
+
+def test_uuid7_shape_and_order() -> None:
+    ids = [new_uuid7() for _ in range(50)]
+    assert all(re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", i) for i in ids)
+    assert ids == sorted(ids)
+
+
+def test_sign_verify_roundtrip_and_defaults() -> None:
+    sig = sign(SECRET, "msg_1", 1_000, b"{}")
+    headers = {
+        "webhook-id": "msg_1",
+        "webhook-timestamp": "1000",
+        "webhook-signature": sig,
+    }
+    assert verify(SECRET, headers, b"{}", now=1_000) is None
+    assert verify(SECRET, headers, b"{}", now=1_300) is None
+    for kwargs in ({"now": 1_301}, {"now": 999_999, "tolerance": 10}):
+        with pytest.raises(SignatureError) as exc:
+            verify(SECRET, headers, b"{}", **kwargs)  # type: ignore[arg-type]
+        assert exc.value.code == "HEPH-WH-401"
+
+
+def test_verify_wall_clock_default() -> None:
+    import time
+
+    ts = int(time.time())
+    sig = sign(SECRET, "m", ts, b"x")
+    headers = {"webhook-id": "m", "webhook-timestamp": str(ts), "webhook-signature": sig}
+    verify(SECRET, headers, b"x")
+    stale = {**headers, "webhook-timestamp": str(ts - 10_000)}
+    with pytest.raises(SignatureError):
+        verify(SECRET, stale, b"x")
+
+
+def test_verify_missing_headers_fail_closed() -> None:
+    with pytest.raises(SignatureError) as exc:
+        verify(SECRET, {}, b"x", now=1)
+    assert exc.value.code == "HEPH-WH-401"
+
+
+def test_negative_and_extreme_tolerance_do_not_abort() -> None:
+    sig = sign(SECRET, "m", 5, b"x")
+    headers = {"webhook-id": "m", "webhook-timestamp": "5", "webhook-signature": sig}
+    with pytest.raises(SignatureError):
+        verify(SECRET, headers, b"x", now=5, tolerance=-1)
+    verify(SECRET, headers, b"x", now=5, tolerance=2**63 - 1)
+    with pytest.raises(OverflowError):
+        verify(SECRET, headers, b"x", now=5, tolerance=2**63)
+
+
+def test_sign_unusable_secret_is_signature_error_with_val_code() -> None:
+    for secret in ("", "whsec_", "!!!not base64"):
+        with pytest.raises(SignatureError) as exc:
+            sign(secret, "m", 1, b"x")
+        assert exc.value.code == "HEPH-VAL-422"
+        assert not isinstance(exc.value, HashingError)
+
+
+def test_non_utf8_and_huge_payloads() -> None:
+    sig = sign(SECRET, "m", 1, b"\xff\xfe\x00")
+    assert sig.startswith("v1,")
+    big = b"a" * (64 * 1024 * 1024)
+    assert sign(SECRET, "m", 1, big).startswith("v1,")
+    with pytest.raises(TypeError):
+        sign(SECRET, "m", 1, "text")  # type: ignore[arg-type]
+    with pytest.raises(UnicodeEncodeError):
+        sign(SECRET, "m\ud800", 1, b"")  # lone surrogate cannot be UTF-8
+
+
+def test_huge_string_inputs() -> None:
+    from hephkit.money import Money, MoneyError
+
+    with pytest.raises(MoneyError):
+        Money.parse("1" * 10_000_000, "KES")
+    with pytest.raises(MoneyError):
+        Money.parse("1." + "0" * 10_000_000, "KES")
+    assert Money.parse("0." + "0" * 10_000_000, "KES", "down").minor == 0
+    assert len(canonical_json("x" * 10_000_000)) == 10_000_002

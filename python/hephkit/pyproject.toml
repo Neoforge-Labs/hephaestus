@@ -1,0 +1,47 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "hephkit"
+version = "0.1.0"
+description = "Hephaestus correctness kit: money, canonical JSON, content hashing and webhook signatures over the Rust core (experimental)"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = []
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Rust",
+    "Typing :: Typed",
+]
+
+[dependency-groups]
+dev = [
+    "maturin>=1.7,<2",
+    "pytest>=8",
+    "pytest-cov>=5",
+    "hypothesis>=6.100",
+    "mypy>=1.11",
+]
+
+[tool.maturin]
+python-source = "src"
+module-name = "hephkit._core"
+manifest-path = "../../core/hephkit-py/Cargo.toml"
+features = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["hephkit"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.mypy]
+strict = true
+python_version = "3.12"

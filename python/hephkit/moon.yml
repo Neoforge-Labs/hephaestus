@@ -1,0 +1,18 @@
+language: 'python'
+layer: 'library'
+
+tasks:
+  test:
+    script: 'uv run maturin develop --uv && uv run pytest --cov=hephkit --cov-fail-under=90'
+    inputs:
+      - 'src/**/*'
+      - 'tests/**/*'
+      - 'pyproject.toml'
+      - '/core/hephkit-core/**/*'
+      - '/core/hephkit-py/**/*'
+      - '/conformance/**/*.json'
+  typecheck:
+    command: 'uv run mypy --strict src'
+    inputs:
+      - 'src/**/*'
+      - 'pyproject.toml'

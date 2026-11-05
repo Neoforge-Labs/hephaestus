@@ -1,0 +1,21 @@
+[package]
+name = "hephkit-py"
+version = "0.1.0"
+description = "PyO3 bindings for hephkit-core, exposed to Python as hephkit._core (experimental)"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+hephkit-core = { path = "../hephkit-core" }
+pyo3 = { version = "0.30", features = ["abi3-py312", "extension-module"] }
+
+[lints.rust]
+# The PyO3 macros expand to unsafe FFI glue; hand-written code in this crate
+# contains none, so `deny` (not `forbid`) lets the macro expansions through.
+unsafe_code = "deny"

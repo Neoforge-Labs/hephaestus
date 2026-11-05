@@ -1,0 +1,50 @@
+"""Type stubs for the compiled extension module ``hephkit._core``.
+
+Experimental. Everything here is thin glue over ``hephkit-core``; the Python
+modules ``hephkit.money``, ``hephkit.hashing`` and ``hephkit.signatures`` are
+the public surface.
+"""
+
+from collections.abc import Sequence
+from typing import Final
+
+DEFAULT_TOLERANCE_SECS: Final[int]
+
+class MoneyError(ValueError):
+    code: str
+
+class SignatureError(ValueError):
+    code: str
+
+class HashingError(ValueError):
+    code: str
+
+def money_check(minor: int, currency: str) -> tuple[int, str]: ...
+def money_parse(amount: str, currency: str, rounding: str) -> tuple[int, str]: ...
+def money_to_decimal(minor: int, currency: str) -> str: ...
+def money_add(
+    a_minor: int, a_currency: str, b_minor: int, b_currency: str
+) -> tuple[int, str]: ...
+def money_sub(
+    a_minor: int, a_currency: str, b_minor: int, b_currency: str
+) -> tuple[int, str]: ...
+def money_neg(minor: int, currency: str) -> tuple[int, str]: ...
+def money_allocate(
+    minor: int, currency: str, ratios: Sequence[int]
+) -> list[tuple[int, str]]: ...
+def money_from_wire(json: str) -> tuple[int, str]: ...
+def money_to_wire(minor: int, currency: str) -> str: ...
+def canonical_json(json: str) -> str: ...
+def content_hash_json(json: str) -> str: ...
+def content_hash_bytes(data: bytes) -> str: ...
+def new_uuid7() -> str: ...
+def sign(secret: str, msg_id: str, timestamp: int, payload: bytes) -> str: ...
+def verify(
+    secret: str,
+    msg_id: str,
+    timestamp_header: str,
+    signature_header: str,
+    payload: bytes,
+    now: int,
+    tolerance: int,
+) -> None: ...
