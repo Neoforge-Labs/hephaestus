@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -170,3 +171,17 @@ def test_rejects_guidance_equal_to_detail_hint(tmp_path: Path) -> None:
     path.write_text(same)
     errors = check_errors(path)
     assert any("HEPH-GEN-500" in e and "guidance" in e and "detail_hint" in e for e in errors)
+
+
+@pytest.mark.parametrize("field", ["guidance", "detail_hint"])
+@pytest.mark.parametrize("value", ['"   "', "[]", "[x]", "7"])
+def test_rejects_blank_or_non_string_prose(tmp_path: Path, field: str, value: str) -> None:
+    prose = {"detail_hint": "h", "guidance": "g", field: value}
+    entry = (
+        "- {code: HEPH-GEN-500, status: 500, title: t, area: GEN, "
+        f"detail_hint: {prose['detail_hint']}, guidance: {prose['guidance']}}}\n"
+    )
+    path = tmp_path / "errors.yaml"
+    path.write_text(entry)
+    errors = check_errors(path)
+    assert any("HEPH-GEN-500" in e and field in e and "non-empty string" in e for e in errors), errors

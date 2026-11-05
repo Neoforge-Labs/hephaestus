@@ -66,6 +66,10 @@ def _check_errors(path: Path, errors: list[str]) -> None:
         for field in ERROR_FIELDS:
             if entry.get(field) in (None, ""):
                 errors.append(f"{path.name}: {code}: missing '{field}'")
+        for field in ("guidance", "detail_hint"):
+            value = entry.get(field)
+            if value not in (None, "") and not (isinstance(value, str) and value.strip()):
+                errors.append(f"{path.name}: {code}: '{field}' must be a non-empty string")
         if not CODE_RE.fullmatch(code):
             errors.append(f"{path.name}: {code}: code must match {CODE_RE.pattern}")
         else:
