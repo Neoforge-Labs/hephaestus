@@ -303,7 +303,7 @@ def sign(secret: str, msg_id: str, ts: int, payload: str) -> str:
 RAW_PAYLOAD = b"\xff\xfe\x00binary"  # not valid UTF-8
 
 
-def sign_raw(secret: str, msg_id: str, ts: int, payload: bytes) -> str:
+def sign_raw(secret: str, msg_id: str, ts: int | str, payload: bytes) -> str:
     """Standard Webhooks v1 signature over raw bytes, from stdlib primitives only."""
     key = base64.b64decode(secret.removeprefix("whsec_") + "==")
     mac = hmac.new(key, f"{msg_id}.{ts}.".encode() + payload, hashlib.sha256).digest()
@@ -356,7 +356,18 @@ def build_sign() -> list[dict[str, Any]]:
             "expect": {"signature": sign_raw(SECRET, MSG_ID, TS, RAW_PAYLOAD)},
         }
     )
-    by = {c["name"]: c["expect"]["signature"] for c in cases}
+    # Spec 5.2: a secret MUST decode to a non-empty key; signing with one is a
+    # validation error. Pure error expectations, hand-derived from that sentence.
+    for name, secret in [("empty-secret-rejected", ""), ("whsec-prefix-only-secret-rejected", "whsec_")]:
+        cases.append(
+            {
+                "name": name,
+                "input": {"secret": secret, "msg_id": MSG_ID, "timestamp": TS,
+                          "payload_b64": b64("{}")},
+                "expect": {"error": "HEPH-VAL-422"},
+            }
+        )
+    by = {c["name"]: c["expect"]["signature"] for c in cases if "signature" in c["expect"]}
     if by["secret-without-whsec-prefix-is-raw-base64"] != by["reference-example"]:
         raise Disagreement("prefixed and raw secrets sign differently")
     return cases
@@ -457,6 +468,31 @@ def build_verify() -> list[dict[str, Any]]:
                 "expect": {"ok": True} if ok else {"error": WH},
             }
         )
+    # Spec 5.2: the signed content uses the literal webhook-timestamp header
+    # text, while the tolerance check uses its numeric value. "01000" is signed
+    # as "01000" (not "1000") and is within tolerance of now=1010. The package
+    # formats integers and cannot emit it, so the MAC is built from stdlib only.
+    lz_payload = b'{"leading":"zero"}'
+    cases.append(
+        {
+            "name": "leading-zero-timestamp-literal-header-text-signed-numeric-value-for-tolerance",
+            "input": {"secret": SECRET, "headers": headers(sign_raw(SECRET, MSG_ID, "01000", lz_payload), ts="01000"),
+                      "payload_b64": base64.b64encode(lz_payload).decode("ascii"), "now": 1010},
+            "expect": {"ok": True},
+        }
+    )
+    # Spec 5.2: a secret that decodes to an empty key is never usable. The
+    # signature is a well-formed HMAC under the empty key (stdlib), which a
+    # careless implementation would accept; expected HEPH-WH-401 (spec 5.6).
+    empty_key_mac = hmac.new(b"", f"{MSG_ID}.{TS}.".encode() + lz_payload, hashlib.sha256).digest()
+    cases.append(
+        {
+            "name": "empty-key-secret-rejected-even-with-matching-empty-key-mac",
+            "input": {"secret": "whsec_", "headers": headers("v1," + base64.b64encode(empty_key_mac).decode("ascii")),
+                      "payload_b64": base64.b64encode(lz_payload).decode("ascii"), "now": now},
+            "expect": {"error": WH},
+        }
+    )
     return cases
 
 
@@ -493,11 +529,11 @@ def main() -> int:
         if args.signatures or both:
             out.append((ROOT / "conformance/signatures/sign.json", "signatures.sign",
                         "Standard Webhooks v1 signature (spec 5.2). `timestamp` is integer seconds; `payload_b64` is the base64 of the raw body bytes.",
-                        f"standardwebhooks.Webhook.sign ({versions}), except the non-UTF-8 case which uses stdlib hmac/hashlib/base64 (cross-checked against the package on UTF-8 payloads); reference example cross-checked against test_sign_function in https://github.com/standard-webhooks/standard-webhooks/blob/main/libraries/python/tests/test_webhooks.py (main at commit ab6844147ce9cdb0d2dbf2e60d1ea85001fd2554, read 2026-11-05); the non-UTF-8 case is rebuilt from spec 5.2 with stdlib only.",
+                        f"standardwebhooks.Webhook.sign ({versions}), except the non-UTF-8 case which uses stdlib hmac/hashlib/base64 (cross-checked against the package on UTF-8 payloads); reference example cross-checked against test_sign_function in https://github.com/standard-webhooks/standard-webhooks/blob/main/libraries/python/tests/test_webhooks.py (main at commit ab6844147ce9cdb0d2dbf2e60d1ea85001fd2554, read 2026-11-05); the non-UTF-8 case is rebuilt from spec 5.2 with stdlib only; the two empty-key error cases are hand-derived from the spec 5.2 sentence that a secret MUST decode to a non-empty key (HEPH-VAL-422 when signing).",
                         build_sign()))
             out.append((ROOT / "conformance/signatures/verify.json", "signatures.verify",
                         "Verification (spec 5). `now` is the verifier clock in integer seconds. All three header keys are always present; an absent header is the empty string. Tolerance 300 s, inclusive.",
-                        f"standardwebhooks.Webhook.verify with its clock pinned to `now` ({versions}); any exception counts as rejection (spec 5.6); the two non-UTF-8 cases are derived with stdlib hmac (the package only takes str). Every case's intended outcome is also stated in this script and the run aborts if the package disagrees.",
+                        f"standardwebhooks.Webhook.verify with its clock pinned to `now` ({versions}); any exception counts as rejection (spec 5.6); the two non-UTF-8 cases, the leading-zero-timestamp case and the empty-key case are derived with stdlib hmac (the package only takes str and formats integer timestamps). Every case's intended outcome is also stated in this script and the run aborts if the package disagrees.",
                         build_verify()))
     except Disagreement as exc:
         print(f"REFERENCE DISAGREEMENT, nothing written: {exc}", file=sys.stderr)

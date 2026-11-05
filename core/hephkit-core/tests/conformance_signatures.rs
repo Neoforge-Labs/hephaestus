@@ -138,19 +138,19 @@ fn empty_and_negative_inputs_reject() {
 }
 
 #[test]
-fn bad_secrets_are_signature_errors() {
-    for s in ["whsec_!!!notbase64", "", "whsec_", "not base64 at all"] {
-        if s.is_empty() || s == "whsec_" {
-            // An empty key is a valid (if useless) HMAC key; it must not panic.
-            let _ = sign(s, "m", 1, b"x");
-            continue;
-        }
-        assert_eq!(sign(s, "m", 1, b"x").unwrap_err().code(), WH);
+fn unusable_secrets_fail_loudly_with_direction_specific_codes() {
+    for s in ["", "whsec_", "whsec_!!!notbase64", "not base64 at all"] {
+        assert_eq!(
+            sign(s, "m", 1, b"x").unwrap_err().code(),
+            "HEPH-VAL-422",
+            "{s:?}"
+        );
         assert_eq!(
             verify(s, "m", "1", "v1,AAAA", b"x", 1, 300)
                 .unwrap_err()
                 .code(),
-            WH
+            WH,
+            "{s:?}"
         );
     }
 }

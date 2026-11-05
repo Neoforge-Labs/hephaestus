@@ -2,7 +2,7 @@
   "suite": "signatures.verify",
   "spec": "0.1.0",
   "description": "Verification (spec 5). `now` is the verifier clock in integer seconds. All three header keys are always present; an absent header is the empty string. Tolerance 300 s, inclusive.",
-  "source": "standardwebhooks.Webhook.verify with its clock pinned to `now` (rfc8785 0.1.4, standardwebhooks 1.1.0); any exception counts as rejection (spec 5.6); the two non-UTF-8 cases are derived with stdlib hmac (the package only takes str). Every case's intended outcome is also stated in this script and the run aborts if the package disagrees.",
+  "source": "standardwebhooks.Webhook.verify with its clock pinned to `now` (rfc8785 0.1.4, standardwebhooks 1.1.0); any exception counts as rejection (spec 5.6); the two non-UTF-8 cases, the leading-zero-timestamp case and the empty-key case are derived with stdlib hmac (the package only takes str and formats integer timestamps). Every case's intended outcome is also stated in this script and the run aborts if the package disagrees.",
   "cases": [
     {
       "name": "valid",
@@ -382,6 +382,38 @@
           "webhook-signature": "v1,F5U/iNAhEB7YTiEj7ytWGzmi8nxeHWgFm1/EwFSK6zk="
         },
         "payload_b64": "//4AYmluYXJ5",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "leading-zero-timestamp-literal-header-text-signed-numeric-value-for-tolerance",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "01000",
+          "webhook-signature": "v1,eO5QUEVaP6K7KG+MYs/d4IYzJVtd4frUME3hcBh5P1E="
+        },
+        "payload_b64": "eyJsZWFkaW5nIjoiemVybyJ9",
+        "now": 1010
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "empty-key-secret-rejected-even-with-matching-empty-key-mac",
+      "input": {
+        "secret": "whsec_",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,d06yHHcysjM83YZ/lL/ZP4xPcTC49MwpfqUANjZQPkk="
+        },
+        "payload_b64": "eyJsZWFkaW5nIjoiemVybyJ9",
         "now": 1614265340
       },
       "expect": {

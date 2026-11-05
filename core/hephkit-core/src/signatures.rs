@@ -1,6 +1,6 @@
 //! Standard Webhooks signing and verification (spec section 5). Experimental.
 //!
-//! Every failure is `HEPH-WH-401` with the same message, so a caller (or an
+//! Every verification failure is `HEPH-WH-401` with the same message, so a caller (or an
 //! attacker watching it) cannot tell which check failed (spec 5.6).
 
 use crate::CoreError;
@@ -24,37 +24,38 @@ fn reject() -> CoreError {
 }
 
 /// HMAC key from a secret: optional `whsec_` prefix stripped, the rest
-/// base64-decoded (spec 5.2).
-fn key_from_secret(secret: &str) -> Result<Vec<u8>, CoreError> {
+/// base64-decoded (spec 5.2). `None` if it is not base64 or decodes to nothing:
+/// an unset secret must never yield a working signature.
+fn key_from_secret(secret: &str) -> Option<Vec<u8>> {
     let encoded = secret.strip_prefix(SECRET_PREFIX).unwrap_or(secret);
-    STANDARD.decode(encoded).map_err(|_| reject())
+    STANDARD.decode(encoded).ok().filter(|key| !key.is_empty())
 }
 
 /// MAC over `{msg_id}.{timestamp}.{payload}`, payload as raw bytes.
-fn mac_for(
-    secret: &str,
-    msg_id: &str,
-    timestamp: &str,
-    payload: &[u8],
-) -> Result<HmacSha256, CoreError> {
-    let key = key_from_secret(secret)?;
-    let mut mac = HmacSha256::new_from_slice(&key).map_err(|_| reject())?;
+fn mac_for(key: &[u8], msg_id: &str, timestamp: &str, payload: &[u8]) -> Option<HmacSha256> {
+    let mut mac = HmacSha256::new_from_slice(key).ok()?;
     mac.update(msg_id.as_bytes());
     mac.update(b".");
     mac.update(timestamp.as_bytes());
     mac.update(b".");
     mac.update(payload);
-    Ok(mac)
+    Some(mac)
 }
 
-/// Signs a message, returning `v1,<base64>` (spec 5.2).
+/// Signs a message, returning `v1,<base64>` (spec 5.2). A secret that does not
+/// decode to a non-empty key is a configuration error: `HEPH-VAL-422`.
 pub fn sign(
     secret: &str,
     msg_id: &str,
     timestamp: i64,
     payload: &[u8],
 ) -> Result<String, CoreError> {
-    let mac = mac_for(secret, msg_id, &timestamp.to_string(), payload)?;
+    let invalid_secret = || CoreError::Signature {
+        code: "HEPH-VAL-422",
+        message: "secret must be base64 that decodes to a non-empty key".to_string(),
+    };
+    let key = key_from_secret(secret).ok_or_else(invalid_secret)?;
+    let mac = mac_for(&key, msg_id, &timestamp.to_string(), payload).ok_or_else(invalid_secret)?;
     Ok(format!(
         "v1,{}",
         STANDARD.encode(mac.finalize().into_bytes())
@@ -105,9 +106,10 @@ pub fn verify(
         (Some(ts), Ok(tol)) => now.abs_diff(ts) <= tol,
         _ => false,
     };
-    let mac = mac_for(secret, msg_id, timestamp_header, payload);
+    let mac =
+        key_from_secret(secret).and_then(|key| mac_for(&key, msg_id, timestamp_header, payload));
     let mut matched = false;
-    if let Ok(mac) = &mac {
+    if let Some(mac) = &mac {
         for candidate in v1_signatures(signature_header) {
             // Constant-time comparison; no early exit on a match.
             matched |= mac.clone().verify_slice(&candidate).is_ok();

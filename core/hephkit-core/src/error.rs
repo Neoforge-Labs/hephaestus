@@ -45,3 +45,44 @@ impl fmt::Display for CoreError {
 }
 
 impl std::error::Error for CoreError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn code_message_and_display_for_every_variant() {
+        let cases = [
+            (
+                CoreError::Money {
+                    code: "HEPH-MNY-422",
+                    message: "bad amount".to_string(),
+                },
+                "HEPH-MNY-422",
+                "bad amount",
+            ),
+            (
+                CoreError::Signature {
+                    code: "HEPH-WH-401",
+                    message: "nope".to_string(),
+                },
+                "HEPH-WH-401",
+                "nope",
+            ),
+            (
+                CoreError::Hashing {
+                    code: "HEPH-VAL-422",
+                    message: "bad json".to_string(),
+                },
+                "HEPH-VAL-422",
+                "bad json",
+            ),
+        ];
+        for (err, code, message) in cases {
+            assert_eq!(err.code(), code);
+            assert_eq!(err.message(), message);
+            assert_eq!(err.to_string(), format!("{code}: {message}"));
+            let _: &dyn std::error::Error = &err;
+        }
+    }
+}

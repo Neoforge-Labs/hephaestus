@@ -132,7 +132,7 @@ This matches the `rfc8785` reference package, which raises on integer literals o
 
 5.1. Messages carry the headers `webhook-id`, `webhook-timestamp` (integer seconds since the Unix epoch) and `webhook-signature`.
 
-5.2. Secrets follow Standard Webhooks: a secret may carry the optional `whsec_` prefix, and the HMAC key is the base64-decoded remainder. The signed content is `<webhook-id>.<webhook-timestamp>.<raw body>`. The signature is HMAC-SHA256 over it, base64-encoded, and `webhook-signature` carries it as `v1,<base64>`.
+5.2. Secrets follow Standard Webhooks: a secret may carry the optional `whsec_` prefix, and the HMAC key is the base64-decoded remainder. The signed content is `<webhook-id>.<webhook-timestamp>.<raw body>`. The signature is HMAC-SHA256 over it, base64-encoded, and `webhook-signature` carries it as `v1,<base64>`. A secret MUST decode to a non-empty key: a secret that is not valid base64 or decodes to zero bytes (an empty string, or `whsec_` alone) is unusable, signing with it fails with `HEPH-VAL-422` (a configuration error, not an authentication outcome), and verifying with it fails with `HEPH-WH-401` (spec 5.6).
 
 5.3. `webhook-signature` MAY hold several space-separated signatures. A message is valid if any signature of a known version verifies. Signatures of unknown versions MUST be ignored, not treated as failures.
 

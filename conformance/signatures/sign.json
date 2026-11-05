@@ -2,7 +2,7 @@
   "suite": "signatures.sign",
   "spec": "0.1.0",
   "description": "Standard Webhooks v1 signature (spec 5.2). `timestamp` is integer seconds; `payload_b64` is the base64 of the raw body bytes.",
-  "source": "standardwebhooks.Webhook.sign (rfc8785 0.1.4, standardwebhooks 1.1.0), except the non-UTF-8 case which uses stdlib hmac/hashlib/base64 (cross-checked against the package on UTF-8 payloads); reference example cross-checked against test_sign_function in https://github.com/standard-webhooks/standard-webhooks/blob/main/libraries/python/tests/test_webhooks.py (main at commit ab6844147ce9cdb0d2dbf2e60d1ea85001fd2554, read 2026-11-05); the non-UTF-8 case is rebuilt from spec 5.2 with stdlib only.",
+  "source": "standardwebhooks.Webhook.sign (rfc8785 0.1.4, standardwebhooks 1.1.0), except the non-UTF-8 case which uses stdlib hmac/hashlib/base64 (cross-checked against the package on UTF-8 payloads); reference example cross-checked against test_sign_function in https://github.com/standard-webhooks/standard-webhooks/blob/main/libraries/python/tests/test_webhooks.py (main at commit ab6844147ce9cdb0d2dbf2e60d1ea85001fd2554, read 2026-11-05); the non-UTF-8 case is rebuilt from spec 5.2 with stdlib only; the two empty-key error cases are hand-derived from the spec 5.2 sentence that a secret MUST decode to a non-empty key (HEPH-VAL-422 when signing).",
   "cases": [
     {
       "name": "reference-example",
@@ -134,6 +134,30 @@
       },
       "expect": {
         "signature": "v1,BsqgULOjB9VT4MJ6Jp6Iu61u1fHthNAJZFYQCeTZsGI="
+      }
+    },
+    {
+      "name": "empty-secret-rejected",
+      "input": {
+        "secret": "",
+        "msg_id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+        "timestamp": 1614265330,
+        "payload_b64": "e30="
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "whsec-prefix-only-secret-rejected",
+      "input": {
+        "secret": "whsec_",
+        "msg_id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+        "timestamp": 1614265330,
+        "payload_b64": "e30="
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
       }
     }
   ]
