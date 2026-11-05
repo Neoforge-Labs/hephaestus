@@ -5,7 +5,9 @@
 # they can do), never as guidance to the implementer. `guidance` is that developer
 # guidance: written to the engineer who hit the code (what causes it, what to
 # change), it is never sent on the wire, must differ from `detail_hint`, and is
-# published on the generated docs page for the code.
+# published on the generated docs page for the code. `guidance` is non-normative:
+# wire behaviour is defined only by heph-spec and the conformance vectors, and
+# `guidance` is advisory developer prose that never constrains an implementation.
 # Generates per-language constants and one docs page per code. Do not add codes
 # here that a task has not specified: every entry is a promise implementations keep.
 - code: HEPH-GEN-500
@@ -43,7 +45,7 @@
   title: Rate limit exceeded
   area: RATE
   detail_hint: Too many requests. Wait before trying again; if the response has a Retry-After header, wait that long.
-  guidance: The caller exceeded a rate limit. Back off and retry after the number of seconds in the Retry-After header, using exponential backoff with jitter if there is none, and never retry in a tight loop. If legitimate traffic is hitting the limit, batch requests, cache responses, or raise the limit for that tenant in the rate limiter configuration.
+  guidance: The caller exceeded a rate limit. Back off before retrying. If the response carries a Retry-After header, wait that long; otherwise use exponential backoff with jitter. Never retry in a tight loop. If legitimate traffic is hitting the limit, batch requests, cache responses, or raise the limit for that tenant in the rate limiter configuration.
 - code: HEPH-IDEMP-400
   status: 400
   title: Idempotency key missing or malformed
