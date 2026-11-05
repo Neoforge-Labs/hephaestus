@@ -11,7 +11,8 @@ validated first; an invalid registry writes nothing.
 
 Pages live at ``docs/site/content/errors/<code>.mdx`` so the site serves them at
 ``/errors/<code>``, the URL heph-spec 1.4 requires in every problem ``type``.
-The generated ``_meta.ts`` beside them orders the sidebar in registry order.
+The generated ``index.mdx`` (the ``/errors`` landing page) and ``_meta.ts`` (sidebar order) beside them
+are generated too, in registry order.
 
 The registry prose is untrusted input to the MDX compiler, so every value is
 escaped before it is written. The output is a pure function of the registry:
@@ -31,6 +32,7 @@ from check_registry import check_errors
 
 PAGES_RELDIR = Path("docs/site/content/errors")
 META_RELPATH = PAGES_RELDIR / "_meta.ts"
+INDEX_RELPATH = PAGES_RELDIR / "index.mdx"
 REGISTRY_RELDIR = Path("spec/errors.yaml")
 
 # Characters Markdown or MDX would interpret: JSX/expressions ({ } < >), emphasis
@@ -80,7 +82,33 @@ defined only by `spec/heph-spec.md` and the conformance vectors.
 
 ---
 
-Defined in `spec/heph-spec.md` section 1. See all codes in the [error reference](/reference/errors).
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error index](/errors).
+"""
+
+
+def render_index(entries: list[dict[str, Any]]) -> str:
+    """The text of the ``/errors`` landing page: every code, status and title."""
+    rows = "\n".join(
+        f"| [{e['code']}](/errors/{e['code']}) | {e['status']} | {_escape(str(e['title']))} |" for e in entries
+    )
+    return f"""\
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "Error codes"
+---
+
+# Error codes
+
+Every problem+json error body the kit emits carries a `type` URL of the form
+`https://heph.neoforgelabs.tech/errors/<code>`. Each code has its own page with
+the caller-facing message and developer guidance.
+
+| Code | Status | Title |
+| --- | --- | --- |
+{rows}
+
+The registry is `spec/errors.yaml`; these pages are generated from it.
 """
 
 
@@ -94,6 +122,7 @@ import type {{ MetaRecord }} from 'nextra'
 // Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
 // Sidebar order of the error pages: registry order.
 const meta: MetaRecord = {{
+  index: 'Error codes',
 {rows}
 }}
 
@@ -109,6 +138,7 @@ def generate(repo_root: Path) -> dict[Path, str]:
         raise ValueError("\n".join(problems))
     entries = yaml.safe_load(registry.read_text(encoding="utf-8"))
     out = {repo_root / PAGES_RELDIR / f"{e['code']}.mdx": render(e) for e in entries}
+    out[repo_root / INDEX_RELPATH] = render_index(entries)
     out[repo_root / META_RELPATH] = render_meta(entries)
     return out
 

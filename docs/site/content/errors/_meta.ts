@@ -4,6 +4,7 @@ import type { MetaRecord } from 'nextra'
 // Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
 // Sidebar order of the error pages: registry order.
 const meta: MetaRecord = {
+  index: 'Error codes',
   "HEPH-GEN-500": "HEPH-GEN-500",
   "HEPH-VAL-422": "HEPH-VAL-422",
   "HEPH-NF-404": "HEPH-NF-404",

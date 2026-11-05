@@ -1,14 +1,16 @@
 ---
-title: Error codes
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "Error codes"
 ---
 
 # Error codes
 
 Every problem+json error body the kit emits carries a `type` URL of the form
-`https://heph.neoforgelabs.tech/errors/<code>`. Each code below has its own page
-there, with the caller-facing message and developer guidance.
+`https://heph.neoforgelabs.tech/errors/<code>`. Each code has its own page with
+the caller-facing message and developer guidance.
 
-| Code | Status | Meaning |
+| Code | Status | Title |
 | --- | --- | --- |
 | [HEPH-GEN-500](/errors/HEPH-GEN-500) | 500 | Internal error |
 | [HEPH-VAL-422](/errors/HEPH-VAL-422) | 422 | Validation failed |
@@ -23,4 +25,4 @@ there, with the caller-facing message and developer guidance.
 | [HEPH-MONEY-409](/errors/HEPH-MONEY-409) | 409 | Currency mismatch |
 | [HEPH-WH-401](/errors/HEPH-WH-401) | 401 | Webhook signature invalid or expired |
 
-The registry is `spec/errors.yaml`; the pages are generated from it.
+The registry is `spec/errors.yaml`; these pages are generated from it.

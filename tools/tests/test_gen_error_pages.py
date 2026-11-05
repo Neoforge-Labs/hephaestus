@@ -10,7 +10,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from gen_error_pages import META_RELPATH, PAGES_RELDIR, generate, main  # noqa: E402
+from gen_error_pages import INDEX_RELPATH, META_RELPATH, PAGES_RELDIR, generate, main  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ERRORS = REPO_ROOT / "spec" / "errors.yaml"
@@ -30,9 +30,9 @@ def test_one_page_per_code() -> None:
     pages = generate(REPO_ROOT)
     codes = [e["code"] for e in _entries()]
     assert len(codes) == 12
-    page_paths = {p for p in pages if p.suffix == ".mdx"}
+    page_paths = {p for p in pages if p.suffix == ".mdx" and p != REPO_ROOT / INDEX_RELPATH}
     assert page_paths == {REPO_ROOT / PAGES_RELDIR / f"{code}.mdx" for code in codes}
-    assert set(pages) - page_paths == {REPO_ROOT / META_RELPATH}  # the sidebar order file
+    assert set(pages) - page_paths == {REPO_ROOT / INDEX_RELPATH, REPO_ROOT / META_RELPATH}
     assert PAGES_RELDIR == Path("docs/site/content/errors")  # URL is /errors/<code> (spec 1.4)
 
 
@@ -131,7 +131,7 @@ def test_invalid_registry_is_refused(tmp_path: Path) -> None:
 
 def test_every_registry_code_has_a_committed_page() -> None:
     codes = {str(e["code"]) for e in _entries()}
-    committed = {p.stem for p in (REPO_ROOT / PAGES_RELDIR).glob("*.mdx")}
+    committed = {p.stem for p in (REPO_ROOT / PAGES_RELDIR).glob("*.mdx") if p.name != "index.mdx"}
     assert codes - committed == set(), "registry code with no committed page"
     assert committed - codes == set(), "committed page with no registry code"
 
@@ -145,3 +145,20 @@ def test_meta_is_generated_with_header_in_registry_order() -> None:
 
 def test_committed_pages_are_fresh() -> None:
     assert main(["--check"], root=REPO_ROOT) == 0
+
+
+def test_index_links_equal_registry_codes() -> None:
+    pages = generate(REPO_ROOT)
+    text = pages[REPO_ROOT / INDEX_RELPATH]
+    targets = re.findall(r"\]\(/errors/([^)]+)\)", text)
+    codes = [str(e["code"]) for e in _entries()]
+    assert targets == codes  # both directions, registry order, no dead links
+    assert text.startswith("---\n# GENERATED") and "spec/errors.yaml" in text
+    committed = (REPO_ROOT / INDEX_RELPATH).read_text(encoding="utf-8")
+    assert committed == text
+
+
+def test_nothing_links_to_the_old_reference_index() -> None:
+    assert not (REPO_ROOT / "docs/site/content/reference/errors.mdx").exists()
+    for path in (REPO_ROOT / "docs/site/content").rglob("*.mdx"):
+        assert "/reference/errors" not in path.read_text(encoding="utf-8"), path
