@@ -621,5 +621,61 @@ class _RaisingInt(int):
 
 def test_key_whose_str_raises_does_not_collapse_the_mapping(capsys: pytest.CaptureFixture[str]) -> None:
     line = _one(capsys, n={_RaisingInt(4): 1, "z": 2}, keep=1)
-    assert line["n"] == {"<_RaisingInt>": "[REDACTED]", "z": 2}
+    assert line["n"] == {"4": 1, "z": 2}  # read via int.__repr__, as json does
     assert line["keep"] == 1
+
+
+def test_key_whose_class_raises_fails_closed_without_collapsing_the_mapping(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    line = _one(capsys, n={_BadClass(): "KEYBADLEAK", "z": 2}, keep=1)
+    assert line["n"] == {"<_BadClass>": "[REDACTED]", "z": 2}
+    assert line["keep"] == 1
+
+
+class _StrEnumKey(str, __import__("enum").Enum):
+    A = "password"
+
+
+class _LyingStr(str):
+    def __str__(self) -> str:
+        return "harmless"
+
+
+class _LyingInt(int):
+    def __str__(self) -> str:
+        return "harmless"
+
+    __repr__ = __str__
+
+
+@pytest.mark.parametrize(
+    ("key", "secret"),
+    [
+        (_StrEnumKey.A, "ENUMKEYLEAK"),
+        (_LyingStr("password"), "STRSUBLEAK"),
+        (_LyingStr("user.id"), "STRSUBPII"),
+        (_LyingStr("access_token"), "STRSUBTOKEN"),
+    ],
+)
+def test_key_the_serialiser_would_write_is_the_key_that_is_matched(
+    capsys: pytest.CaptureFixture[str], key: object, secret: str
+) -> None:
+    out = _rendered(capsys, m={key: secret})
+    assert secret not in out
+    assert "[REDACTED]" in out
+
+
+def test_int_subclass_key_is_matched_and_emitted_by_its_data(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _rendered(capsys, m={_LyingInt(12345): "INTSUBVAL", "amount": "ok"})
+    assert json.loads(out)["m"] == {"12345": "INTSUBVAL", "amount": "ok"}
+
+
+def test_key_controls_still_behave(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _rendered(capsys, m={"password": "CTLSECRET", "amount": "10", "tenant.id": "t1"})
+    assert "CTLSECRET" not in out
+    assert json.loads(out)["m"] == {"password": "[REDACTED]", "amount": "10", "tenant.id": "t1"}
+
+
+def test_bool_and_float_keys_render_as_json_does(capsys: pytest.CaptureFixture[str]) -> None:
+    assert _one(capsys, m={True: 1, False: 2, 1.5: 3})["m"] == {"true": 1, "false": 2, "1.5": 3}

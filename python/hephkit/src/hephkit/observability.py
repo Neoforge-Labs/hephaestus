@@ -26,9 +26,12 @@ Redaction (decisions, each pinned by a test):
   ``dict.items()``/``values()`` are expanded and redacted. Any other object is
   rendered as ``"<TypeName>"`` only, never ``repr``, so unanticipated shapes
   cannot leak their fields. Dict keys must be str, bytes, int, float, bool or
-  None; any other key type (date, UUID, Path, Enum, tuple, objects) renders as
+  None; any other key type (date, UUID, Path, plain ``Enum``, tuple, objects) renders as
   ``<TypeName>`` and its value is withheld as ``[REDACTED]``, because such a key
   cannot be checked against the redaction words. Key by string if you need both.
+  ``str``- and ``int``-mixin enums and other ``str``/``int`` subclasses are
+  treated as their underlying data, which is what the JSON output (and the
+  redaction match) sees.
 * The rule is deliberately over-eager on prefixes: ``token_count`` is redacted
   (prefix ``token_``) while ``tokens_used`` is kept. LLM products that log token
   counts should name them ``tokens_used`` or ``input_tokens``, or accept the redaction.
@@ -95,17 +98,35 @@ REDACTED_KEYS: Final[frozenset[str]] = frozenset(
 )
 
 
-def _is_redacted(key: object, words: frozenset[str]) -> bool:
+def _key_text(key: object) -> str | None:
+    """The text the JSON serialiser will write for ``key``, or ``None`` if it
+    is not a JSON key type. Both the redaction match and the emitted key use
+    this, so they cannot disagree: ``json`` writes a ``str`` subclass's raw data
+    (not its ``__str__``) and an ``int`` subclass via ``int.__repr__``."""
     if isinstance(key, bytes):
-        k = _normalise(key.decode("utf-8", "replace"))
-    elif isinstance(key, _JSON_KEYS):
-        try:
-            k = _normalise(str(key))
-        except Exception:  # e.g. int beyond the digit limit, or a subclass whose __str__ raises
+        return key.decode("utf-8", "replace")
+    if isinstance(key, str):
+        return str.__str__(key)
+    if isinstance(key, bool):
+        return "true" if key else "false"
+    if isinstance(key, int):
+        return int.__repr__(key)  # ValueError beyond the int-to-str digit limit
+    if isinstance(key, float):
+        return float.__repr__(key)
+    if key is None:
+        return "null"
+    return None
+
+
+def _is_redacted(key: object, words: frozenset[str]) -> bool:
+    try:
+        text = _key_text(key)
+        if text is None:
+            # A key we cannot name (tuple, custom object) cannot be shown to be
+            # safe, so its value is withheld rather than risk leaking it.
             return True
-    else:
-        # A key we cannot name (tuple, custom object) cannot be shown to be
-        # safe, so its value is withheld rather than risk leaking it.
+        k = _normalise(text)
+    except Exception:  # fail closed
         return True
     return any(k == w or k.startswith(w + "_") or k.endswith("_" + w) for w in words)
 
@@ -116,25 +137,19 @@ def _placeholder(obj: object) -> str:
     return f"<{type(obj).__name__}>"
 
 
-_JSON_KEYS: Final = (str, int, float, bool, type(None))
 _STRINGIFIED: Final = (datetime.date, datetime.time, datetime.timedelta, decimal.Decimal, uuid.UUID, PurePath)
 _OPAQUE_BYTES: Final = (bytearray, memoryview)
 
 
-def _emit_key(key: object) -> object:
-    """The key as the renderer will see it. Never ``str()``/``repr()`` an
-    arbitrary object: that is the leak the type-name fallback exists to close."""
-    if isinstance(key, bytes):
-        return key.decode("utf-8", "replace")
-    if isinstance(key, int) and not isinstance(key, bool):
-        try:
-            str(key)
-        except Exception:  # beyond the digit limit, or a subclass whose __str__ raises
-            return _placeholder(key)
-        return key
-    if isinstance(key, _JSON_KEYS):
-        return key
-    return _placeholder(key)
+def _emit_key(key: object) -> str:
+    """The key as plain ``str``, exactly the text ``_is_redacted`` matched.
+    Never ``str()``/``repr()`` an arbitrary object: that is the leak the
+    type-name fallback exists to close."""
+    try:
+        text = _key_text(key)
+    except Exception:
+        text = None
+    return _placeholder(key) if text is None else text
 
 
 def _redact_value(value: object, depth: int, words: frozenset[str]) -> object:
