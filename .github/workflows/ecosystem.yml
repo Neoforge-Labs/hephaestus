@@ -83,6 +83,14 @@ jobs:
         with:
           version: '0.13.6'
           python-version: '3.12'
+          # This job checks out a third-party repository at `matrix.ref` and then
+          # runs its command. On `workflow_dispatch` and `schedule` it runs in the
+          # default branch's context, so it holds write access to the Actions
+          # cache. A cache keyed on files from an untrusted checkout lets that
+          # checkout poison a cache which trusted default-branch workflows later
+          # restore, so this job must never write one. Do not set this to `true`
+          # to speed the row up.
+          enable-cache: false
       - name: Run
         if: ${{ matrix.enabled }}
         env:
