@@ -57,6 +57,13 @@ def test_modules_page_splits_shipped_and_planned() -> None:
     assert "experimental" in shipped_part
 
 
+def test_modules_page_says_planned_list_is_not_exhaustive() -> None:
+    text = _page(generate(REPO_ROOT), "reference/modules.mdx")
+    note = text.split("## Planned", 1)[1].split("| Module", 1)[0]
+    assert "not exhaustive" in note
+    assert "(/roadmap)" in note
+
+
 def test_adr_pages_match_sources() -> None:
     pages = generate(REPO_ROOT)
     sources = sorted(

@@ -1,5 +1,8 @@
 # Module inventory. Checked by tools/check_modules.py; rendered by the docs site.
 # status: shipped (needs maturity) | planned (needs phase). Everything shipped is experimental.
+# `shipped` rows are exhaustive: tools/check_modules.py fails if a module on disk has no row.
+# `planned` rows are the headline modules named in the design's rollout and are deliberately
+# NOT exhaustive; do not read them as the full scope (see the roadmap page).
 # spec_section is a section number of spec/heph-spec.md, or null.
 # Compose fragment rows (home: compose) are added when the fragments land; the check
 # fails until they are listed.

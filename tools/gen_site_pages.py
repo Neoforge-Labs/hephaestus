@@ -139,6 +139,9 @@ What runs today and what does not yet. Maturity is `experimental`, `beta` or
 
 ## Planned
 
+This list is not exhaustive: it names the headline modules from the design's rollout.
+See the [roadmap](/roadmap) for the full picture.
+
 | Module | Home | Phase | Spec |
 | --- | --- | --- | --- |
 {planned_rows}
