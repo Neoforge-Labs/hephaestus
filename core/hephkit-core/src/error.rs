@@ -2,6 +2,12 @@ use std::fmt;
 
 /// Error returned by every fallible core function. `code` is a HEPH code from
 /// `spec/errors.yaml`.
+///
+/// Mapping rule for bindings: the variant selects the exception class (the
+/// capability that failed); `code` carries the precise registry code (the kind
+/// of failure) and is exposed verbatim. So `Signature` is not exclusively
+/// `HEPH-WH-401` (an unusable secret passed to `sign` is `Signature` carrying
+/// `HEPH-VAL-422`), and `Hashing` is not the only source of `HEPH-VAL-422`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoreError {
     Money {
@@ -55,10 +61,10 @@ mod tests {
         let cases = [
             (
                 CoreError::Money {
-                    code: "HEPH-MNY-422",
+                    code: "HEPH-MONEY-422",
                     message: "bad amount".to_string(),
                 },
-                "HEPH-MNY-422",
+                "HEPH-MONEY-422",
                 "bad amount",
             ),
             (

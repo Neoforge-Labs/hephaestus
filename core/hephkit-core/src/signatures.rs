@@ -74,17 +74,14 @@ fn parse_timestamp(header: &str) -> Option<i64> {
 /// Decoded MACs of every well-formed `v1` entry in a `webhook-signature`
 /// header. Entries are space separated; entries of any other version, or
 /// without a comma, or with undecodable base64 are skipped (spec 5.3).
-fn v1_signatures(header: &str) -> Vec<Vec<u8>> {
-    header
-        .split(' ')
-        .filter_map(|entry| {
-            let (version, encoded) = entry.split_once(',')?;
-            if version != "v1" {
-                return None;
-            }
-            STANDARD.decode(encoded).ok()
-        })
-        .collect()
+fn v1_signatures(header: &str) -> impl Iterator<Item = Vec<u8>> + '_ {
+    header.split(' ').filter_map(|entry| {
+        let (version, encoded) = entry.split_once(',')?;
+        if version != "v1" {
+            return None;
+        }
+        STANDARD.decode(encoded).ok()
+    })
 }
 
 /// Verifies a message. `now` is the verifier's clock in epoch seconds; the

@@ -165,6 +165,10 @@ fn header_grammar_edge_cases() {
     assert!(ok(&format!("  {sig}  ")));
     assert!(!ok(&format!("V1,{}", sig.trim_start_matches("v1,"))));
     assert!(!ok(&format!("v1 {}", sig.trim_start_matches("v1,"))));
+    // Decodable but wrong-length tags (3, 31 and 65 bytes) are mismatches.
+    assert!(!ok("v1,AAAA"));
+    assert!(!ok(&format!("v1,{}", STANDARD.encode([0u8; 31]))));
+    assert!(!ok(&format!("v1,{}", STANDARD.encode([0u8; 65]))));
     assert!(!ok("v1,"));
     assert!(!ok(","));
     assert!(!ok("v1"));
