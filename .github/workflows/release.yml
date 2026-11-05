@@ -1,0 +1,66 @@
+# Lockstep releases. release-please keeps a release PR open on main; merging it
+# creates the tag, and this workflow then builds the wheels, publishes hephkit
+# to PyPI by trusted publishing (OIDC, no token anywhere), and pushes signed
+# images with the release version as an extra tag.
+#
+# Needs, on the user's side (not done by this repo): a PyPI pending trusted
+# publisher for project hephkit, owner Neoforge-Labs, repo hephaestus,
+# workflow release.yml. Until it exists the publish job fails at the token
+# exchange; nothing else in this file depends on it.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      released: ${{ steps.rp.outputs.releases_created }}
+      tag: ${{ steps.rp.outputs.tag_name }}
+      version: ${{ steps.rp.outputs.version }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  wheels:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.released == 'true' }}
+    uses: ./.github/workflows/rust-wheels.yml
+
+  pypi:
+    needs: wheels
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # trusted publishing; there is deliberately no API token
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist
+
+  images:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.released == 'true' }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      push: true
+      version-tag: ${{ needs.release-please.outputs.version }}

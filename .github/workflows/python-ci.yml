@@ -1,0 +1,71 @@
+# Reusable Python gate for hephkit and the shared repo checks that need its
+# environment. Every command is a moon task so CI and a local `moon run` cannot
+# drift. Consume as:
+#   uses: Neoforge-Labs/hephaestus/.github/workflows/python-ci.yml@v0
+name: python-ci
+
+on:
+  workflow_call:
+    inputs:
+      include-slow:
+        description: >-
+          Also run the slow-marked tests (64 MB payload, 10M-char strings) in a
+          separate job. The default job always runs with -m "not slow".
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.6' # keep equal to uv in .prototools
+          python-version: '3.12'
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          moon-version: '2.6.5'
+      # The pinned toolchain in rust-toolchain.toml is installed by rustup on
+      # first use (maturin builds the PyO3 extension).
+      - name: Tests, fast path (coverage gate 90%)
+        run: moon run hephkit:test-fast
+      - name: mypy --strict
+        run: moon run hephkit:typecheck
+      - name: Generated files are not stale
+        run: moon run hephkit:gen-errors hephkit:gen-conventions
+      - name: Rust core codes are all in spec/errors.yaml
+        run: moon run hephkit:core-codes
+      - name: Conformance vectors are valid
+        run: moon run conformance:check
+      - name: Repo tooling tests
+        run: uv run --with pytest --with pyyaml --with jsonschema pytest tools/tests -q
+      - name: pip-audit
+        working-directory: python/hephkit
+        run: |
+          uv export --frozen --all-groups --no-emit-project --no-hashes -o "$RUNNER_TEMP/requirements.txt"
+          uvx pip-audit --requirement "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip --strict
+
+  python-slow:
+    if: ${{ inputs.include-slow }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.6'
+          python-version: '3.12'
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          moon-version: '2.6.5'
+      - name: Full suite including slow tests
+        run: moon run hephkit:test

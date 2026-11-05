@@ -1,0 +1,27 @@
+# Reusable boot test for the Compose fragments (needs a Docker daemon, so
+# GitHub-hosted Linux runners; each fragment alone, then all together).
+#   uses: Neoforge-Labs/hephaestus/.github/workflows/compose-boot.yml@v0
+name: compose-boot
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          moon-version: '2.6.5'
+      - name: Install psql
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+      # curl and the aws CLI v2 are preinstalled on ubuntu-latest.
+      - name: Boot every fragment
+        run: moon run compose:test

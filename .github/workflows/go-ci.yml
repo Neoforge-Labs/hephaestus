@@ -1,0 +1,42 @@
+# Reusable Go gate: tests, vet, staticcheck, govulncheck, fragment sync.
+#   uses: Neoforge-Labs/hephaestus/.github/workflows/go-ci.yml@v0
+name: go-ci
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          moon-version: '2.6.5'
+      - name: Install staticcheck and govulncheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+      # test and lint depend on sync-fragments, which copies compose/ into the
+      # embedded (gitignored) directory first.
+      - name: go test
+        run: moon run heph-cli:test
+      - name: go vet and staticcheck
+        run: moon run heph-cli:lint
+      - name: Embedded fragments match compose/
+        run: moon run heph-cli:check-fragments
+      - name: Build
+        run: moon run heph-cli:build
+      - name: govulncheck
+        working-directory: go
+        run: govulncheck ./...

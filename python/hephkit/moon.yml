@@ -11,6 +11,17 @@ tasks:
       - '/core/hephkit-core/**/*'
       - '/core/hephkit-py/**/*'
       - '/conformance/**/*.json'
+  test-fast:
+    # CI default: everything except the multi-megabyte `slow` tests, which run
+    # in their own job (moon script tasks do not forward extra arguments).
+    script: 'uv run maturin develop --uv && uv run pytest -m "not slow" --cov=hephkit --cov-fail-under=90'
+    inputs:
+      - 'src/**/*'
+      - 'tests/**/*'
+      - 'pyproject.toml'
+      - '/core/hephkit-core/**/*'
+      - '/core/hephkit-py/**/*'
+      - '/conformance/**/*.json'
   typecheck:
     command: 'uv run mypy --strict src'
     inputs:

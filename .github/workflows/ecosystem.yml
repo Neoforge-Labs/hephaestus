@@ -1,0 +1,75 @@
+# Ecosystem CI: does a change here still work for what is built from it?
+# Runs each consumer at a pinned ref. Only examples/hello (this repo's own
+# five-minute path) is enabled in phase 1; the product repos are listed so the
+# matrix is complete, but `enabled: false` entries are NOT run: each one emits
+# a visible "skipped" notice instead of passing quietly. Flip `enabled` and set
+# a real `ref` and `command` when a product adopts hephkit.
+#
+# Runs weekly, on demand, and as a reusable workflow.
+#   uses: Neoforge-Labs/hephaestus/.github/workflows/ecosystem.yml@v0
+name: ecosystem
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: ${{ matrix.name }}${{ matrix.enabled && '' || ' (disabled)' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: examples/hello
+            enabled: true
+            repo: Neoforge-Labs/hephaestus
+            ref: ${{ github.sha }}
+            command: bash examples/hello/tutorial_test.sh
+          # Placeholders: ref and command are set when the repo is enabled.
+          - name: Collie
+            enabled: false
+            repo: Neoforge-Labs/collie
+            ref: main
+            command: ''
+          - name: Domus
+            enabled: false
+            repo: Neoforge-Labs/domus
+            ref: main
+            command: ''
+          - name: SAWA
+            enabled: false
+            repo: Neoforge-Labs/sawa
+            ref: main
+            command: ''
+          - name: NeoRx
+            enabled: false
+            repo: Neoforge-Labs/neorx
+            ref: main
+            command: ''
+    steps:
+      - name: Skipped, not enabled
+        if: ${{ !matrix.enabled }}
+        run: echo "::notice title=${{ matrix.name }}::skipped, enabled is false in ecosystem.yml"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ matrix.enabled }}
+        with:
+          repository: ${{ matrix.repo }}
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        if: ${{ matrix.enabled }}
+        with:
+          version: '0.13.6'
+          python-version: '3.12'
+      - name: Run
+        if: ${{ matrix.enabled }}
+        env:
+          COMMAND: ${{ matrix.command }}
+        run: bash -euo pipefail -c "$COMMAND"
