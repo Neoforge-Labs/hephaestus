@@ -289,8 +289,7 @@
                 "input": {
                   "type": "object",
                   "required": [
-                    "op",
-                    "a"
+                    "op"
                   ],
                   "additionalProperties": false,
                   "properties": {
@@ -306,7 +305,35 @@
                     },
                     "b": {
                       "type": "object"
+                    },
+                    "a_text": {
+                      "type": "string"
+                    },
+                    "b_text": {
+                      "type": "string"
                     }
+                  },
+                  "oneOf": [
+                    {
+                      "required": [
+                        "a"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "a_text"
+                      ]
+                    }
+                  ],
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "b",
+                          "b_text"
+                        ]
+                      }
+                    ]
                   }
                 },
                 "expect": {

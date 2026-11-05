@@ -4,9 +4,14 @@ use common::{assert_suites_covered, check, load, minor_str, Case};
 use hephkit_core::{CoreError, Currency, Money, Rounding};
 use serde_json::Value;
 
-/// Passes the vector's original bytes for `input.<member>` to the library.
+/// Passes the vector's original bytes for `input.<member>` to the library: the
+/// text member `<member>_text` when present (a runner MUST pass those exact
+/// bytes), otherwise the raw object.
 fn from_wire(c: &Case, member: &str) -> Result<Money, CoreError> {
-    Money::from_wire_json(c.raw_object(member))
+    match c.input.get(format!("{member}_text")) {
+        Some(text) => Money::from_wire_json(text.as_str().expect("_text member is a string")),
+        None => Money::from_wire_json(c.raw_object(member)),
+    }
 }
 
 #[test]

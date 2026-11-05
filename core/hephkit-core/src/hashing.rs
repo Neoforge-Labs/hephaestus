@@ -103,6 +103,7 @@ fn write_string(s: &str, out: &mut String) {
 
 /// ECMAScript `Number::toString(10)` for a finite double (RFC 8785 3.2.2.3).
 fn write_double(f: f64, out: &mut String) {
+    debug_assert!(f.is_finite(), "the parser only admits finite doubles");
     if f == 0.0 {
         out.push('0'); // also folds -0
         return;
@@ -149,13 +150,32 @@ fn shortest_digits(f: f64) -> (String, i32) {
     (digits, exp)
 }
 
-/// `d.ddde<exp>` into (`ddd`, exp).
+/// `d.ddde<exp>` into (`ddd`, exp). Only ever fed this crate's own `{:e}`
+/// output, never user text, so a malformed value is a bug, not an input error.
 fn split_sci(sci: &str) -> (String, i32) {
-    let (mantissa, exp) = sci.split_once('e').unwrap_or((sci, "0"));
+    let (mantissa, exp) = sci
+        .split_once('e')
+        .expect("Rust {:e} always emits d.dddde<exp>");
     (
         mantissa.chars().filter(|c| *c != '.').collect(),
-        exp.parse().unwrap_or(0),
+        exp.parse().expect("Rust {:e} always emits d.dddde<exp>"),
     )
+}
+
+/// Number of fractional bits of `f`: the `e` in `f = odd / 2^e` (0 for an integer).
+fn fractional_bits(f: f64) -> i32 {
+    let bits = f.to_bits();
+    let biased = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1u64 << 52) - 1);
+    let (significand, exponent) = if biased == 0 {
+        (fraction, -1074) // subnormal
+    } else {
+        (fraction | (1u64 << 52), biased - 1075)
+    };
+    if significand == 0 {
+        return 0;
+    }
+    (-(exponent + significand.trailing_zeros() as i32)).max(0)
 }
 
 /// Rust breaks an exact tie between two shortest candidates upwards; ECMAScript
@@ -163,15 +183,24 @@ fn split_sci(sci: &str) -> (String, i32) {
 /// 1424953923781206.2). Returns the corrected digits when that differs.
 fn even_tie(f: f64, digits: &str, exp: i32) -> Option<String> {
     let last = digits.as_bytes().last()?.wrapping_sub(b'0');
-    if last.is_multiple_of(2) || last == 9 {
+    if last.is_multiple_of(2) {
         return None;
     }
-    // 800 fractional digits is more than any double needs, so this is exact.
-    let (exact, exact_exp) = split_sci(&format!("{f:.800e}"));
-    let exact = exact.trim_end_matches('0');
+    // A tie means f is exactly the midpoint of two k-digit decimals, i.e. its
+    // exact decimal expansion has k+1 significant digits and ends in 5. A
+    // double odd/2^e (e >= 2) has exactly e fractional decimal digits, so the
+    // expansion has k+1 digits iff e == k - exp. This integer test rejects
+    // nearly every input, so the exact expansion below runs only for genuine
+    // ties and is never an input-controlled cost.
     let k = digits.len();
-    if exact_exp != exp || exact.len() != k + 1 || !exact.ends_with('5') {
-        return None; // not an exact midpoint of two k-digit decimals
+    let e = fractional_bits(f);
+    if e < 2 || e != k as i32 - exp {
+        return None;
+    }
+    // k+1 significant digits is the exact value, no rounding involved.
+    let (exact, exact_exp) = split_sci(&format!("{f:.k$e}"));
+    if exact_exp != exp || !exact.ends_with('5') {
+        return None; // unreachable for a true tie; keeps the function total
     }
     let lower: u64 = exact[..k].parse().ok()?;
     let chosen = if lower.is_multiple_of(2) {
@@ -179,6 +208,8 @@ fn even_tie(f: f64, digits: &str, exp: i32) -> Option<String> {
     } else {
         lower + 1
     };
+    // `lower + 1` carrying into a new digit changes the length: not a k-digit
+    // candidate, so leave Rust's answer alone.
     let candidate = format!("{chosen}");
     if candidate.len() != k || candidate == digits {
         return None;
