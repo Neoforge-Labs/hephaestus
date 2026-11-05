@@ -58,6 +58,11 @@ def test_python_package_directory_needs_an_entry(tmp_path):
     assert any("pkg" in e for e in check_modules(root))
 
 
+def test_go_command_directory_needs_an_entry(tmp_path):
+    root = make_tree(tmp_path, [planned()], dirs=["go/cmd/heph"])
+    assert any("go/heph" in e for e in check_modules(root))
+
+
 def test_scan_exclusions_are_not_required(tmp_path):
     root = make_tree(
         tmp_path,

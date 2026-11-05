@@ -65,6 +65,7 @@ def _scan(repo_root: Path) -> set[tuple[str, str]]:
 
     dirs("core", "rust")
     dirs("go/internal", "go")
+    dirs("go/cmd", "go")
     dirs("docker", "docker")
 
     compose = repo_root / "compose"
