@@ -10,6 +10,9 @@ Debian has published is applied. Trivy's status column is Debian's own:
 `affected` (no fix released), `fix_deferred` (Debian has decided to fix later),
 `will_not_fix`.
 
+**Standard of evidence:** the reasoning below is role-based (what the package is
+for and how these images use it), not exploit analysis.
+
 Reasoning below is about exposure in these images (non-root uid 10001, no
 setuid binaries, no shell services, no init system). It is not an independent
 exploit analysis; where a claim rests on the package's role rather than the
@@ -21,7 +24,7 @@ Affected images: **P** = heph-python, **N** = heph-node.
 | CVE | Sev | Debian status | Packages | Img | Why it is accepted for now |
 |---|---|---|---|---|---|
 | CVE-2023-45853 | CRITICAL | will_not_fix | zlib1g | P N | Overflow is in `zipOpenNewFileInZip4_6`, part of zlib's contrib *minizip*, which Debian does not build into `libz`. The library the images ship does not contain the vulnerable function. Debian's will_not_fix reflects that. |
-| CVE-2026-76844 | HIGH | affected | zlib1g | P N | The advisory title Trivy shows describes `webpack-dev-middleware`, not zlib, which suggests a mis-attributed record in the vulnerability database. Not verified against the upstream advisory; re-check when Trivy's DB updates. |
+| CVE-2026-76844 | HIGH | affected | zlib1g | P N | Title appears mis-attributed in the Trivy DB (it describes `webpack-dev-middleware`, not zlib); not verified upstream. Accepted because no Debian 12 fix is available. |
 | CVE-2026-53613 | HIGH | affected | util-linux, mount, bsdutils, libblkid1, libmount1, libsmartcols1, libuuid1, util-linux-extra | P N | TOCTOU in the `mount` program. All setuid/setgid bits are stripped at build and the container user has no `CAP_SYS_ADMIN`, so `mount` cannot perform a privileged mount for it. |
 | CVE-2026-78410 | HIGH | affected | (same util-linux set) | P N | Restricted bind mounts not pinning the source. Same reasoning: needs the `mount` program to act with privilege, which the unprivileged user cannot obtain. |
 | CVE-2026-53615 | HIGH | affected | (same util-linux set) | P N | Integer overflow in the DOS partition parser (libblkid). Triggers only when probing a crafted disk or image; services here do not probe block devices. |

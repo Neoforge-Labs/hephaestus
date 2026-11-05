@@ -30,8 +30,11 @@ FROM python:${PYTHON_VERSION}-slim-bookworm@${PYTHON_DIGEST} AS build
 # Re-declared: a global ARG is not visible inside a stage until it is.
 ARG PYTHON_VERSION
 
-# Pick up Debian security fixes published since the pinned base was built, then
-# create the unprivileged user. No recommends; apt lists removed.
+# Pick up Debian security fixes published since the pinned base was built. This
+# makes rebuilds not bit-reproducible, deliberately: a base image that never
+# patches is worse than one that is not bit-reproducible. Drift is handled by the
+# digest pin plus a scan on every CI build. Do not remove this as an oversight.
+# Then create the unprivileged user. No recommends; apt lists removed.
 RUN apt-get update \
  && apt-get upgrade -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt/* \
@@ -57,7 +60,11 @@ RUN set -eux; \
 COPY --from=uv /uv /usr/local/bin/uv
 
 # --- Stage 3: runtime --------------------------------------------------------
-# Flatten the prepared filesystem into a single layer.
+# WHY THIS IS `FROM scratch`: it flattens the prepared filesystem into one layer
+# so the stripping in stage 2 actually shrinks the image (deletions in a later
+# layer do not). Without it the image is ~273 MB, over the 250 MB budget. Do not
+# "simplify" this back to `FROM python:...`. The cost is that upstream ENV and
+# labels are lost, which is why they are restated below.
 FROM scratch AS runtime
 COPY --from=build / /
 
@@ -68,9 +75,13 @@ LABEL org.opencontainers.image.title="heph-python" \
       dev.neoforge.heph.maturity="experimental"
 
 # FROM scratch drops the upstream image's ENV, so the ones Python needs are
-# restated here (same values as the python:slim-bookworm image).
+# restated here (same values as the pinned python:3.13-slim-bookworm image).
+# PYTHON_VERSION is the full upstream version (the build ARG of the same name is
+# only the minor); update it together with PYTHON_DIGEST. GPG_KEY and
+# PYTHON_SHA256 are build-time-only upstream values and are not restated.
 ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
     LANG=C.UTF-8 \
+    PYTHON_VERSION=3.13.18 \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
