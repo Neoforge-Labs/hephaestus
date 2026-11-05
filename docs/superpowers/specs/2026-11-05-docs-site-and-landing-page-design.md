@@ -306,6 +306,27 @@ proof block and the tiles become assertions, which is the anti-goal above.
   `tools/dx_budget.json` beyond holding the two thresholds.
 - Copy polish throughout. The proposed hero lines are a starting point.
 
+## Deferred to Phase 4 (brand presets)
+
+**The site has no favicon, deliberately.** There is no `public/favicon.ico`, no
+`app/favicon.ico` and no `app/icon.*`. Two consequences to expect until Phase 4
+supplies one:
+
+- Under `next dev`, every `/favicon.ico` request falls through the MDX catch-all
+  and emits two `MODULE_NOT_FOUND` traces plus a 404. **This is expected output,
+  not a bug** — worth knowing in a repo that treats noisy output as a defect,
+  so nobody spends an afternoon chasing it.
+- The static export contains no `out/favicon.ico`, so every browser that asks
+  gets a 404.
+
+Left open on purpose: a favicon is a brand surface, Phase 4 owns the brand
+presets, and picking a mark is Kelyn's decision rather than a builder's. When it
+lands, add a test asserting `out/favicon.ico` exists, so the gap cannot reopen.
+
+Found by running the dev server, not by any test. The site tests assert what
+`out/` contains; they never assert what a browser requests and fails to find.
+That distinction is worth carrying into Phase 4's tests.
+
 ## Review notes
 
 A builder check read the first draft. Calls made in response, worth checking
