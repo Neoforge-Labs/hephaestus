@@ -163,7 +163,13 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
             p for p, text in pages.items() if not p.is_file() or p.read_text(encoding="utf-8") != text
         ]
         directory = root / PAGES_RELDIR
-        orphans = [p for p in sorted(directory.glob("HEPH-*.mdx")) if p not in pages] if directory.is_dir() else []
+        # Anything else in the directory is an orphan, whatever its name or extension;
+        # dotfiles (.DS_Store) are not pages.
+        orphans = (
+            [p for p in sorted(directory.iterdir()) if p.is_file() and not p.name.startswith(".") and p not in pages]
+            if directory.is_dir()
+            else []
+        )
         for path in drift + orphans:
             reason = "has no registry code" if path in orphans else "is stale or missing"
             print(f"{path.relative_to(root)} {reason}; run: uv run tools/gen_error_pages.py", file=sys.stderr)

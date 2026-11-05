@@ -162,3 +162,16 @@ def test_nothing_links_to_the_old_reference_index() -> None:
     assert not (REPO_ROOT / "docs/site/content/reference/errors.mdx").exists()
     for path in (REPO_ROOT / "docs/site/content").rglob("*.mdx"):
         assert "/reference/errors" not in path.read_text(encoding="utf-8"), path
+
+
+@pytest.mark.parametrize("name", ["notes.mdx", "index.mdx.bak", "heph-old-404.mdx"])
+def test_check_reports_any_stray_file_in_the_errors_directory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], name: str
+) -> None:
+    root = _root(tmp_path)
+    assert main([], root=root) == 0
+    assert main(["--check"], root=root) == 0
+    (root / PAGES_RELDIR / name).write_text("stray\n", encoding="utf-8")
+    capsys.readouterr()
+    assert main(["--check"], root=root) == 1
+    assert name in capsys.readouterr().err
