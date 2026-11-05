@@ -38,3 +38,5 @@ go/bin/
 docs/site/out/
 docs/site/.next/
 docs/site/next-env.d.ts
+# next dev regenerates this agent-instructions file; instructions live in CLAUDE.md
+docs/site/AGENTS.md
