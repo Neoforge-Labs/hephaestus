@@ -1,5 +1,6 @@
 """Decimal ergonomics, immutability, errors and edge cases for hephkit.money."""
 
+import operator
 import pickle
 from decimal import Decimal
 
@@ -186,6 +187,43 @@ def test_operators_with_foreign_types() -> None:
         m + 1  # type: ignore[operator]
     with pytest.raises(TypeError):
         m - 1.0  # type: ignore[operator]
+
+
+@pytest.mark.parametrize("other", [5, 0, 1.0, "KES 0.01", None, Decimal("0.01")])
+def test_ordering_with_a_foreign_type_is_a_type_error(other: object) -> None:
+    """A non-Money operand is a programming bug, so the dunders return
+    ``NotImplemented`` and Python raises ``TypeError``. It is not a
+    money-domain error and must never surface as ``HEPH-MONEY-409``."""
+    m = Money(1, "KES")
+    for op in (operator.lt, operator.le, operator.gt, operator.ge):
+        with pytest.raises(TypeError):
+            op(m, other)
+        with pytest.raises(TypeError):
+            op(other, m)
+
+
+def test_ordering_across_currencies_is_a_money_error() -> None:
+    kes, usd = Money(1, "KES"), Money(1, "USD")
+    for op in (operator.lt, operator.le, operator.gt, operator.ge):
+        with pytest.raises(MoneyError) as exc:
+            op(kes, usd)
+        assert exc.value.code == "HEPH-MONEY-409"
+    # Equality is not ordering: it stays False across currencies so that a
+    # Money can be a dict key or a set member without `==` ever raising.
+    assert (kes == usd) is False
+    assert (kes != usd) is True
+    assert len({kes, usd}) == 2
+
+
+def test_ordering_sorts_and_reaches_the_i64_bounds() -> None:
+    i64_min, i64_max = -(2**63), 2**63 - 1
+    assert Money(i64_min, "USD") < Money(i64_max, "USD")
+    assert Money(i64_max, "USD") > Money(i64_min, "USD")
+    assert Money(i64_min, "USD") <= Money(i64_min, "USD")
+    amounts = [Money(n, "KWD") for n in (1000, -1, 0, 999, i64_min, i64_max)]
+    assert [m.minor for m in sorted(amounts)] == [i64_min, -1, 0, 999, 1000, i64_max]
+    assert max(amounts).minor == i64_max
+    assert min(amounts).minor == i64_min
 
 
 def test_wire_shapes() -> None:

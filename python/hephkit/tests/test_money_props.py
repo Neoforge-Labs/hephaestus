@@ -1,9 +1,12 @@
 """Hypothesis properties mirroring core/hephkit-core/tests/prop_money.rs."""
 
+import operator
+
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from hephkit.money import Money
+from hephkit.money import Money, MoneyError
 
 I64_MIN = -(2**63)
 I64_MAX = 2**63 - 1
@@ -59,6 +62,27 @@ def test_add_sub_inverse(minor: int, other: int) -> None:
     a, b = Money(minor, "USD"), Money(other, "USD")
     assert (a + b) - b == a
     assert a + (-a) == Money(0, "USD")
+
+
+i64s = st.integers(min_value=I64_MIN, max_value=I64_MAX)
+
+
+@given(a=i64s, b=i64s)
+def test_ordering_agrees_with_minor_units(a: int, b: int) -> None:
+    x, y = Money(a, "KES"), Money(b, "KES")
+    assert (x < y) is (a < b)
+    assert (x <= y) is (a <= b)
+    assert (x > y) is (a > b)
+    assert (x >= y) is (a >= b)
+
+
+@given(a=i64s, b=i64s)
+def test_ordering_across_currencies_always_raises(a: int, b: int) -> None:
+    x, y = Money(a, "KES"), Money(b, "USD")
+    for left, right in ((x, y), (y, x)):
+        with pytest.raises(MoneyError) as exc:
+            operator.lt(left, right)
+        assert exc.value.code == "HEPH-MONEY-409"
 
 
 @given(minor=st.integers(min_value=I64_MIN, max_value=I64_MAX))
