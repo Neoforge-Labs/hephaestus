@@ -9,11 +9,16 @@
 #
 # PYTHON_VERSION tracks a newer runtime than the project floor (>=3.12): the
 # abi3-py312 wheels run unchanged on 3.13. If you override PYTHON_VERSION you
-# must also override PYTHON_DIGEST, otherwise the build fails (by design).
+# must also override PYTHON_DIGEST and PYTHON_FULL_VERSION. The build stage
+# asserts that the interpreter the digest provides matches all three, so a
+# mismatch fails the build instead of shipping the wrong runtime or a wrong
+# PYTHON_VERSION variable (a digest wins over a tag; Docker ignores the mismatch).
 
 ARG PYTHON_VERSION=3.13
 # python:3.13-slim-bookworm (multi-arch index digest)
 ARG PYTHON_DIGEST=sha256:281d39ff02e3b389401586134ff9e6572954687822a58055ec07a60ded4e0b7f
+# Exact version that digest provides; becomes the PYTHON_VERSION env var.
+ARG PYTHON_FULL_VERSION=3.13.18
 
 # --- Stage 1: uv -------------------------------------------------------------
 # uv ships as a static binary; take it from the official image rather than
@@ -29,6 +34,15 @@ FROM python:${PYTHON_VERSION}-slim-bookworm@${PYTHON_DIGEST} AS build
 
 # Re-declared: a global ARG is not visible inside a stage until it is.
 ARG PYTHON_VERSION
+ARG PYTHON_FULL_VERSION
+
+# Invariant: the requested version, the restated ENV value and the interpreter the
+# digest actually provides must agree. Enforced here so it cannot drift.
+RUN actual="$(python3 -c 'import platform; print(platform.python_version())')" \
+ && case "$actual" in "${PYTHON_VERSION}".*) ;; \
+      *) echo "PYTHON_VERSION=${PYTHON_VERSION} but the pinned digest provides ${actual}" >&2; exit 1 ;; esac \
+ && [ "$actual" = "${PYTHON_FULL_VERSION}" ] \
+ || { echo "PYTHON_FULL_VERSION=${PYTHON_FULL_VERSION} but the pinned digest provides ${actual}" >&2; exit 1; }
 
 # Pick up Debian security fixes published since the pinned base was built. This
 # makes rebuilds not bit-reproducible, deliberately: a base image that never
@@ -66,6 +80,7 @@ COPY --from=uv /uv /usr/local/bin/uv
 # "simplify" this back to `FROM python:...`. The cost is that upstream ENV and
 # labels are lost, which is why they are restated below.
 FROM scratch AS runtime
+ARG PYTHON_FULL_VERSION
 COPY --from=build / /
 
 LABEL org.opencontainers.image.title="heph-python" \
@@ -76,12 +91,13 @@ LABEL org.opencontainers.image.title="heph-python" \
 
 # FROM scratch drops the upstream image's ENV, so the ones Python needs are
 # restated here (same values as the pinned python:3.13-slim-bookworm image).
-# PYTHON_VERSION is the full upstream version (the build ARG of the same name is
-# only the minor); update it together with PYTHON_DIGEST. GPG_KEY and
-# PYTHON_SHA256 are build-time-only upstream values and are not restated.
+# PYTHON_VERSION is the full upstream version, taken from PYTHON_FULL_VERSION,
+# which the build stage verifies against the installed interpreter. (The build
+# ARG of the same name is only the minor.) GPG_KEY and PYTHON_SHA256 are
+# build-time-only upstream values and are not restated.
 ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
     LANG=C.UTF-8 \
-    PYTHON_VERSION=3.13.18 \
+    PYTHON_VERSION=${PYTHON_FULL_VERSION} \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
