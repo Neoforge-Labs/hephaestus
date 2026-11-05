@@ -20,7 +20,8 @@ const meta: MetaRecord = {
   "0014-adopt-or-build": "0014. Adopt commodity components, build where we have an edge",
   "0015-maturity-levels": "0015. Maturity levels for every module",
   "0016-value-preserving-trailing-zeros": "0016. Accept value-preserving trailing zeros in decimal money input",
-  "0017-full-iso-4217-currency-table": "0017. Generate the full ISO 4217 currency table, funds codes included"
+  "0017-full-iso-4217-currency-table": "0017. Generate the full ISO 4217 currency table, funds codes included",
+  "0018-disambiguate-the-name-atlas": "0018. Disambiguate the name \"Atlas\" across ADRs 0013 and 0014"
 }
 
 export default meta
