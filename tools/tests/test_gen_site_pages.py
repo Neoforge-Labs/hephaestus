@@ -1,6 +1,5 @@
 """Tests for tools/gen_site_pages.py."""
 
-import json
 import re
 import shutil
 import sys
@@ -30,7 +29,6 @@ def _body(text: str) -> str:
 def _root(tmp_path: Path) -> Path:
     for rel in ("conventions", "spec", "docs/adr", "docs/superpowers/specs"):
         shutil.copytree(REPO_ROOT / rel, tmp_path / rel)
-    shutil.copy(REPO_ROOT / ".release-please-manifest.json", tmp_path / ".release-please-manifest.json")
     return tmp_path
 
 
@@ -117,10 +115,6 @@ def _spec_version(root: Path) -> str:
     return m.group(1)
 
 
-def _package_version(root: Path) -> str:
-    return json.loads((root / ".release-please-manifest.json").read_text("utf-8"))["."]
-
-
 def _spec_note(pages: dict[Path, str], root: Path = REPO_ROOT) -> str:
     """The generated note: everything between the front matter and the synced body."""
     spec = (root / "spec/heph-spec.md").read_text(encoding="utf-8")
@@ -139,10 +133,10 @@ def test_spec_page_is_the_spec_body() -> None:
     assert _body(_page(pages, "spec/index.md")) == note + spec
 
 
-def test_spec_page_note_names_both_versions_and_says_they_are_independent() -> None:
+def test_spec_page_note_names_the_spec_version_and_says_the_two_are_independent() -> None:
     note = _spec_note(generate(REPO_ROOT))
     assert _spec_version(REPO_ROOT) in note
-    assert _package_version(REPO_ROOT) in note
+    assert not re.search(r"\b\d+\.\d+\.\d+\b", note.replace(_spec_version(REPO_ROOT), ""))  # no package number
     assert "independent" in note
 
 
@@ -153,33 +147,6 @@ def test_spec_page_note_follows_the_spec_version(tmp_path: Path) -> None:
     path.write_text(path.read_text("utf-8").replace(f"**Version:** {old}", "**Version:** 7.8.9", 1), encoding="utf-8")
     note = _spec_note(generate(root), root)
     assert "7.8.9" in note
-    assert _package_version(root) in note
-
-
-def test_spec_page_note_follows_the_package_version(tmp_path: Path) -> None:
-    root = _root(tmp_path)
-    path = root / ".release-please-manifest.json"
-    manifest = json.loads(path.read_text("utf-8"))
-    manifest["."] = "6.5.4"
-    path.write_text(json.dumps(manifest), encoding="utf-8")
-    note = _spec_note(generate(root), root)
-    assert "6.5.4" in note
-    assert _spec_version(root) in note
-
-
-def test_spec_page_rejects_an_unparseable_manifest(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root = _root(tmp_path)
-    (root / ".release-please-manifest.json").write_text("{not json", encoding="utf-8")
-    assert main([], root) == 1
-    err = capsys.readouterr().err
-    assert ".release-please-manifest.json" in err and "Traceback" not in err
-
-
-def test_spec_page_rejects_a_manifest_without_the_root_version(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root = _root(tmp_path)
-    (root / ".release-please-manifest.json").write_text('{"go": "0.1.0"}', encoding="utf-8")
-    assert main([], root) == 1
-    assert ".release-please-manifest.json" in capsys.readouterr().err
 
 
 def test_spec_page_rejects_a_spec_with_no_version(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

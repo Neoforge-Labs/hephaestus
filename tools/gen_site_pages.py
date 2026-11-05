@@ -13,8 +13,7 @@ Sources and outputs, all under ``docs/site/content/``:
 * ``conventions/attributes.yaml`` -> ``reference/conventions.mdx``
 * ``spec/modules.yaml``           -> ``reference/modules.mdx``
 * ``spec/heph-spec.md``           -> ``spec/index.md`` (behind a generated note that
-  separates the spec version from the package version in
-  ``.release-please-manifest.json``)
+  separates the spec version from the package version)
 * ``docs/adr/NNNN-*.md``          -> ``adrs/NNNN-*.md`` and ``adrs/_meta.ts``
 * the design's Rollout section    -> ``roadmap.mdx``
 
@@ -45,7 +44,6 @@ ADR_SRC = Path("docs/adr")
 ATTRIBUTES_SRC = Path("conventions/attributes.yaml")
 MODULES_SRC = Path("spec/modules.yaml")
 SPEC_SRC = Path("spec/heph-spec.md")
-MANIFEST_SRC = Path(".release-please-manifest.json")
 DESIGN_SRC = Path("docs/superpowers/specs/2026-11-04-hephaestus-design.md")
 
 # Product and research project names that must not appear on the roadmap page.
@@ -237,24 +235,15 @@ def parse_spec_version(spec: str) -> str:
     return m.group(1)
 
 
-def parse_package_version(manifest: str) -> str:
-    try:
-        version = json.loads(manifest).get(".")
-    except (ValueError, AttributeError) as err:
-        raise ValueError(f"{MANIFEST_SRC}: not a JSON object ({err})") from err
-    if not isinstance(version, str) or not version.strip():
-        raise ValueError(f"{MANIFEST_SRC}: no version under the \".\" key")
-    return version
-
-
-def render_spec_note(spec_version: str, package_version: str) -> str:
-    """A visible note above the synced spec; both numbers are read from their sources."""
+def render_spec_note(spec_version: str) -> str:
+    """A visible note above the synced spec. It carries the spec version, read from the
+    spec, and deliberately no package version: that is stated by the project's releases."""
     return (
         f"> **Two version numbers.** This page is version {spec_version} of the specification. "
-        f"The packages (`hephkit`, `hephkit-core` and the Go module) are versioned independently; "
-        f"the last package release recorded is {package_version}. "
-        "A change to the specification bumps the spec version, and package releases follow their own "
-        "history, so the two numbers can differ and need not move together.\n\n"
+        "The packages (`hephkit`, `hephkit-core` and the Go module) are versioned independently: "
+        "a change to the specification bumps the spec version, while package releases follow their own "
+        "commit history, so the two numbers need not match. "
+        "For the current package version, see the project's releases.\n\n"
     )
 
 
@@ -290,10 +279,7 @@ def generate(repo_root: Path) -> dict[Path, str]:
     }
 
     spec = (repo_root / SPEC_SRC).read_text(encoding="utf-8")
-    note = render_spec_note(
-        parse_spec_version(spec),
-        parse_package_version((repo_root / MANIFEST_SRC).read_text(encoding="utf-8")),
-    )
+    note = render_spec_note(parse_spec_version(spec))
     out[content / "spec/index.md"] = _synced("spec/heph-spec.md", _title(spec, "heph-spec"), note + spec)
 
     sources = adr_sources(repo_root)
