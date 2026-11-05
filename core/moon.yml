@@ -1,0 +1,15 @@
+language: 'rust'
+layer: 'library'
+
+tasks:
+  test:
+    command: 'cargo test -p hephkit-core'
+    inputs:
+      - 'hephkit-core/**/*'
+      - 'Cargo.toml'
+      - '/conformance/money/*.json'
+  lint:
+    command: 'cargo clippy -p hephkit-core --all-targets -- -D warnings'
+    inputs:
+      - 'hephkit-core/**/*'
+      - 'Cargo.toml'
