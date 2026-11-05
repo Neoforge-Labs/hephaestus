@@ -130,8 +130,10 @@ def test_python_ci_runs_fast_path_and_every_generator_check() -> None:
 
 def test_rust_ci_enforces_coverage_on_the_rustup_toolchain() -> None:
     text = (WORKFLOWS / "rust-ci.yml").read_text()
-    assert "--fail-under-lines 90" in text
-    assert "-D warnings" in text or "core:lint" in text
+    assert "core:coverage" in text and "core:lint-py" in text
+    moon = yaml.safe_load((ROOT / "core/moon.yml").read_text())["tasks"]
+    assert "--fail-under-lines 90" in moon["coverage"]["command"]
+    assert "-D warnings" in moon["lint-py"]["command"]
     assert "llvm-tools" in text
 
 
@@ -163,3 +165,25 @@ def test_release_publishes_with_trusted_publishing_and_no_token() -> None:
     assert "id-token: write" in text
     assert "pypa/gh-action-pypi-publish" in text
     assert not re.search(r"PYPI_(API_)?TOKEN|password:", text)
+
+
+def test_enabled_ecosystem_rows_are_pinned_and_runnable() -> None:
+    include = load_workflow("ecosystem.yml")["jobs"]["matrix"]["strategy"]["matrix"]["include"]
+    for e in include:
+        if e["enabled"]:
+            assert re.fullmatch(r"[0-9a-f]{40}|\$\{\{ github\.sha \}\}", e["ref"]), e["name"]
+            assert e["command"].strip(), e["name"]
+        else:
+            assert not re.fullmatch(r"[0-9a-f]{40}", e["ref"]) and e["ref"] != "main", e["name"]
+
+
+def test_release_publishes_nothing_without_a_verified_version() -> None:
+    jobs = load_workflow("release.yml")["jobs"]
+    assert "python/hephkit--version" in (WORKFLOWS / "release.yml").read_text()
+    for job in ("wheels", "images"):
+        assert "verify-release" in jobs[job]["needs"], job
+
+
+def test_ci_never_cancels_runs_on_main() -> None:
+    cancel = load_workflow("ci.yml")["concurrency"]["cancel-in-progress"]
+    assert "refs/heads/main" in cancel

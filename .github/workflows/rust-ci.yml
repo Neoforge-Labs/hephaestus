@@ -35,8 +35,6 @@ jobs:
       - name: clippy -D warnings (hephkit-core)
         run: moon run core:lint
       - name: clippy -D warnings (hephkit-py)
-        working-directory: core
-        run: cargo clippy -p hephkit-py --all-targets -- -D warnings
+        run: moon run core:lint-py
       - name: Coverage floor, 90% lines
-        working-directory: core
-        run: cargo llvm-cov -p hephkit-core --fail-under-lines 90
+        run: moon run core:coverage

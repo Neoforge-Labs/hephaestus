@@ -24,8 +24,11 @@ jobs:
       pull-requests: write
     outputs:
       released: ${{ steps.rp.outputs.releases_created }}
-      tag: ${{ steps.rp.outputs.tag_name }}
-      version: ${{ steps.rp.outputs.version }}
+      # Packages live in sub-paths, so release-please prefixes their outputs
+      # with the path; the unprefixed ones exist only for a root package.
+      # linked-versions keeps all four equal, so python/hephkit speaks for all.
+      version: ${{ steps.rp.outputs['python/hephkit--version'] }}
+      tag: ${{ steps.rp.outputs['python/hephkit--tag_name'] }}
     steps:
       - id: rp
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
@@ -33,8 +36,25 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  wheels:
+  # Fail closed: this path cannot be exercised before a real release, so an
+  # empty version must stop everything rather than ship an untagged image.
+  verify-release:
     needs: release-please
+    if: ${{ needs.release-please.outputs.released == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a non-empty version and tag
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
+          TAG: ${{ needs.release-please.outputs.tag }}
+        run: |
+          if [ -z "$VERSION" ] || [ -z "$TAG" ]; then
+            echo "::error::release-please reported a release but version='$VERSION' tag='$TAG'"
+            exit 1
+          fi
+
+  wheels:
+    needs: [release-please, verify-release]
     if: ${{ needs.release-please.outputs.released == 'true' }}
     uses: ./.github/workflows/rust-wheels.yml
 
@@ -54,7 +74,7 @@ jobs:
           packages-dir: dist
 
   images:
-    needs: release-please
+    needs: [release-please, verify-release]
     if: ${{ needs.release-please.outputs.released == 'true' }}
     permissions:
       contents: read

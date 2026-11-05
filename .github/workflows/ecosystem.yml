@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   matrix:
-    name: ${{ matrix.name }}${{ matrix.enabled && '' || ' (disabled)' }}
+    name: ${{ matrix.name }} (${{ matrix.enabled && 'enabled' || 'disabled' }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -32,31 +32,37 @@ jobs:
             repo: Neoforge-Labs/hephaestus
             ref: ${{ github.sha }}
             command: bash examples/hello/tutorial_test.sh
-          # Placeholders: ref and command are set when the repo is enabled.
+          # Placeholders: before enabling a row, set ref to a 40-hex commit SHA and set
+          # command. The placeholder ref cannot resolve, so checkout fails loudly.
           - name: Collie
             enabled: false
             repo: Neoforge-Labs/collie
-            ref: main
+            ref: TODO-pin-a-commit-sha
             command: ''
           - name: Domus
             enabled: false
             repo: Neoforge-Labs/domus
-            ref: main
+            ref: TODO-pin-a-commit-sha
             command: ''
           - name: SAWA
             enabled: false
             repo: Neoforge-Labs/sawa
-            ref: main
+            ref: TODO-pin-a-commit-sha
             command: ''
           - name: NeoRx
             enabled: false
             repo: Neoforge-Labs/neorx
-            ref: main
+            ref: TODO-pin-a-commit-sha
             command: ''
     steps:
       - name: Skipped, not enabled
         if: ${{ !matrix.enabled }}
         run: echo "::notice title=${{ matrix.name }}::skipped, enabled is false in ecosystem.yml"
+      - name: Refuse an enabled row with no command
+        if: ${{ matrix.enabled && matrix.command == '' }}
+        run: |
+          echo "::error::${{ matrix.name }} is enabled but has an empty command"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: ${{ matrix.enabled }}
         with:

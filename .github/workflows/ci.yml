@@ -2,6 +2,9 @@ name: ci
 
 on:
   pull_request:
+  workflow_dispatch: # pre-merge way to run the slow tests: run this workflow on a branch
+  schedule:
+    - cron: '43 4 * * 1' # weekly, on main
   push:
     branches:
       - main
@@ -12,7 +15,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a run on main: it may be publishing images.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   repo-checks:
@@ -35,7 +39,7 @@ jobs:
   python:
     uses: ./.github/workflows/python-ci.yml
     with:
-      include-slow: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      include-slow: ${{ github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/heads/work/') || github.event_name == 'workflow_dispatch' }}
 
   go:
     uses: ./.github/workflows/go-ci.yml

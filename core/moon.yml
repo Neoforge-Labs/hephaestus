@@ -13,3 +13,20 @@ tasks:
     inputs:
       - 'hephkit-core/**/*'
       - 'Cargo.toml'
+
+  lint-py:
+    command: 'cargo clippy -p hephkit-py --all-targets -- -D warnings'
+    inputs:
+      - 'hephkit-py/**/*'
+      - 'hephkit-core/**/*'
+      - 'Cargo.toml'
+  coverage:
+    # Needs the rustup toolchain with llvm-tools and cargo-llvm-cov; a Homebrew
+    # cargo has no llvm-profdata.
+    command: 'cargo llvm-cov -p hephkit-core --fail-under-lines 90'
+    inputs:
+      - 'hephkit-core/**/*'
+      - 'Cargo.toml'
+      - '/conformance/**/*.json'
+    options:
+      cache: false
