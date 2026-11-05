@@ -82,10 +82,11 @@ import logging
 import socket
 import threading
 import uuid
+import warnings
 from collections.abc import ItemsView, Iterable, Mapping, Sequence, ValuesView
 from collections.abc import Set as AbstractSet
 from pathlib import PurePath
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 from urllib.parse import urlsplit
 
 import structlog
@@ -237,18 +238,32 @@ def _add_trace_ids(_logger: WrappedLogger, _method: str, event_dict: EventDict) 
     return event_dict
 
 
+# The accepted level names, case-insensitively. `HephSettings.LogLevel` must
+# list exactly these (pinned by a test): the two used to disagree in both
+# directions -- settings rejected `debug` and `WARN` that this function accepted,
+# while this function's error message advertised `NOTSET` that settings rejected.
+#
+# `WARN` and `FATAL` are `logging`'s own deprecated aliases, kept because an
+# operator's muscle memory has them and honouring them costs nothing. `NOTSET`
+# is deliberately NOT accepted: it is 0, so as a filtering threshold it means
+# "emit everything", including records below DEBUG. That is not a level anyone
+# selects on purpose, and silently accepting it would be the same class of
+# surprise this function exists to remove.
+LOG_LEVELS: Final = ("CRITICAL", "FATAL", "ERROR", "WARNING", "WARN", "INFO", "DEBUG")
+
+
 def _numeric_level(level: str) -> int:
     """``level`` as a numeric threshold, raising rather than defaulting.
 
     A typo used to become ``INFO`` silently, so an operator raising verbosity
-    during an incident got nothing and no warning (``HephSettings.log_level``
-    now also rejects it at construction).
+    during an incident got nothing and no warning. Case-insensitive, because
+    ``HEPH_LOG_LEVEL=debug`` is the common convention and rejecting it would
+    turn that same incident into a failed start.
     """
-    try:
-        return logging.getLevelNamesMapping()[level.upper()]
-    except (AttributeError, KeyError):
-        known = ", ".join(sorted(logging.getLevelNamesMapping()))
-        raise ValueError(f"unknown log level {level!r}: expected one of {known}") from None
+    if not isinstance(level, str) or level.upper() not in LOG_LEVELS:
+        known = ", ".join(LOG_LEVELS)
+        raise ValueError(f"unknown log level {level!r}: expected one of {known} (any case)")
+    return logging.getLevelNamesMapping()[level.upper()]
 
 
 def _configure_logging(level: str, words: frozenset[str] = REDACTED_KEYS) -> None:
@@ -293,8 +308,31 @@ def configure_logging(level: str = "INFO", *, redact_keys: Iterable[str] = ()) -
     _configure_logging(level, REDACTED_KEYS | {_normalise(k) for k in redact_keys})
 
 
+_warned_unconfigured = False
+
+
 def get_logger(name: str) -> FilteringBoundLogger:
-    """A structlog logger that emits redacted JSON lines with trace ids."""
+    """A structlog logger.
+
+    Under hephkit's configuration it emits redacted JSON lines with trace ids —
+    but only under hephkit's configuration. Importing this module no longer
+    installs it, so until ``setup_observability`` or ``configure_logging`` has
+    run, this returns a logger on whatever structlog is set to, **and nothing
+    is redacted**: ``get_logger("t").info("hi", password="hunter2")`` prints the
+    password. Redaction is a security property, so the first call made while
+    structlog is unconfigured warns rather than leaving that to be discovered
+    in a log file.
+    """
+    global _warned_unconfigured
+    if not _warned_unconfigured and not structlog.is_configured():
+        _warned_unconfigured = True  # once per process: a warning per log call is noise
+        warnings.warn(
+            "hephkit.observability.get_logger() was called before structlog was "
+            "configured, so log records are NOT redacted and carry no trace ids. "
+            "Call setup_observability(settings) or configure_logging() first.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
     logger: FilteringBoundLogger = structlog.get_logger(name)
     return logger
 
@@ -325,15 +363,7 @@ class _NoOpSpanExporter(SpanExporter):
         return True
 
 
-def _collector_reachable(endpoint: str, timeout: float) -> bool:
-    """Whether ``endpoint``'s host:port accepts a TCP connection within ``timeout``.
-
-    One bounded connect, never a request: this decides which exporter to build,
-    so it must not be able to delay or fail startup. A collector that comes up
-    *after* the product does will be treated as absent for the life of the
-    process — pass ``probe_timeout=None`` to skip the probe when that is the
-    deployment shape.
-    """
+def _connects(endpoint: str, timeout: float) -> bool:
     parts = urlsplit(endpoint)
     host = parts.hostname
     if not host:
@@ -343,6 +373,50 @@ def _collector_reachable(endpoint: str, timeout: float) -> bool:
         with socket.create_connection((host, port), timeout=timeout):
             return True
     return False
+
+
+def _collector_reachable(endpoint: str, timeout: float) -> bool:
+    """Whether ``endpoint``'s host:port accepts a TCP connection within ``timeout``.
+
+    Runs on a daemon thread joined with ``timeout``, which is what makes the
+    bound real: ``socket.create_connection``'s own timeout covers the connect
+    but NOT ``getaddrinfo``, so a name that resolves slowly blocks for as long
+    as the resolver takes. Measured at 5,040 ms against a 250 ms budget for
+    ``otel-collector.observability.svc.cluster.local`` — the most likely
+    production value there is — after which the no-op exporter would have been
+    installed for the life of the process. The thread is abandoned rather than
+    waited on; it holds nothing but a socket and cannot delay interpreter exit.
+
+    A timeout counts as unreachable, so in a dev or test environment with a
+    slow resolver tracing is disabled. That is the right guess there and the
+    wrong one in production, which is why the probe is off by default in
+    ``prod`` (see ``_probe_budget``).
+    """
+    answer: list[bool] = []
+    prober = threading.Thread(
+        target=lambda: answer.append(_connects(endpoint, timeout)),
+        name="hephkit-otel-probe",
+        daemon=True,
+    )
+    prober.start()
+    prober.join(timeout)
+    return bool(answer) and answer[0]
+
+
+def _probe_budget(settings: HephSettings, requested: float | None | str) -> float | None:
+    """Seconds to spend probing, or ``None`` to skip the probe and always export.
+
+    ``"auto"`` (the default) probes in ``dev`` and ``test`` and does NOT probe in
+    ``prod``. The noise the probe answers — 4,008 exporter warnings and a 198 s
+    suite in one ingot — is a dev and test problem, and ``HephSettings`` already
+    carries ``env`` to tell them apart. A kit that other products adopt must
+    never silently drop *production* traces to fix a test-suite annoyance, and a
+    probe that guesses wrong in prod does exactly that. An explicit value is
+    honoured in every environment, ``prod`` included.
+    """
+    if isinstance(requested, str):
+        return None if settings.env == "prod" else COLLECTOR_PROBE_TIMEOUT
+    return requested
 
 
 class _SwitchTracer(trace.Tracer):
@@ -440,7 +514,7 @@ def setup_observability(
     *,
     span_exporter: SpanExporter | None = None,
     redact_keys: Iterable[str] = (),
-    probe_timeout: float | None = COLLECTOR_PROBE_TIMEOUT,
+    probe_timeout: float | None | Literal["auto"] = "auto",
 ) -> Observability:
     """Configure tracing and logging in one call.
 
@@ -448,11 +522,21 @@ def setup_observability(
     (see the module docstring for the matching rule).
 
     With no ``span_exporter``, spans go to ``settings.otlp_endpoint`` over OTLP
-    HTTP — but only if that endpoint is non-blank and answers a TCP connect
-    within ``probe_timeout`` seconds. Otherwise spans are dropped by a no-op
-    exporter, so a product with no collector pays nothing and emits no export
-    retries. Set ``probe_timeout=None`` to skip the probe and always export,
-    which is what a deployment whose collector starts after the product wants.
+    HTTP. A blank endpoint always gets a no-op exporter. A non-blank one is
+    probed first in ``dev`` and ``test``, and is NOT probed in ``prod``:
+
+    * ``probe_timeout="auto"`` (the default) — probe with a
+      ``COLLECTOR_PROBE_TIMEOUT`` budget in ``dev``/``test``, skip it in
+      ``prod``. A product with no collector then pays nothing and emits no
+      export retries where that noise actually hurts, while production traces
+      are never dropped on the strength of one TCP connect.
+    * ``probe_timeout=None`` — never probe; always build the OTLP exporter.
+    * ``probe_timeout=<seconds>`` — probe with that budget in every
+      environment, ``prod`` included.
+
+    The probe is one connect on a daemon thread joined with the budget, so a
+    slow-resolving name cannot delay startup, and it runs before the lock so it
+    cannot delay another thread's setup either.
 
     Shutdown is registered with ``atexit``; a FastAPI product should call
     ``shutdown()`` from its lifespan instead (see the module docstring).
@@ -472,6 +556,16 @@ def setup_observability(
     """
     global _active
     words = REDACTED_KEYS | {_normalise(k) for k in redact_keys}
+    # Probed OUTSIDE the lock: even bounded, this waits on the network, and
+    # holding `_lock` across it would stall every other thread's setup. The
+    # unsynchronised `_active` read only avoids a needless probe on a repeat
+    # call; the authoritative check is still inside the lock below.
+    endpoint = settings.otlp_endpoint.strip()
+    reachable = True
+    if span_exporter is None and endpoint and _active is None:
+        budget = _probe_budget(settings, probe_timeout)
+        if budget is not None:
+            reachable = _collector_reachable(settings.otlp_endpoint, budget)
     with _lock:
         if _active is not None:
             if _active.settings != settings or _active._words != words:
@@ -484,11 +578,9 @@ def setup_observability(
             provider = TracerProvider(resource=resource)
             if span_exporter is not None:
                 provider.add_span_processor(SimpleSpanProcessor(span_exporter))
-            elif settings.otlp_endpoint.strip() and (
-                probe_timeout is None or _collector_reachable(settings.otlp_endpoint, probe_timeout)
-            ):
-                endpoint = settings.otlp_endpoint.rstrip("/") + "/v1/traces"
-                provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
+            elif endpoint and reachable:
+                traces = endpoint.rstrip("/") + "/v1/traces"
+                provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=traces)))
             else:
                 # No collector: drop spans cheaply rather than retry forever.
                 provider.add_span_processor(SimpleSpanProcessor(_NoOpSpanExporter()))

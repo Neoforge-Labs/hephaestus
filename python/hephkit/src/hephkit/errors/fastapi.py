@@ -18,6 +18,7 @@ is deliberately not mapped to ``HEPH-GEN-500``.
 when no span is active.
 """
 
+import warnings
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -59,6 +60,29 @@ def _trace_id() -> str | None:
     return format(ctx.trace_id, "032x") if ctx.is_valid else None
 
 
+def _allowed(extensions: dict[str, Any] | None) -> dict[str, Any]:
+    """``extensions`` without the reserved problem members.
+
+    Dropped rather than raised: raising here would route through
+    ``problem_response``'s serialisation fallback and turn a correct 404 into a
+    HEPH-GEN-500, which is a worse response than the one the caller asked for.
+    But a silent drop leaves a caller wondering where its member went, so it
+    warns. ``HephError`` refuses the same names outright, at construction.
+    """
+    if not extensions:
+        return {}
+    clash = sorted(RESERVED_MEMBERS.intersection(extensions))
+    if clash:
+        warnings.warn(
+            f"problem+json extensions {', '.join(clash)} are reserved and were dropped; "
+            "type, title, status, detail and code come from the registry and trace_id "
+            "from the active span",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+    return {k: v for k, v in extensions.items() if k not in RESERVED_MEMBERS}
+
+
 def _render(code: str, detail: str | None, extensions: dict[str, Any] | None) -> JSONResponse:
     status, title = REGISTRY[code]
     body: dict[str, Any] = {
@@ -68,7 +92,7 @@ def _render(code: str, detail: str | None, extensions: dict[str, Any] | None) ->
         # was not, because it is only assigned when a span is active, so
         # without one a caller-supplied value survived into the body and
         # fabricated a trace that never existed.
-        **{k: v for k, v in (extensions or {}).items() if k not in RESERVED_MEMBERS},
+        **_allowed(extensions),
         "type": TYPE_BASE_URL + code,
         "title": title,
         "status": status,

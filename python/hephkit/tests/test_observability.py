@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import logging
 import time
+import typing
 from collections.abc import Iterator
 from typing import Any
 
@@ -249,6 +251,36 @@ def test_log_level_filters_from_settings(capsys: pytest.CaptureFixture[str]) -> 
     assert [entry["event"] for entry in _lines(capsys)] == ["loud"]
 
 
+def test_log_levels_are_case_insensitive_and_the_two_ends_agree() -> None:
+    """`HEPH_LOG_LEVEL=debug` became a hard startup failure: the Literal was
+    case-sensitive while `_configure_logging` uppercased, and `_numeric_level`'s
+    own message advertised NOTSET/WARN/FATAL that settings rejected. The two
+    ends disagreed in both directions; now they list exactly the same set."""
+    from hephkit.settings import LogLevel
+
+    literal = typing.get_args(typing.get_args(LogLevel)[0])
+    assert set(literal) == set(obs_module.LOG_LEVELS), "settings and observability disagree"
+
+    for spelling in ("debug", "Debug", "DEBUG", "dEbUg"):
+        assert _settings(log_level=spelling).log_level == "DEBUG"
+        assert obs_module._numeric_level(spelling) == logging.DEBUG
+
+    # logging's own aliases are honoured; NOTSET is not a threshold anyone
+    # selects on purpose (it is 0, i.e. emit everything below DEBUG too).
+    assert _settings(log_level="warn").log_level == "WARN"
+    assert obs_module._numeric_level("warn") == logging.WARNING
+    with pytest.raises(ValidationError):
+        _settings(log_level="NOTSET")
+    with pytest.raises(ValueError, match="unknown log level"):
+        obs_module._numeric_level("NOTSET")
+
+
+def test_a_lowercase_level_actually_sets_the_threshold(capsys: pytest.CaptureFixture[str]) -> None:
+    setup_observability(_settings(log_level="debug"), span_exporter=InMemorySpanExporter())
+    get_logger("t").debug("shown now")
+    assert [e["event"] for e in _lines(capsys)] == ["shown now"]
+
+
 def test_an_unknown_log_level_is_rejected_not_silently_downgraded() -> None:
     """``HEPH_LOG_LEVEL=DEBUGG`` used to be accepted by settings and then
     silently become ``INFO`` here, so an operator raising verbosity during an
@@ -471,6 +503,70 @@ def test_the_no_op_exporter_reports_success_and_flushes() -> None:
     assert exporter.shutdown() is None
 
 
+def test_the_default_probe_is_time_bounded_even_when_dns_hangs() -> None:
+    """The wave that added the probe used `socket.create_connection`, whose
+    timeout covers the connect but NOT getaddrinfo, so a slow-resolving name
+    blocked for as long as the resolver took -- measured at 5,040 ms against a
+    250 ms budget -- and then installed the no-op exporter for the process
+    lifetime. The probe now runs on a joined daemon thread.
+
+    Deliberately asserts the DEFAULT path: passing probe_timeout=None (which
+    every other unreachable-collector test does, to keep the OTLP exporter in
+    play) is exactly how the regression went uncaught."""
+    settings = _settings(otlp_endpoint="http://otel.invalid.example.test:4318")
+    started = time.monotonic()
+    o = setup_observability(settings)
+    elapsed = time.monotonic() - started
+    # Generous against CI jitter, and still an order of magnitude under the
+    # 5 s a hanging resolver cost.
+    assert elapsed < 2.0, f"setup took {elapsed:.2f}s; the probe is not bounded"
+    (exporter,) = _processors(o)
+    assert isinstance(exporter, obs_module._NoOpSpanExporter)
+
+
+def test_the_probe_bound_covers_name_resolution_not_just_connect() -> None:
+    slow = "otel-collector.observability.svc.cluster.local"
+    started = time.monotonic()
+    assert obs_module._collector_reachable(f"http://{slow}:4318", 0.25) is False
+    elapsed = time.monotonic() - started
+    assert elapsed < 1.5, f"resolving {slow} took {elapsed:.2f}s; the join is not bounding it"
+
+
+def test_prod_never_probes_so_production_traces_are_not_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A kit other products adopt must not silently drop production traces to
+    fix a test-suite annoyance. The probe answers dev/test noise, and `env`
+    already tells the two apart."""
+    def boom(*args: Any, **kwargs: Any) -> bool:
+        raise AssertionError("prod must not be probed by default")
+
+    monkeypatch.setattr(obs_module, "_collector_reachable", boom)
+    prod = HephSettings(  # type: ignore[call-arg]
+        env="prod", service_name="svc-a", database_url="postgresql://x", otlp_endpoint="http://127.0.0.1:1"
+    )
+    o = setup_observability(prod)
+    (exporter,) = _processors(o)
+    assert isinstance(exporter, OTLPSpanExporter), "prod must export without probing"
+
+
+def test_an_explicit_probe_timeout_is_honoured_in_prod_too() -> None:
+    prod = HephSettings(  # type: ignore[call-arg]
+        env="prod", service_name="svc-a", database_url="postgresql://x", otlp_endpoint="http://127.0.0.1:1"
+    )
+    o = setup_observability(prod, probe_timeout=0.25)
+    (exporter,) = _processors(o)
+    assert isinstance(exporter, obs_module._NoOpSpanExporter)
+
+
+def test_probe_budget_resolves_the_three_spellings() -> None:
+    dev, prod = _settings(), HephSettings(  # type: ignore[call-arg]
+        env="prod", service_name="s", database_url="postgresql://x"
+    )
+    assert obs_module._probe_budget(dev, "auto") == obs_module.COLLECTOR_PROBE_TIMEOUT
+    assert obs_module._probe_budget(prod, "auto") is None
+    assert obs_module._probe_budget(dev, None) is None
+    assert obs_module._probe_budget(prod, 0.5) == 0.5
+
+
 # --- shutdown is registered, not merely available ---------------------------
 
 
@@ -555,6 +651,41 @@ def test_configure_logging_redacts_and_takes_extra_words(capsys: pytest.CaptureF
 def test_configure_logging_rejects_an_unknown_level() -> None:
     with pytest.raises(ValueError, match="unknown log level 'DEBUGG'"):
         configure_logging("DEBUGG")
+
+
+def test_get_logger_warns_once_when_structlog_is_unconfigured(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Making configuration opt-in left `get_logger`'s docstring promising
+    redaction it no longer delivered, at the exact call site a consumer reads.
+    Redaction is a security property, so an unconfigured call says so."""
+    monkeypatch.setattr(obs_module, "_warned_unconfigured", False)
+    monkeypatch.setattr(structlog, "is_configured", lambda: False)
+    with pytest.warns(RuntimeWarning, match="NOT redacted"):
+        get_logger("t")
+    # Once per process: a warning per log call would be noise.
+    import warnings as _w
+
+    with _w.catch_warnings():
+        _w.simplefilter("error")
+        get_logger("t")
+
+
+def test_get_logger_does_not_warn_once_configured() -> None:
+    import warnings as _w
+
+    configure_logging()
+    with _w.catch_warnings():
+        _w.simplefilter("error")
+        get_logger("t")
+
+
+def test_the_configured_logger_really_does_redact(capsys: pytest.CaptureFixture[str]) -> None:
+    """The promise `get_logger`'s docstring makes, held to."""
+    configure_logging()
+    line = _one(capsys, password="hunter2", api_key="sk_live_abc")
+    assert line["password"] == "[REDACTED]" and line["api_key"] == "[REDACTED]"
+    assert "hunter2" not in json.dumps(line) and "sk_live_abc" not in json.dumps(line)
 
 
 def test_importing_observability_opens_no_sockets() -> None:

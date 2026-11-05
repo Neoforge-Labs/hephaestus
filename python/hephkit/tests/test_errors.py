@@ -191,16 +191,38 @@ def test_problem_response_cannot_be_made_to_fabricate_a_trace_id() -> None:
 
     @app.get("/x")
     def x() -> JSONResponse:
-        return problem_response(
-            _codes.NF_404,
-            extensions={"trace_id": "deadbeef", "status": 200, "hint": "kept"},
-        )
+        import warnings
+
+        # The drop now warns, so a caller is not left wondering where its
+        # member went; the suite runs under -W error, hence the catch.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            return problem_response(
+                _codes.NF_404,
+                extensions={"trace_id": "deadbeef", "status": 200, "hint": "kept"},
+            )
 
     body = _body(TestClient(app).get("/x"))
     assert "trace_id" not in body
     assert body["status"] == 404
     assert body["code"] == "HEPH-NF-404"
     assert body["hint"] == "kept"
+
+
+def test_dropping_a_reserved_extension_warns() -> None:
+    """Dropping is right (raising would turn a correct 404 into a GEN-500) but
+    a silent drop leaves a caller wondering where its member went."""
+    with pytest.warns(RuntimeWarning, match="trace_id.*reserved and were dropped"):
+        problem_response("HEPH-NF-404", extensions={"trace_id": "x"})
+
+
+def test_an_extension_that_clashes_with_nothing_does_not_warn() -> None:
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        problem_response("HEPH-NF-404", extensions={"hint": "fine"})
+        problem_response("HEPH-NF-404")
 
 
 def test_production_code_uses_the_generated_constants_not_literals() -> None:

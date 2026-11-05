@@ -10,17 +10,37 @@ Needs the ``settings`` extra: ``pip install "hephkit[settings]"``.
 
 import os
 from collections.abc import Callable
-from typing import Any, ClassVar, Literal, Self
+from typing import Annotated, Any, ClassVar, Literal, Self
 
-from pydantic import SecretStr, ValidationError, model_validator
+from pydantic import BeforeValidator, SecretStr, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = ["HephSettings", "LogLevel", "SettingsError"]
 
+def _upper(value: Any) -> Any:
+    """Uppercase a level name before the ``Literal`` sees it.
+
+    ``HEPH_LOG_LEVEL=debug`` is the common convention, and without this the
+    ``Literal`` rejected it at construction -- turning a lowercase level into a
+    hard startup failure for a deployment that previously worked. Non-strings
+    pass through untouched so pydantic reports the real type error.
+    """
+    return value.upper() if isinstance(value, str) else value
+
+
 # The levels hephkit configures structlog with. A typo used to be accepted here
 # and then silently became INFO in `observability._configure_logging`, so an
 # operator raising verbosity during an incident got nothing and no warning.
-LogLevel = Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
+#
+# Must stay equal to `observability.LOG_LEVELS`, which a test asserts: the two
+# ends used to disagree in both directions, this one rejecting `debug` and
+# `WARN` that `_numeric_level` accepted, and `_numeric_level` advertising
+# `NOTSET` that this one rejected. `WARN` and `FATAL` are `logging`'s own
+# aliases; `NOTSET` is excluded on purpose (see that constant's comment).
+LogLevel = Annotated[
+    Literal["CRITICAL", "FATAL", "ERROR", "WARNING", "WARN", "INFO", "DEBUG"],
+    BeforeValidator(_upper),
+]
 
 
 class SettingsError(RuntimeError):
