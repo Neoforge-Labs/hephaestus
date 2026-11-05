@@ -32,7 +32,7 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 
 1.6. `trace_id` MUST be the W3C Trace Context trace id (32 lowercase hex characters) of the request's active span, or omitted only when no trace is active.
 
-1.7. `detail` is for the caller. It MUST NOT contain stack traces, SQL, file paths, secrets or personal data, and SHOULD follow the registry `detail_hint`.
+1.7. `detail` is for the caller. It MUST NOT contain stack traces, SQL, file paths, secrets or personal data. When the implementation supplies no more specific text, `detail` MUST be the registry `detail_hint`, which is written for the caller and sent verbatim.
 
 1.8. A registry entry is permanent: a code's meaning and status MUST NOT change after release. A retired code stays in the registry.
 

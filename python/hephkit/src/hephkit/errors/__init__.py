@@ -30,7 +30,7 @@ class HephError(Exception):
     """
 
     def __init__(self, code: str, detail: str | None = None, **extensions: Any) -> None:
-        if code not in REGISTRY:
+        if not isinstance(code, str) or code not in REGISTRY:
             raise ValueError(f"unknown error code {code!r}: codes must be in spec/errors.yaml")
         clash = sorted(RESERVED_MEMBERS.intersection(extensions))
         if clash:

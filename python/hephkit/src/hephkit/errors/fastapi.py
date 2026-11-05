@@ -27,6 +27,9 @@ from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from hephkit.errors import DETAIL_HINTS, REGISTRY, TYPE_BASE_URL, HephError
+from hephkit.hashing import HashingError
+from hephkit.money import MoneyError
+from hephkit.signatures import SignatureError
 
 try:
     from opentelemetry import trace
@@ -67,7 +70,11 @@ def problem_response(
     trace_id = _trace_id()
     if trace_id is not None:
         body["trace_id"] = trace_id
-    return JSONResponse(body, status_code=status, media_type=PROBLEM_JSON)
+    try:
+        return JSONResponse(body, status_code=status, media_type=PROBLEM_JSON)
+    except (TypeError, ValueError):
+        # An extension that cannot be serialised must not break the error path.
+        return problem_response(_GENERIC)
 
 
 async def _handle_exception(request: Request, exc: Exception) -> JSONResponse:
@@ -95,7 +102,16 @@ async def _handle_validation(request: Request, exc: Exception) -> JSONResponse:
 
 
 def install_error_handlers(app: FastAPI) -> None:
-    """Route validation errors, ``HephError`` and any other exception to problem+json."""
+    """Route validation errors, our coded exceptions and any other exception to problem+json.
+
+    Our four coded classes are registered by class, so Starlette dispatches them
+    through ``ExceptionMiddleware`` and they are not re-raised (an expected client
+    error must not be logged as a server crash). The bare ``Exception`` handler
+    sits on ``ServerErrorMiddleware``, which re-raises after responding, and that
+    is correct for a true 500. Mapping is still by ``.code`` in one function.
+    """
     app.add_exception_handler(RequestValidationError, _handle_validation)
     app.add_exception_handler(StarletteHTTPException, _handle_http)
+    for cls in (HephError, MoneyError, SignatureError, HashingError):
+        app.add_exception_handler(cls, _handle_exception)
     app.add_exception_handler(Exception, _handle_exception)

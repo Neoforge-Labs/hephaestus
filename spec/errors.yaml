@@ -1,42 +1,46 @@
 # heph error-code registry. Source of truth for every HEPH-* code.
 # Codes match ^HEPH-[A-Z]{2,6}-\d{3}$ and `area` is the code's middle segment.
+# `detail_hint` is the DEFAULT CONSUMER-FACING `detail` of the problem+json response
+# and is sent verbatim to API callers: write it to the caller (what happened, what
+# they can do), never as guidance to the implementer. Developer guidance belongs on
+# the generated docs pages.
 # Generates per-language constants and one docs page per code. Do not add codes
 # here that a task has not specified: every entry is a promise implementations keep.
 - code: HEPH-GEN-500
   status: 500
   title: Internal error
   area: GEN
-  detail_hint: An unexpected failure. Never include internals; give the trace_id so the operator can find it.
+  detail_hint: Something went wrong on our side. Try again later, and quote the trace_id from this response if you contact support.
 - code: HEPH-VAL-422
   status: 422
   title: Validation failed
   area: VAL
-  detail_hint: Name the offending field and the rule it broke, not the submitted value.
+  detail_hint: The request failed validation. Each offending field and the rule it broke is listed under errors.
 - code: HEPH-NF-404
   status: 404
   title: Resource not found
   area: NF
-  detail_hint: Name the resource type. Also use this when the caller may not learn that a resource exists.
+  detail_hint: The requested resource was not found.
 - code: HEPH-AUTH-401
   status: 401
   title: Authentication required
   area: AUTH
-  detail_hint: Credentials are missing, malformed or expired. Do not say which part was wrong.
+  detail_hint: Authentication is required. Your credentials are missing, malformed or expired.
 - code: HEPH-AUTH-403
   status: 403
   title: Permission denied
   area: AUTH
-  detail_hint: The caller is authenticated but not allowed. Name the missing permission, not the resource contents.
+  detail_hint: You are authenticated but do not have permission to perform this action.
 - code: HEPH-RATE-429
   status: 429
   title: Rate limit exceeded
   area: RATE
-  detail_hint: Say when to retry; the response also carries a Retry-After header.
+  detail_hint: Too many requests. Wait for the time given in the Retry-After header before trying again.
 - code: HEPH-IDEMP-400
   status: 400
   title: Idempotency key missing or malformed
   area: IDEMP
-  detail_hint: The key is missing, empty, or not 1-255 printable ASCII characters without whitespace.
+  detail_hint: The Idempotency-Key header is missing, empty, or not 1-255 printable ASCII characters without whitespace.
 - code: HEPH-IDEMP-409
   status: 409
   title: Original request still in flight
@@ -46,19 +50,19 @@
   status: 422
   title: Idempotency key reused with a different payload
   area: IDEMP
-  detail_hint: The key was already used for a request with a different fingerprint. Use a new key.
+  detail_hint: This Idempotency-Key was already used for a different request. Use a new key for a new request.
 - code: HEPH-MONEY-422
   status: 422
   title: Invalid money amount
   area: MONEY
-  detail_hint: The amount is not a valid integer-minor-units string, or has excess precision for its currency.
+  detail_hint: The amount is not a valid integer minor-units string, or has more precision than its currency allows.
 - code: HEPH-MONEY-409
   status: 409
   title: Currency mismatch
   area: MONEY
-  detail_hint: The operation mixes two currencies. Name both currency codes.
+  detail_hint: This operation mixes two different currencies; both amounts must use the same currency.
 - code: HEPH-WH-401
   status: 401
   title: Webhook signature invalid or expired
   area: WH
-  detail_hint: No signature verified, or the timestamp is outside the 300 second tolerance. Do not say which.
+  detail_hint: The webhook signature is invalid or has expired.

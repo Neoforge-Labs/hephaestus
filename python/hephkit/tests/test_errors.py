@@ -72,6 +72,14 @@ def _app() -> FastAPI:
     def coded_unknown() -> None:
         raise CodedError("HEPH-ZZ-999")
 
+    @app.get("/currency-mismatch")
+    def currency_mismatch() -> None:
+        Money.parse("1", "USD") + Money.parse("1", "EUR")
+
+    @app.get("/unserialisable")
+    def unserialisable() -> None:
+        raise HephError("HEPH-NF-404", obj=object())
+
     @app.get("/boom")
     def boom() -> None:
         raise RuntimeError(SECRET_TEXT)
@@ -93,12 +101,13 @@ class TestClient:
 
     __test__ = False
 
-    def __init__(self, app: Any) -> None:
+    def __init__(self, app: Any, *, raise_app_exceptions: bool = False) -> None:
         self._app = app
+        self._raise = raise_app_exceptions
 
     def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         async def go() -> httpx.Response:
-            transport = httpx.ASGITransport(app=self._app, raise_app_exceptions=False)
+            transport = httpx.ASGITransport(app=self._app, raise_app_exceptions=self._raise)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
                 return await c.request(method, url, **kwargs)
 
@@ -160,6 +169,11 @@ def test_heph_error_unknown_code_raises_value_error() -> None:
         HephError("HEPH-ZZ-999")
     with pytest.raises(ValueError):
         HephError("not a code")
+
+
+def test_heph_error_unhashable_code_raises_value_error() -> None:
+    with pytest.raises(ValueError):
+        HephError(["HEPH-GEN-500"])  # type: ignore[arg-type]
 
 
 def test_heph_error_rejects_reserved_extension_names() -> None:
@@ -271,6 +285,36 @@ def test_money_error_maps_to_422(client: TestClient) -> None:
     assert body["title"] == "Invalid money amount"
     assert body["type"] == TYPE_BASE + "HEPH-MONEY-422"
     assert isinstance(MoneyError("x"), ValueError)
+
+
+def test_currency_mismatch_maps_to_409(client: TestClient) -> None:
+    response = client.get("/currency-mismatch")
+    assert response.status_code == 409
+    assert _body(response) == {
+        "type": TYPE_BASE + "HEPH-MONEY-409",
+        "title": "Currency mismatch",
+        "status": 409,
+        "detail": _codes.DETAIL_HINTS["HEPH-MONEY-409"],
+        "code": "HEPH-MONEY-409",
+    }
+
+
+@pytest.mark.parametrize("path", ["/heph", "/money", "/signature", "/hashing", "/currency-mismatch"])
+def test_our_coded_exceptions_are_not_reraised(app: FastAPI, path: str) -> None:
+    """Expected client errors must not propagate to the server as crashes."""
+    response = TestClient(app, raise_app_exceptions=True).get(path)
+    assert response.headers["content-type"] == PROBLEM
+
+
+def test_unknown_exceptions_still_propagate_after_the_500_is_built(app: FastAPI) -> None:
+    with pytest.raises(RuntimeError):
+        TestClient(app, raise_app_exceptions=True).get("/boom")
+
+
+def test_unserialisable_extension_falls_back_to_a_500_problem(client: TestClient) -> None:
+    response = client.get("/unserialisable")
+    assert response.status_code == 500
+    assert _body(response)["code"] == "HEPH-GEN-500"
 
 
 def test_signature_error_maps_to_401(client: TestClient) -> None:

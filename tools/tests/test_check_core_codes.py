@@ -69,4 +69,14 @@ def test_real_core_is_consistent() -> None:
         reason="expected to run under the hephkit moon task `core-codes`, "
         "which has the built extension; skipped in a bare tools environment",
     )
+    from check_core_codes import _probes
+
+    reached = set()
+    for probe in _probes(hephkit_core := __import__("hephkit._core", fromlist=["_core"])):
+        try:
+            probe()
+        except Exception as exc:  # noqa: BLE001
+            reached.add(getattr(exc, "code", None))
+    assert hephkit_core is not None
+    assert {"HEPH-MONEY-422", "HEPH-MONEY-409", "HEPH-WH-401", "HEPH-VAL-422"} <= reached
     assert main() == 0

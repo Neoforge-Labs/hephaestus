@@ -28,3 +28,12 @@ tasks:
       - '/tools/tests/test_check_core_codes.py'
       - '/core/hephkit-py/**/*'
       - '/core/hephkit-core/**/*'
+
+  gen-errors:
+    # _codes.py is generated from spec/errors.yaml; fail if the committed file is stale.
+    command: 'uv run ../../tools/gen_errors.py --check'
+    inputs:
+      - '/spec/errors.yaml'
+      - '/tools/gen_errors.py'
+      - '/tools/check_registry.py'
+      - 'src/hephkit/errors/_codes.py'

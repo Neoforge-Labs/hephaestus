@@ -6,9 +6,12 @@
 
 CLAUDE.md says codes live only in the registry, but the Rust core carries them
 as literals. This closes the loop cheaply from the Python side, without parsing
-Rust: it collects (1) every string attribute of ``hephkit._core`` that looks like
-a code or is named ``*_CODE``, and (2) the ``.code`` of the exception raised by a
-few probe calls that fail on purpose, and reports any that the registry lacks.
+Rust. It SAMPLES codes; it does not cover every code the core holds. It collects
+(1) every string attribute of ``hephkit._core`` that looks like a code or is named
+``*_CODE``, and (2) the ``.code`` of the exception raised by a few probe calls that
+fail on purpose (HEPH-MONEY-422, HEPH-MONEY-409, HEPH-WH-401, HEPH-VAL-422), and
+reports any that the registry lacks. A code no probe reaches is not checked: add
+a probe when the core gains a new failure path.
 
 Needs the built extension, so run it inside the hephkit environment:
 ``cd python/hephkit && uv run --with pyyaml ../../tools/check_core_codes.py``.
@@ -30,6 +33,7 @@ def _probes(core: Any) -> list[Callable[[], object]]:
     """Calls that must fail inside the core, one per exception class."""
     return [
         lambda: core.money_check(0, "ZZZ"),
+        lambda: core.money_add(1, "USD", 1, "EUR"),
         lambda: core.verify("whsec_dGVzdA==", "", "", "", b"", 0, 300),
         lambda: core.content_hash_json("{"),
         lambda: core.sign("", "id", 0, b""),
