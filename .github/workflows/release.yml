@@ -24,11 +24,10 @@ jobs:
       pull-requests: write
     outputs:
       released: ${{ steps.rp.outputs.releases_created }}
-      # Packages live in sub-paths, so release-please prefixes their outputs
-      # with the path; the unprefixed ones exist only for a root package.
-      # linked-versions keeps all four equal, so python/hephkit speaks for all.
-      version: ${{ steps.rp.outputs['python/hephkit--version'] }}
-      tag: ${{ steps.rp.outputs['python/hephkit--tag_name'] }}
+      # Unprefixed outputs exist only for the root package ("."), which cuts
+      # the plain vX.Y.Z tag. linked-versions keeps every package equal.
+      version: ${{ steps.rp.outputs.version }}
+      tag: ${{ steps.rp.outputs.tag_name }}
     steps:
       - id: rp
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
@@ -52,6 +51,26 @@ jobs:
             echo "::error::release-please reported a release but version='$VERSION' tag='$TAG'"
             exit 1
           fi
+
+  # Consumers reference these workflows as ...@v0; release-please makes no major
+  # alias, so move it here. contents: write is granted to this job alone.
+  major-tag:
+    needs: [release-please, verify-release]
+    if: ${{ needs.release-please.outputs.released == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
+      - name: Force-move the major alias tag
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          major="v${VERSION%%.*}"
+          git tag -f "$major"
+          git push --force origin "refs/tags/$major"
 
   wheels:
     needs: [release-please, verify-release]

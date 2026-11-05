@@ -3,6 +3,11 @@
   "include-component-in-tag": true,
   "separate-pull-requests": false,
   "packages": {
+    ".": {
+      "release-type": "simple",
+      "component": "",
+      "include-component-in-tag": false
+    },
     "core/hephkit-core": {
       "release-type": "rust",
       "component": "hephkit-core"
@@ -17,15 +22,24 @@
     },
     "go": {
       "release-type": "simple",
-      "component": "heph",
-      "extra-files": ["internal/cli/version.go"]
+      "component": "go",
+      "extra-files": [
+        "internal/cli/version.go"
+      ],
+      "tag-separator": "/"
     }
   },
   "plugins": [
     {
       "type": "linked-versions",
       "groupName": "hephaestus",
-      "components": ["hephkit-core", "hephkit-py", "hephkit", "heph"]
+      "components": [
+        "",
+        "hephkit-core",
+        "hephkit-py",
+        "hephkit",
+        "go"
+      ]
     }
   ]
 }

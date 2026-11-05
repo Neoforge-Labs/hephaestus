@@ -17,10 +17,11 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 LOCKSTEP = {
+    ".": "",
     "core/hephkit-core": "hephkit-core",
     "core/hephkit-py": "hephkit-py",
     "python/hephkit": "hephkit",
-    "go": "heph",
+    "go": "go",
 }
 EXPECTED_WORKFLOWS = [
     "ci.yml",
@@ -58,6 +59,35 @@ def test_manifest_has_one_shared_version_for_every_package() -> None:
     manifest = json.loads((ROOT / ".release-please-manifest.json").read_text())
     assert set(manifest) == set(LOCKSTEP)
     assert len(set(manifest.values())) == 1, manifest
+
+
+def test_root_package_cuts_the_plain_tag() -> None:
+    cfg = json.loads((ROOT / "release-please-config.json").read_text())
+    assert cfg["include-component-in-tag"] is True
+    root = cfg["packages"]["."]
+    assert root["include-component-in-tag"] is False
+    manifest = json.loads((ROOT / ".release-please-manifest.json").read_text())
+    assert "." in manifest
+
+
+def test_go_tags_are_go_slash_version() -> None:
+    go = json.loads((ROOT / "release-please-config.json").read_text())["packages"]["go"]
+    assert go["component"] == "go" and go["tag-separator"] == "/"
+
+
+def test_linked_components_equal_package_components() -> None:
+    cfg = json.loads((ROOT / "release-please-config.json").read_text())
+    comps = {p["component"] for p in cfg["packages"].values()}
+    linked = cfg["plugins"][0]["components"]
+    assert set(linked) == comps and len(linked) == len(set(linked))
+
+
+def test_release_reads_plain_outputs_and_moves_the_major_tag() -> None:
+    text = (WORKFLOWS / "release.yml").read_text()
+    assert "outputs.version" in text and "--version" not in text
+    jobs = load_workflow("release.yml")["jobs"]
+    assert "verify-release" in jobs["major-tag"]["needs"]
+    assert jobs["major-tag"]["permissions"] == {"contents": "write"}
 
 
 def test_manifest_matches_the_versions_in_the_tree() -> None:
@@ -179,7 +209,6 @@ def test_enabled_ecosystem_rows_are_pinned_and_runnable() -> None:
 
 def test_release_publishes_nothing_without_a_verified_version() -> None:
     jobs = load_workflow("release.yml")["jobs"]
-    assert "python/hephkit--version" in (WORKFLOWS / "release.yml").read_text()
     for job in ("wheels", "images"):
         assert "verify-release" in jobs[job]["needs"], job
 
