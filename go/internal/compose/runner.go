@@ -12,6 +12,9 @@ import (
 // it so callers can be tested without a Docker daemon.
 type Runner interface {
 	Run(ctx context.Context, args []string) error
+	// Output runs `docker <args>` and returns its stdout, for queries such as
+	// `compose ps --format json`.
+	Output(ctx context.Context, args []string) ([]byte, error)
 }
 
 // Args builds the argument list for `docker`, e.g. for verb "up":
@@ -38,4 +41,9 @@ func (ExecRunner) Run(ctx context.Context, args []string) error {
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdout, cmd.Stderr, cmd.Stdin = os.Stdout, os.Stderr, os.Stdin
 	return cmd.Run()
+}
+
+// Output implements Runner.
+func (ExecRunner) Output(ctx context.Context, args []string) ([]byte, error) {
+	return exec.CommandContext(ctx, "docker", args...).Output()
 }

@@ -9,11 +9,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Minimums: `up --wait` needs Compose v2.1+; Docker 20.10 is the oldest engine
-// the v2 plugin supports.
+// Minimums, part of doctor's contract. Compose: 2.0.0, i.e. the v2 plugin
+// rather than v1's docker-compose, which is the line the spec draws; we do not
+// reject early v2 releases. Docker: 20.10, the oldest engine the v2 plugin
+// supports.
 const (
 	minDockerMajor, minDockerMinor   = 20, 10
-	minComposeMajor, minComposeMinor = 2, 1
+	minComposeMajor, minComposeMinor = 2, 0
 )
 
 func newDoctorCmd(d Deps) *cobra.Command {
@@ -53,7 +55,7 @@ func runDoctor(ctx context.Context, d Deps) error {
 		return envErr("Docker Compose v2 is required (`docker compose`, not `docker-compose`): the plugin is missing (%v)", err)
 	}
 	if maj, min, ok := parseVersion(cv); !ok || less(maj, min, minComposeMajor, minComposeMinor) {
-		return envErr("Docker Compose v2.1 or newer is required, found %q", cv)
+		return envErr("Docker Compose v2 is required (2.0.0 or newer), found %q", cv)
 	}
 	if _, err := d.Env.Output(ctx, "docker", "info", "--format", "{{.ServerVersion}}"); err != nil {
 		return envErr("the docker daemon is not reachable: start Docker and retry (%v)", err)

@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 
@@ -72,19 +74,26 @@ func devRun(ctx context.Context, d Deps, verb string, checkPorts bool, extra []s
 	if err := runDoctor(ctx, d); err != nil {
 		return err
 	}
-	if checkPorts {
-		for _, f := range frs {
-			for _, p := range f.Ports {
-				if d.portInUse(p) {
-					return envErr("port %d (fragment %q) is already in use: stop whatever is listening on it, or drop %q from dev.fragments", p, f.Name, f.Name)
-				}
-			}
-		}
-	}
+	// Fragments live in a stable per-project directory, NOT os.MkdirTemp:
+	// Compose bakes bind-mount source paths (objects.yaml mounts
+	// ./seaweedfs-s3.json) into the containers, so a cleaned-up temp dir would
+	// break restarts. Do not "simplify" this back to a temp dir.
 	stateDir := filepath.Join(d.StateDir, cfg.Ingot.Name)
 	files, err := fragments.Materialize(src, stateDir, frs)
 	if err != nil {
 		return envErr("writing fragments to %s: %v", stateDir, err)
+	}
+	if checkPorts {
+		// `up` is idempotent: ports held by this project's own containers are
+		// not collisions. Anything else holding a port still is.
+		own := ownPorts(ctx, d, cfg.Ingot.Name, files)
+		for _, f := range frs {
+			for _, p := range f.Ports {
+				if !own[p] && d.portInUse(p) {
+					return envErr("port %d (fragment %q) is already in use by another process: stop it, or drop %q from dev.fragments", p, f.Name, f.Name)
+				}
+			}
+		}
 	}
 	if err := d.Runner.Run(ctx, compose.Args(cfg.Ingot.Name, files, verb, extra...)); err != nil {
 		return envErr("docker compose %s failed: %v", verb, err)
@@ -123,4 +132,41 @@ func newSyncFragmentsCmd(Deps) *cobra.Command {
 	}
 	c.Flags().BoolVar(&check, "check", false, "fail if dst differs from src instead of copying")
 	return c
+}
+
+// ownPorts returns the host ports published by this project's running
+// containers. Failure to query means "none": the preflight then stays strict.
+func ownPorts(ctx context.Context, d Deps, project string, files []string) map[int]bool {
+	out, err := d.Runner.Output(ctx, compose.Args(project, files, "ps", "--format", "json"))
+	if err != nil {
+		return nil
+	}
+	type container struct {
+		Publishers []struct {
+			PublishedPort int
+		}
+	}
+	var all []container
+	trimmed := bytes.TrimSpace(out)
+	if bytes.HasPrefix(trimmed, []byte("[")) { // older Compose: one JSON array
+		_ = json.Unmarshal(trimmed, &all)
+	} else { // newer Compose: one JSON object per line
+		dec := json.NewDecoder(bytes.NewReader(trimmed))
+		for {
+			var c container
+			if dec.Decode(&c) != nil {
+				break
+			}
+			all = append(all, c)
+		}
+	}
+	own := map[int]bool{}
+	for _, c := range all {
+		for _, p := range c.Publishers {
+			if p.PublishedPort != 0 {
+				own[p.PublishedPort] = true
+			}
+		}
+	}
+	return own
 }

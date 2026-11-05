@@ -59,7 +59,17 @@ func healthyEnv() fakeEnv {
 	}
 }
 
-type fakeRunner struct{ calls [][]string }
+type fakeRunner struct {
+	calls   [][]string
+	psOut   string // returned by Output (compose ps)
+	psErr   error
+	queries [][]string
+}
+
+func (r *fakeRunner) Output(_ context.Context, args []string) ([]byte, error) {
+	r.queries = append(r.queries, args)
+	return []byte(r.psOut), r.psErr
+}
 
 func (r *fakeRunner) Run(_ context.Context, args []string) error {
 	r.calls = append(r.calls, args)
@@ -117,10 +127,9 @@ func TestDoctorDockerMissing(t *testing.T) {
 
 func TestDoctorComposeV1(t *testing.T) {
 	cases := map[string]fakeResult{
-		"plugin absent":  {err: errors.New("docker: 'compose' is not a docker command")},
-		"reports v1":     {out: "1.29.2\n"},
-		"reports old v2": {out: "v2.0.5\n"},
-		"unparseable":    {out: "banana\n"},
+		"plugin absent": {err: errors.New("docker: 'compose' is not a docker command")},
+		"reports v1":    {out: "1.29.2\n"},
+		"unparseable":   {out: "banana\n"},
 	}
 	for name, res := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -134,6 +143,15 @@ func TestDoctorComposeV1(t *testing.T) {
 				t.Fatalf("stderr must name Compose v2, got %q", h.errb.String())
 			}
 		})
+	}
+}
+
+func TestDoctorAcceptsComposeV2Zero(t *testing.T) {
+	env := healthyEnv()
+	env.outputs[kComposeVersion] = fakeResult{out: "v2.0.0\n"}
+	h := newHarness(t, env, "")
+	if code := h.run("doctor"); code != 0 {
+		t.Fatalf("exit = %d; stderr=%q", code, h.errb.String())
 	}
 }
 
@@ -350,5 +368,56 @@ func TestVersion(t *testing.T) {
 	}
 	if !strings.HasPrefix(h.out.String(), "heph ") || !strings.Contains(h.out.String(), "experimental") {
 		t.Fatalf("stdout = %q", h.out.String())
+	}
+}
+
+const ownPS = `{"Name":"hello-otel-1","Publishers":[{"URL":"0.0.0.0","TargetPort":4318,"PublishedPort":54318,"Protocol":"tcp"},{"URL":"0.0.0.0","TargetPort":3000,"PublishedPort":54300,"Protocol":"tcp"}]}
+{"Name":"hello-pg-1","Publishers":[{"TargetPort":5432,"PublishedPort":54320,"Protocol":"tcp"}]}
+`
+
+// Re-running `dev up` must not trip over the project's own containers.
+func TestDevUpRerunIgnoresOwnContainers(t *testing.T) {
+	for name, ps := range map[string]string{
+		"ndjson": ownPS,
+		"array":  `[{"Publishers":[{"PublishedPort":54318},{"PublishedPort":54300},{"PublishedPort":54317}]},{"Publishers":[{"PublishedPort":54320}]}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, healthyEnv(), hephToml)
+			h.runner.psOut = ps
+			h.deps.PortInUse = func(p int) bool { return p == 54318 || p == 54320 }
+			if code := h.run("dev", "up"); code != 0 {
+				t.Fatalf("exit = %d, want 0; stderr=%q", code, h.errb.String())
+			}
+			q := strings.Join(h.runner.queries[0], " ")
+			if !strings.Contains(q, "-p hello") || !strings.HasSuffix(q, " ps --format json") {
+				t.Fatalf("ownership query = %q", q)
+			}
+		})
+	}
+}
+
+// ...but a port held by something else is still a collision.
+func TestDevUpStillRefusesForeignPort(t *testing.T) {
+	h := newHarness(t, healthyEnv(), hephToml)
+	h.runner.psOut = ownPS                                    // owns 54318, 54300, 54320
+	h.deps.PortInUse = func(p int) bool { return p == 54317 } // not owned
+	if code := h.run("dev", "up"); code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+	if m := h.errb.String(); !strings.Contains(m, "54317") || !strings.Contains(m, "telemetry") {
+		t.Fatalf("stderr = %q", m)
+	}
+	if len(h.runner.calls) != 0 {
+		t.Fatal("docker up must not run")
+	}
+}
+
+// If ownership cannot be determined the preflight stays strict.
+func TestDevUpOwnershipQueryFailureStaysStrict(t *testing.T) {
+	h := newHarness(t, healthyEnv(), hephToml)
+	h.runner.psErr = errors.New("boom")
+	h.deps.PortInUse = func(p int) bool { return p == 54318 }
+	if code := h.run("dev", "up"); code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
 	}
 }
