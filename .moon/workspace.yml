@@ -12,6 +12,7 @@ projects:
   docs: 'docs'
   spec: 'spec'
   docker: 'docker'
+  heph-cli: 'go'
 
 vcs:
   client: 'git'

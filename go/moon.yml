@@ -1,0 +1,42 @@
+language: 'go'
+layer: 'application'
+
+# maturity: experimental
+tasks:
+  # Copies compose/*.yaml and *.json into the embedded, gitignored files/ dir.
+  sync-fragments:
+    command: 'go run ./cmd/heph sync-fragments ../compose internal/fragments/files'
+    inputs:
+      - '/compose/*.yaml'
+      - '/compose/*.json'
+      - 'internal/fragments/**/*.go'
+    options:
+      cache: false
+
+  # CI gate: fails if the embedded copy differs from compose/.
+  check-fragments:
+    command: 'go run ./cmd/heph sync-fragments --check ../compose internal/fragments/files'
+    options:
+      cache: false
+
+  test:
+    command: 'go test ./...'
+    deps: ['~:sync-fragments']
+    inputs:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+
+  lint:
+    script: 'go vet ./... && staticcheck ./...'
+    deps: ['~:sync-fragments']
+    inputs:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+
+  build:
+    command: 'go build -o bin/heph ./cmd/heph'
+    deps: ['~:sync-fragments']
+    outputs:
+      - 'bin/heph'

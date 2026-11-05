@@ -25,7 +25,9 @@ node_modules/
 .moon/cache/
 
 # Generated copy produced by a later task
-go/internal/fragments/files/
+go/internal/fragments/files/*
+!go/internal/fragments/files/.gitkeep
+go/bin/
 
 # Scratch workspace for the build process; never committed
 .superpowers/
