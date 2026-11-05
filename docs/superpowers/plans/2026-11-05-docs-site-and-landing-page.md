@@ -44,12 +44,13 @@ Everything the landing page prints must resolve, so the release comes first. Thi
 - Modify: none. `release-please-config.json` and `.release-please-manifest.json` (already `0.1.0` across all five components) drive it.
 
 **Interfaces:**
-- Produces: `hephkit` 0.1.0 on PyPI; tags `v0.1.0` and `go/v0.1.0`; `heph` installable with `go install github.com/Neoforge-Labs/hephaestus/go/cmd/heph@v0.1.0`.
+- Produces: `hephkit` on PyPI at the first released version; tags `v<X.Y.Z>` and `go/v<X.Y.Z>`; `heph` installable with `go install github.com/Neoforge-Labs/hephaestus/go/cmd/heph@v<X.Y.Z>`.
+- **The version is not `0.1.0`.** `.release-please-manifest.json` already records `0.1.0` as released for all five components, and `work/phase-1` carries two breaking commits (`feat(money)!: generate the full ISO 4217 currency table`, `feat(money)!: accept value-preserving trailing zeros`). On a 0.x manifest release-please bumps the minor for a breaking change, so the release PR will propose **0.2.0**. Later tasks must not hard-code a version: the tutorial prints `uv add hephkit` unpinned, and Task 1 Step 4 verifies whatever release-please actually cut. PyPI version numbers cannot be reused, so settle the number before merging the release PR, not after.
 
 - [ ] **Step 1: Prerequisite (Kelyn, manual)** — configure the PyPI trusted publisher for `hephkit`, pointing at `Neoforge-Labs/hephaestus` and the `release.yml` workflow. Nothing downstream works until this exists; stop and ask rather than working around it.
 - [ ] **Step 2: Merge `work/phase-1` to `main`** so release-please opens its release PR. Confirm `compose/` is committed first (Task 12 of the Phase 1 plan — the design's blocking prerequisite).
 - [ ] **Step 3: Merge the release PR** and confirm the tags `v0.1.0` and `go/v0.1.0` exist, and that `release.yml` published wheels.
-- [ ] **Step 4: Verify** — in an empty directory: `uv venv && uv pip install hephkit==0.1.0 && python -c "import hephkit.money"` → succeeds; `go install github.com/Neoforge-Labs/hephaestus/go/cmd/heph@v0.1.0 && heph version` → prints `0.1.0`. Paste both outputs; if either fails, the hero's copy is still a lie and later tasks must not assume it.
+- [ ] **Step 4: Verify** — read the released version from the merged release PR, then in an empty directory: `uv venv && uv pip install hephkit==<version> && python -c "import hephkit.money"` → succeeds; `go install github.com/Neoforge-Labs/hephaestus/go/cmd/heph@v<version> && heph version` → prints that version. Paste both outputs; if either fails, the hero's copy is still a lie and later tasks must not assume it.
 
 ---
 
