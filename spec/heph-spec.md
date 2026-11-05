@@ -122,6 +122,7 @@ Formatting minor units as a decimal string produces exactly `exponent` fractiona
 - A JSON number written as an **integer literal** (no fraction and no exponent) MUST have magnitude at most 2^53-1, that is 9007199254740991, the largest accepted integer literal. A larger integer literal MUST be rejected: `9007199254740992`, `9007199254740993` and `-9007199254740993` are rejected.
 - A JSON number written **with a fraction or an exponent** is parsed as an IEEE-754 double and serialised by the RFC 8785 ECMAScript `Number::toString` rules. Rounding to the nearest double is expected and permitted here. For example `1e20` becomes `100000000000000000000`, `1e21` becomes `1e+21`, `0.1` stays `0.1`, and `123456789012345678901234567890.5` becomes `1.2345678901234568e+29`. An integer-valued literal with a fraction or exponent (such as `1e20`) is therefore not an integer literal for this rule. `-0` is serialised as `0`.
 - Non-finite values (NaN, +Infinity, -Infinity), lone surrogates and duplicate object member names MUST be rejected.
+- Arrays and objects nested more than 128 levels deep MUST be rejected, so that a hostile document cannot exhaust the stack of any implementation.
 
 This matches the `rfc8785` reference package, which raises on integer literals outside the safe-integer domain.
 

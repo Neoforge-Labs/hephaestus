@@ -1,25 +1,26 @@
 //! Wire format (spec 3.1 to 3.4): `{"amount": "<minor units>", "currency": "XXX"}`.
 
 use super::{invalid, Money};
+use crate::json::{self, Json};
 use crate::{CoreError, Currency};
-use serde_json::Value;
 
 pub(super) fn from_wire_json(json: &str) -> Result<Money, CoreError> {
-    let value: Value = serde_json::from_str(json).map_err(|_| invalid("not valid JSON"))?;
-    let obj = value
-        .as_object()
-        .ok_or_else(|| invalid("money must be a JSON object"))?;
-    if obj.len() != 2 {
+    // The shared strict reader rejects duplicate member names (spec 4.3), which
+    // a `serde_json::Value` round trip would silently collapse.
+    let value = json::parse(json).map_err(invalid)?;
+    let Json::Object(members) = value else {
+        return Err(invalid("money must be a JSON object"));
+    };
+    if members.len() != 2 {
         return Err(invalid("money must have exactly amount and currency"));
     }
-    let amount = obj
-        .get("amount")
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid("amount must be a JSON string"))?;
-    let currency = obj
-        .get("currency")
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid("currency must be a JSON string"))?;
+    let member = |name: &str| members.iter().find(|(n, _)| n == name).map(|(_, v)| v);
+    let Some(Json::Str(amount)) = member("amount") else {
+        return Err(invalid("amount must be a JSON string"));
+    };
+    let Some(Json::Str(currency)) = member("currency") else {
+        return Err(invalid("currency must be a JSON string"));
+    };
     Ok(Money::new(minor(amount)?, Currency::from_code(currency)?))
 }
 
@@ -74,6 +75,8 @@ mod tests {
             r#"{"amount":"00","currency":"USD"}"#,
             r#"{"amount":"1.0","currency":"USD"}"#,
             r#"{"amount":"1","currency":"USD","x":1}"#,
+            r#"{"amount":"1","amount":"2","currency":"USD"}"#,
+            r#"{"amount":"1","currency":"USD","currency":"USD"}"#,
         ] {
             let err = Money::from_wire_json(bad).unwrap_err();
             assert_eq!(err.code(), "HEPH-MONEY-422", "{bad}");
