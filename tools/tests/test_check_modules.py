@@ -45,7 +45,7 @@ def test_every_on_disk_module_has_an_entry(tmp_path):
     root = make_tree(
         tmp_path,
         [planned()],
-        files=[("compose/kafka.yaml", "# Kafka. maturity: experimental\n")],
+        files=[("compose/kafka.yaml", "# Kafka. maturity: experimental\nservices: {}\n")],
     )
     assert any("kafka" in e for e in check_modules(root))
 
@@ -104,7 +104,7 @@ def test_matching_compose_header_is_valid(tmp_path):
     root = make_tree(
         tmp_path,
         [shipped("telemetry", "compose"), planned()],
-        files=[("compose/telemetry.yaml", "# Something. maturity: experimental\n")],
+        files=[("compose/telemetry.yaml", "# Something. maturity: experimental\nservices: {}\n")],
     )
     assert check_modules(root) == []
 
@@ -129,3 +129,56 @@ def test_spec_section_resolves(tmp_path):
 def test_ledger_has_both_sides(tmp_path):
     errors = check_modules(make_tree(tmp_path, [shipped("x", "python")]))
     assert any("no planned" in e for e in errors)
+
+
+def test_yml_compose_fragment_needs_an_entry(tmp_path):
+    root = make_tree(
+        tmp_path,
+        [planned()],
+        files=[("compose/foo.yml", "# Foo. maturity: experimental\nservices: {}\n")],
+    )
+    assert any("foo" in e for e in check_modules(root))
+
+
+def test_yml_compose_header_must_match_entry(tmp_path):
+    root = make_tree(
+        tmp_path,
+        [shipped("foo", "compose"), planned()],
+        files=[("compose/foo.yml", "# Foo. maturity: beta\nservices: {}\n")],
+    )
+    assert any("foo" in e and "beta" in e for e in check_modules(root))
+
+
+def test_moon_project_config_is_not_a_fragment(tmp_path):
+    root = make_tree(tmp_path, [planned()], files=[("compose/moon.yml", "language: unknown\ntasks: {}\n")])
+    assert check_modules(root) == []
+
+
+def test_unrecognised_compose_file_is_reported_not_skipped(tmp_path):
+    root = make_tree(tmp_path, [planned()], files=[("compose/tooling.yml", "language: unknown\n")])
+    errors = check_modules(root)
+    assert any("tooling.yml" in e and "services" in e for e in errors), errors
+
+
+def test_fragment_missing_services_is_reported(tmp_path):
+    root = make_tree(
+        tmp_path, [shipped("foo", "compose"), planned()], files=[("compose/foo.yaml", "# Foo. maturity: experimental\n")]
+    )
+    assert any("foo.yaml" in e and "services" in e for e in check_modules(root))
+
+
+def test_undecodable_compose_fragment_is_an_error_not_a_traceback(tmp_path):
+    root = make_tree(tmp_path, [shipped("foo", "compose"), planned()])
+    (root / "compose").mkdir()
+    (root / "compose" / "foo.yaml").write_bytes(b"# \xff\xfe maturity: experimental\n")
+    errors = check_modules(root)
+    assert any("foo" in e and "cannot read" in e for e in errors), errors
+
+
+def test_header_read_failure_returns_an_error_string(tmp_path):
+    from check_modules import _compose_header_maturity
+
+    bad = tmp_path / "foo.yaml"
+    bad.write_bytes(b"\xff\xfe")
+    header, err = _compose_header_maturity(bad)
+    assert header is None and err and "foo" in err

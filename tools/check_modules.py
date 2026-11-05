@@ -37,6 +37,8 @@ NOT_MODULES = {
     "rust": {"fuzz": "fuzz-target harness, not a module", "target": "cargo build output"},
     "docker": {"test": "test harness, not a runtime image"},
 }
+# Files under compose/ that are not fragments and so carry no maturity header.
+NOT_FRAGMENTS = {"moon.yml": "moon project config, not a Compose fragment"}
 # Generated, not a module of its own.
 PYTHON_EXCLUDED_FILES = {"conventions.py"}
 
@@ -68,11 +70,42 @@ def _scan(repo_root: Path) -> set[tuple[str, str]]:
     dirs("go/cmd", "go")
     dirs("docker", "docker")
 
-    compose = repo_root / "compose"
-    if compose.is_dir():
-        for p in compose.glob("*.yaml"):
-            found.add(("compose", p.stem))
     return found
+
+
+def _compose_fragments(repo_root: Path) -> tuple[dict[str, Path], list[str]]:
+    """Find Compose fragments by content, not extension.
+
+    A fragment is a ``compose/*.yaml`` or ``*.yml`` file that parses as a mapping
+    with a top-level ``services:`` key. A file that is neither a fragment nor a
+    known tooling file is reported, not skipped, so it cannot escape the check.
+    """
+    fragments: dict[str, Path] = {}
+    errors: list[str] = []
+    compose = repo_root / "compose"
+    if not compose.is_dir():
+        return fragments, errors
+    for p in sorted([*compose.glob("*.yaml"), *compose.glob("*.yml")]):
+        if not p.is_file() or p.name in NOT_FRAGMENTS:
+            continue
+        try:
+            data = yaml.safe_load(p.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append(f"modules.yaml: {p.stem}: cannot read compose fragment {p.name}: {exc}")
+            continue
+        except yaml.YAMLError as exc:
+            errors.append(f"modules.yaml: compose/{p.name} is not valid YAML, so it cannot be checked as a fragment: {exc}")
+            continue
+        if isinstance(data, dict) and "services" in data:
+            if p.stem in fragments:
+                errors.append(f"modules.yaml: compose/{p.name} and compose/{fragments[p.stem].name} share the name {p.stem}")
+            fragments[p.stem] = p
+        else:
+            errors.append(
+                f"modules.yaml: compose/{p.name} has no top-level 'services:' key and is not a known "
+                "tooling file, so it is not recognised as a fragment; fix it or add it to NOT_FRAGMENTS"
+            )
+    return fragments, errors
 
 
 def _validate_entry(entry: Any, sections: set[str]) -> tuple[str, list[str]]:
@@ -112,10 +145,14 @@ def _validate_entry(entry: Any, sections: set[str]) -> tuple[str, list[str]]:
     return name, errs
 
 
-def _compose_header_maturity(path: Path) -> str | None:
-    first = path.read_text(encoding="utf-8").split("\n", 1)[0]
+def _compose_header_maturity(path: Path) -> tuple[str | None, str | None]:
+    """The fragment's header maturity and, if it could not be read, an error message."""
+    try:
+        first = path.read_text(encoding="utf-8").split("\n", 1)[0]
+    except (OSError, UnicodeDecodeError) as exc:
+        return None, f"modules.yaml: {path.stem}: cannot read compose fragment {path.name}: {exc}"
     match = HEADER_MATURITY_RE.search(first) if first.startswith("#") else None
-    return match.group(1) if match else None
+    return (match.group(1) if match else None), None
 
 
 def check_modules(repo_root: Path) -> list[str]:
@@ -149,13 +186,17 @@ def check_modules(repo_root: Path) -> list[str]:
     if not any(isinstance(e, dict) and e.get("status") == "planned" for e in data):
         errors.append("modules.yaml: no planned entry; the ledger needs both sides")
 
-    for home, name in sorted(_scan(repo_root)):
+    fragments, fragment_errors = _compose_fragments(repo_root)
+    errors.extend(fragment_errors)
+    for home, name in sorted(_scan(repo_root) | {("compose", n) for n in fragments}):
         entry = by_key.get((home, name))
         if entry is None or entry.get("status") != "shipped":
             errors.append(f"modules.yaml: {home}/{name} exists on disk but has no shipped entry")
         elif home == "compose":
-            header = _compose_header_maturity(repo_root / "compose" / f"{name}.yaml")
-            if header != entry.get("maturity"):
+            header, unreadable = _compose_header_maturity(fragments[name])
+            if unreadable:
+                errors.append(unreadable)
+            elif header != entry.get("maturity"):
                 errors.append(
                     f"modules.yaml: {name}: compose header says maturity {header!r}, "
                     f"entry says {entry.get('maturity')!r}"
