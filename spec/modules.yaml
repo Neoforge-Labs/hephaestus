@@ -1,6 +1,16 @@
 # Module inventory. Checked by tools/check_modules.py; rendered by the docs site.
 # status: shipped (needs maturity) | planned (needs phase). Everything shipped is experimental.
 # `shipped` rows are exhaustive: tools/check_modules.py fails if a module on disk has no row.
+# A `shipped` row's maturity must equal the module's own in-source label; tools/check_modules.py
+# fails on a mismatch and on a missing label. Where the label lives, by home:
+#   rust     `Maturity: <level>.` in the crate's `//!` doc comment (src/lib.rs, else src/main.rs)
+#   python   `Maturity: <level>.` in the module docstring (<name>.py or <name>/__init__.py)
+#   go       `Maturity: <level>.` in the package comment, the // block directly above `package`
+#            in any non-test file (go/cmd/<name> or go/internal/<name>)
+#   compose  `maturity: <level>` at the end of the first-line `#` header comment of the fragment
+#   docker   NOT checked: a Dockerfile has no doc-comment convention yet, so these rows are
+#            recorded here but unverified against the image source.
+# Change the row and the in-source label together.
 # `planned` rows are the headline modules named in the design's rollout and are deliberately
 # NOT exhaustive; do not read them as the full scope (see the roadmap page).
 # spec_section is a section number of spec/heph-spec.md, or null.
