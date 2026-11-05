@@ -38,12 +38,12 @@ REGISTRY: dict[str, tuple[int, str]] = {
 
 # code -> guidance for the caller, used as the default problem `detail`
 DETAIL_HINTS: dict[str, str] = {
-    "HEPH-GEN-500": "Something went wrong on our side. Try again later, and quote the trace_id from this response if you contact support.",
+    "HEPH-GEN-500": "Something went wrong on our side. Try again later. If this response has a trace_id, quote it if you contact support.",
     "HEPH-VAL-422": "The request failed validation. Each offending field and the rule it broke is listed under errors.",
     "HEPH-NF-404": "The requested resource was not found.",
     "HEPH-AUTH-401": "Authentication is required. Your credentials are missing, malformed or expired.",
     "HEPH-AUTH-403": "You are authenticated but do not have permission to perform this action.",
-    "HEPH-RATE-429": "Too many requests. Wait for the time given in the Retry-After header before trying again.",
+    "HEPH-RATE-429": "Too many requests. Wait before trying again; if the response has a Retry-After header, wait that long.",
     "HEPH-IDEMP-400": "The Idempotency-Key header is missing, empty, or not 1-255 printable ASCII characters without whitespace.",
     "HEPH-IDEMP-409": "A request with this key is still being processed. Retry after it completes.",
     "HEPH-IDEMP-422": "This Idempotency-Key was already used for a different request. Use a new key for a new request.",

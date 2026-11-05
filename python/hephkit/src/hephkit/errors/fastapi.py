@@ -50,14 +50,7 @@ def _trace_id() -> str | None:
     return format(ctx.trace_id, "032x") if ctx.is_valid else None
 
 
-def problem_response(
-    code: str, detail: str | None = None, extensions: dict[str, Any] | None = None
-) -> JSONResponse:
-    """A problem+json response for a registry ``code``.
-
-    ``detail`` defaults to the registry ``detail_hint`` (the title if absent). ``trace_id`` is a member only
-    when a span is active.
-    """
+def _render(code: str, detail: str | None, extensions: dict[str, Any] | None) -> JSONResponse:
     status, title = REGISTRY[code]
     body: dict[str, Any] = {
         **(extensions or {}),
@@ -70,11 +63,24 @@ def problem_response(
     trace_id = _trace_id()
     if trace_id is not None:
         body["trace_id"] = trace_id
+    return JSONResponse(body, status_code=status, media_type=PROBLEM_JSON)
+
+
+def problem_response(
+    code: str, detail: str | None = None, extensions: dict[str, Any] | None = None
+) -> JSONResponse:
+    """A problem+json response for a registry ``code``.
+
+    ``detail`` defaults to the registry ``detail_hint`` (the title if absent).
+    ``trace_id`` is a member only when a span is active. If the caller-supplied
+    ``detail`` or ``extensions`` cannot be serialised (including a nesting so
+    deep it raises ``RecursionError``), the response is the ``HEPH-GEN-500``
+    problem built from registry strings alone, with nothing caller-supplied.
+    """
     try:
-        return JSONResponse(body, status_code=status, media_type=PROBLEM_JSON)
-    except (TypeError, ValueError):
-        # An extension that cannot be serialised must not break the error path.
-        return problem_response(_GENERIC)
+        return _render(code, detail, extensions)
+    except (TypeError, ValueError, RecursionError):
+        return _render(_GENERIC, None, None)
 
 
 async def _handle_exception(request: Request, exc: Exception) -> JSONResponse:

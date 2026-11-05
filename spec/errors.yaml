@@ -10,7 +10,7 @@
   status: 500
   title: Internal error
   area: GEN
-  detail_hint: Something went wrong on our side. Try again later, and quote the trace_id from this response if you contact support.
+  detail_hint: Something went wrong on our side. Try again later. If this response has a trace_id, quote it if you contact support.
 - code: HEPH-VAL-422
   status: 422
   title: Validation failed
@@ -35,7 +35,7 @@
   status: 429
   title: Rate limit exceeded
   area: RATE
-  detail_hint: Too many requests. Wait for the time given in the Retry-After header before trying again.
+  detail_hint: Too many requests. Wait before trying again; if the response has a Retry-After header, wait that long.
 - code: HEPH-IDEMP-400
   status: 400
   title: Idempotency key missing or malformed

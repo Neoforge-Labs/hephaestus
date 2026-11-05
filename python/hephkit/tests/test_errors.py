@@ -76,10 +76,6 @@ def _app() -> FastAPI:
     def currency_mismatch() -> None:
         Money.parse("1", "USD") + Money.parse("1", "EUR")
 
-    @app.get("/unserialisable")
-    def unserialisable() -> None:
-        raise HephError("HEPH-NF-404", obj=object())
-
     @app.get("/boom")
     def boom() -> None:
         raise RuntimeError(SECRET_TEXT)
@@ -311,10 +307,28 @@ def test_unknown_exceptions_still_propagate_after_the_500_is_built(app: FastAPI)
         TestClient(app, raise_app_exceptions=True).get("/boom")
 
 
-def test_unserialisable_extension_falls_back_to_a_500_problem(client: TestClient) -> None:
-    response = client.get("/unserialisable")
+def _deep(depth: int = 100_000) -> Any:
+    value: Any = []
+    for _ in range(depth):
+        value = [value]
+    return value
+
+
+@pytest.mark.parametrize("bad", [object(), _deep()], ids=["object", "deeply-nested"])
+def test_unserialisable_extension_falls_back_to_a_500_problem(
+    app: FastAPI, bad: Any
+) -> None:
+    @app.get("/bad-extension")
+    def bad_extension() -> None:
+        raise HephError("HEPH-NF-404", leaky=bad)
+
+    response = TestClient(app).get("/bad-extension")
     assert response.status_code == 500
-    assert _body(response)["code"] == "HEPH-GEN-500"
+    body = _body(response)  # also asserts content-type application/problem+json
+    assert body["code"] == "HEPH-GEN-500"
+    assert body["detail"] == _codes.DETAIL_HINTS["HEPH-GEN-500"]
+    assert "leaky" not in body
+    assert "leaky" not in response.text
 
 
 def test_signature_error_maps_to_401(client: TestClient) -> None:
