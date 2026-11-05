@@ -1,6 +1,6 @@
 {
   "suite": "money.arith",
-  "spec": "0.1.0",
+  "spec": "0.2.0",
   "description": "Wire-format arithmetic (spec 3.1-3.5). Currency mismatch is HEPH-MONEY-409; overflow and every wire violation are HEPH-MONEY-422. `b` is absent for `neg`. An operand is given either as an object `a`/`b` or as a JSON string `a_text`/`b_text`; when a text member is present a runner MUST pass those exact bytes to the library without parsing and re-serialising them (needed to exercise duplicate member names, spec 4.3).",
   "source": "Hand-derived from spec section 3 and i64 bounds. add-duplicate-amount-member is hand-derived from spec 3.1 (a money wire object has exactly the members amount and currency) and spec 4.3 (duplicate object member names MUST be rejected); the money code applies because a money wire object is being rejected. The duplicated key lives in a text member (a_text) rather than a live object, because standard JSON loaders collapse duplicate keys.",
   "cases": [

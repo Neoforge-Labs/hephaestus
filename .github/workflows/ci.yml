@@ -31,6 +31,9 @@ jobs:
           python-version: '3.12'
       - run: uv run python tools/check_adrs.py
       - run: uv run --with pyyaml python tools/check_registry.py
+      # The core's currency table is generated from spec/currencies.yaml; fail
+      # if the committed file is stale. Also runs locally as core:gen-currencies.
+      - run: uv run tools/gen_currencies.py --check
       # check_vectors.py runs in python-ci as conformance:check.
 
   rust:

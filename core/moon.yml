@@ -20,6 +20,14 @@ tasks:
       - 'hephkit-py/**/*'
       - 'hephkit-core/**/*'
       - 'Cargo.toml'
+  gen-currencies:
+    # currency_table.rs is generated from spec/currencies.yaml; fail if the committed file is stale.
+    command: 'uv run ../tools/gen_currencies.py --check'
+    inputs:
+      - '/spec/currencies.yaml'
+      - '/tools/gen_currencies.py'
+      - '/tools/check_registry.py'
+      - 'hephkit-core/src/money/currency_table.rs'
   coverage:
     # Needs the rustup toolchain with llvm-tools and cargo-llvm-cov; a Homebrew
     # cargo has no llvm-profdata.

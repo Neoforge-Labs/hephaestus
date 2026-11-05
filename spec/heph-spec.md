@@ -1,8 +1,8 @@
 # heph-spec
 
-- **Version:** 0.1.0
+- **Version:** 0.2.0
 - **Status:** Draft for implementation in Phase 1; every module implementing it is `experimental`.
-- **Registries:** `spec/errors.yaml` (error codes), `conventions/attributes.yaml` (telemetry attributes).
+- **Registries:** `spec/errors.yaml` (error codes), `conventions/attributes.yaml` (telemetry attributes), `spec/currencies.yaml` (ISO 4217 minor units).
 
 The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119 and RFC 8174. Where this document profiles a standard, the standard governs everything this document does not restate. Four parts are original: the error-code registry (section 1), idempotency storage and replay (section 2), money on the wire (section 3) and the provenance record (section 7).
 
@@ -15,6 +15,8 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 - Idempotency records carry a 60 second default lease; 5xx and raised errors release the record, status below 500 is stored and replayed (2.7, 2.8).
 - Integer literals above 2^53-1 are rejected with `HEPH-VAL-422`, never rounded; literals with a fraction or exponent follow RFC 8785 number serialisation (4.3).
 - Money `amount` is a string matching `^(0|-?[1-9][0-9]*)$`; JSON numbers are rejected (3.2, 3.4).
+- Fractional digits beyond a currency's exponent are accepted when every one of them is zero, because the value is preserved exactly; a non-zero digit beyond the exponent still needs a rounding mode (3.6, ADR 0016).
+- The accepted currency set is the whole of ISO 4217 List One, a code being accepted if and only if List One gives it a numeric minor-unit field, which includes the funds codes and excludes the `N.A.` codes (3.3, ADR 0017).
 
 ## 1. Errors
 
@@ -91,7 +93,9 @@ For `POST /v1/charges` with body `{"b":1,"a":2}` the JCS string is `{"body":{"a"
 
 3.2. `amount` is a JSON **string**: an integer count of the currency's minor units in base 10, so that it survives JavaScript numbers. It MUST match `^(0|-?[1-9][0-9]*)$` (ASCII digits only, no `+`, no leading zeros, no whitespace, no decimal point, no exponent, and no `-0`). It MUST fit in a signed 64-bit integer. Anything else is rejected with `HEPH-MONEY-422`.
 
-3.3. `currency` MUST be an alphabetic code with a defined minor-unit exponent; three uppercase ASCII letters is necessary but not sufficient. The exponent is the one given in `conformance/money/currency.json`, which is the normative exponent table for the currencies Phase 1 supports (for example `USD` 2, `JPY` 0, `KWD` 3). That file records its derivation: ISO 4217 List One as published by SIX Group, retrieved on 2026-11-04, with each exponent hand-derived from the table. An unknown code (for example `XYZ`), or a code with no defined exponent (`XXX`, `XAU`, `XTS`, `XDR` and the other non-currency codes), MUST be rejected with `HEPH-MONEY-422`. A change to the accepted set requires a spec version bump and updated conformance vectors.
+3.3. `currency` MUST be an alphabetic code with a defined minor-unit exponent; three uppercase ASCII letters is necessary but not sufficient. The accepted set is the whole of ISO 4217 List One, the standard's current currency and funds code list: a code is accepted **if and only if** List One gives it a numeric minor-unit field, and its exponent is that field (for example `USD` 2, `JPY` 0, `KWD` 3, `CLF` 4). A code List One publishes with a minor-unit field of `N.A.` has no exponent and MUST be rejected with `HEPH-MONEY-422`; so MUST a code that is not in List One at all, whether it was never assigned (for example `XYZ`) or the standard has retired it to the historical list (for example `BGN` after Amendment 180). Because the rule is mechanical, the funds codes (`CHE`, `CHW`, `USN`, `MXV`, `COU`, `BOV`, `CLF`, `UYI`, `UYW`) are accepted and the non-currency codes (`XXX`, `XAU`, `XTS`, `XDR` and the rest) are rejected; ADR 0017 records why that boundary is the right one. ISO defines no exponent-1 code, so the exponents in use are 0, 2, 3 and 4.
+
+The normative registry is `spec/currencies.yaml`, which transcribes List One and records which publication it came from; `core/hephkit-core/src/money/currency_table.rs` is generated from it by `tools/gen_currencies.py` and MUST NOT be edited by hand. `conformance/money/currency.json` pins a representative sample of the accepted codes together with every rejection boundary, and is what a new implementation is tested against. A change to the accepted set requires a spec version bump and updated conformance vectors, and is made by re-transcribing a newer List One, never by editing one code.
 
 A wire object that violates 3.1 (missing member, extra member, or a value of the wrong JSON type) MUST also be rejected with `HEPH-MONEY-422`. `HEPH-MONEY-409` is reserved for a currency mismatch between two amounts in one operation.
 

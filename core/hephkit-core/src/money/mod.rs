@@ -2,6 +2,7 @@
 
 mod allocate;
 mod currency;
+mod currency_table;
 mod parse;
 mod wire;
 
