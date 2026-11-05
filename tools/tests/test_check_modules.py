@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -56,6 +57,19 @@ def test_python_package_directory_needs_an_entry(tmp_path):
         files=[("python/hephkit/src/hephkit/pkg/__init__.py", "")],
     )
     assert any("pkg" in e for e in check_modules(root))
+
+
+@pytest.mark.parametrize(
+    ("directory", "name"),
+    [
+        ("core/newcrate", "newcrate"),
+        ("go/internal/newpkg", "newpkg"),
+        ("docker/newimg", "newimg"),
+    ],
+)
+def test_scanned_directory_needs_an_entry(tmp_path, directory, name):
+    root = make_tree(tmp_path, [planned()], dirs=[directory])
+    assert any(name in e for e in check_modules(root))
 
 
 def test_go_command_directory_needs_an_entry(tmp_path):
