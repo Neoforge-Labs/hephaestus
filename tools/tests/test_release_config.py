@@ -185,6 +185,25 @@ def test_wheels_cover_the_required_targets() -> None:
         assert needle in text, needle
 
 
+def test_release_please_does_not_use_the_actions_token() -> None:
+    """The first release run failed with "GitHub Actions is not permitted to
+    create or approve pull requests" -- the Actions identity cannot open the
+    release PR. And even where it is allowed, a PR authored by GITHUB_TOKEN
+    does not trigger workflows, so the release PR arrives with no checks
+    reported, which is the state that invites merging past it unexamined.
+
+    So the step must pass an explicit token that is not GITHUB_TOKEN, and a
+    preflight must fail loudly when that secret is absent rather than letting
+    the action fail opaquely."""
+    doc = load_workflow("release.yml")
+    steps = doc["jobs"]["release-please"]["steps"]
+    rp = next(s for s in steps if s.get("id") == "rp")
+    token = rp["with"]["token"]
+    assert "secrets.RELEASE_PLEASE_TOKEN" in token, token
+    assert "GITHUB_TOKEN" not in token, token
+    assert any("RELEASE_PLEASE_TOKEN is not set" in str(s.get("run", "")) for s in steps)
+
+
 def test_breaking_changes_stay_in_zero_x() -> None:
     """Release-please's default for a 0.x version is to bump a breaking change
     to 1.0.0. Phase 1 carries two `feat(money)!:` commits, so without this the
