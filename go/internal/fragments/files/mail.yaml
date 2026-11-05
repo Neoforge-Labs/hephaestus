@@ -1,0 +1,20 @@
+# Local SMTP sink with a web UI. maturity: experimental
+# Host ports: 54025 SMTP, 54825 web UI. Nothing sent here leaves the machine.
+services:
+  mailpit:
+    image: axllent/mailpit:v1.33.0
+    environment:
+      MP_DATABASE: /data/mailpit.db
+    ports:
+      - "54025:1025"   # SMTP
+      - "54825:8025"   # UI and API
+    volumes:
+      - heph-mailpit-data:/data
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  heph-mailpit-data:
