@@ -389,11 +389,17 @@ def test_global_tracer_start_as_current_span_goes_through_the_switch() -> None:
     assert [s.name for s in exporter.get_finished_spans()] == ["cm"]
 
 
-def test_default_exporter_targets_the_settings_endpoint() -> None:
-    o = setup_observability(_settings(otlp_endpoint="http://collector.invalid:54318/"))
-    (processor,) = o.tracer_provider._active_span_processor._span_processors  # type: ignore[attr-defined]
-    assert processor.span_exporter._endpoint == "http://collector.invalid:54318/v1/traces"
-    o.tracer_provider.force_flush = lambda *_a, **_k: True  # type: ignore[method-assign,assignment]
+def test_default_exporter_targets_the_settings_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    class FakeExporter(InMemorySpanExporter):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__()
+            seen.update(kwargs)
+
+    monkeypatch.setattr(obs_module, "OTLPSpanExporter", FakeExporter)
+    setup_observability(_settings(otlp_endpoint="http://collector.invalid:54318/"))
+    assert seen == {"endpoint": "http://collector.invalid:54318/v1/traces"}
 
 
 # --- import hygiene ----------------------------------------------------------
@@ -423,3 +429,122 @@ def test_importing_observability_opens_no_sockets() -> None:
         "import hephkit.observability; print('ok')"
     )
     assert out == "ok"
+
+
+# --- repr/container leaks and non-JSON keys ----------------------------------
+
+import collections  # noqa: E402
+import dataclasses  # noqa: E402
+
+from pydantic import BaseModel, SecretStr  # noqa: E402
+
+
+@dataclasses.dataclass
+class _D:
+    password: str
+    name: str = "n"
+
+
+@dataclasses.dataclass(frozen=True)
+class _F:
+    password: str
+
+
+class _M(BaseModel):
+    password: str
+    name: str = "n"
+
+
+class _Opaque:
+    def __init__(self) -> None:
+        self.password = "OPAQUELEAK"
+
+    def __repr__(self) -> str:
+        return f"Opaque(password={self.password!r})"
+
+
+def _rendered(capsys: pytest.CaptureFixture[str], **kw: Any) -> str:
+    get_logger("t").info("x", **kw)
+    return capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "secret"),
+    [
+        ("dc", _D(password="HUNTER2"), "HUNTER2"),
+        ("dq", collections.deque([{"password": "DEQLEAK"}]), "DEQLEAK"),
+        ("it", {"password": "SETLEAK"}.items(), "SETLEAK"),
+        ("pm", _M(password="PYDLEAK"), "PYDLEAK"),
+        ("st", {_F(password="FSLEAK")}, "FSLEAK"),
+        ("vals", {"a": {"password": "VALLEAK"}}.values(), "VALLEAK"),
+        ("opaque", _Opaque(), "OPAQUELEAK"),
+        ("nested", [{"inner": _D(password="NESTLEAK")}], "NESTLEAK"),
+        ("sec", _M.model_construct(password=SecretStr("SECLEAK")), "SECLEAK"),
+    ],
+)
+def test_secret_values_never_reach_the_rendered_line(
+    capsys: pytest.CaptureFixture[str], field: str, value: object, secret: str
+) -> None:
+    out = _rendered(capsys, **{field: value})
+    assert secret not in out
+    json.loads(out)  # still one valid JSON line
+
+
+def test_known_shapes_are_expanded_and_redacted(capsys: pytest.CaptureFixture[str]) -> None:
+    line = _one(
+        capsys,
+        ctl={"password": "p"},
+        dc=_D(password="x"),
+        dq=collections.deque([{"password": "x"}]),
+        it={"password": "x"}.items(),
+        pm=_M(password="x"),
+    )
+    assert line["ctl"] == {"password": "[REDACTED]"}
+    assert line["dc"] == {"password": "[REDACTED]", "name": "n"}
+    assert line["dq"] == [{"password": "[REDACTED]"}]
+    assert line["it"] == {"password": "[REDACTED]"}
+    assert line["pm"] == {"password": "[REDACTED]", "name": "n"}
+
+
+def test_unknown_objects_render_as_their_type_only(capsys: pytest.CaptureFixture[str]) -> None:
+    assert _one(capsys, o=_Opaque(), e=ValueError("secret text"))["o"] == "<_Opaque>"
+
+
+def test_common_scalars_stay_readable(capsys: pytest.CaptureFixture[str]) -> None:
+    import datetime
+    import decimal
+    import uuid
+
+    u = uuid.UUID(int=1)
+    line = _one(capsys, d=datetime.date(2026, 1, 2), n=decimal.Decimal("1.50"), u=u, b=b"raw")
+    assert line["d"] == "2026-01-02" and line["n"] == "1.50" and line["u"] == str(u) and line["b"] == "<bytes>"
+
+
+def test_failing_dump_falls_back_to_type_name(capsys: pytest.CaptureFixture[str]) -> None:
+    class Bad(BaseModel):
+        x: int = 1
+
+        def model_dump(self, **_: Any) -> dict[str, Any]:  # type: ignore[override]
+            raise RuntimeError("boom")
+
+    @dataclasses.dataclass
+    class BadDC:
+        f: Any
+
+    class Unclonable:
+        def __deepcopy__(self, memo: Any) -> None:
+            raise RuntimeError("no")
+
+    line = _one(capsys, a=Bad(), b=BadDC(f=Unclonable()))
+    assert line["a"] == "<Bad>" and line["b"] == "<BadDC>"
+
+
+def test_non_json_dict_keys_do_not_raise(capsys: pytest.CaptureFixture[str]) -> None:
+    line = _one(capsys, d={("a", 1): "t", b"k": "b", 7: "i", None: "n", "ok": 1})
+    assert line["d"] == {"('a', 1)": "t", "b'k'": "b", "7": "i", "null": "n", "ok": 1}
+
+
+def test_redacted_bytes_key_is_still_redacted(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _rendered(capsys, d={b"password": "BYTESLEAK", b"access_token": "T2"})
+    assert "BYTESLEAK" not in out and "T2" not in out
+    assert json.loads(out)["d"] == {"b'password'": "[REDACTED]", "b'access_token'": "[REDACTED]"}

@@ -22,6 +22,13 @@ Redaction (decisions, each pinned by a test):
   are redacted too (to a depth of 16, beyond which the value is replaced by
   ``"[TRUNCATED]"``). Whatever the value's type, a redacted key's value
   becomes ``"[REDACTED]"``.
+* Dataclasses and pydantic models are dumped and redacted; sequences, sets,
+  ``dict.items()``/``values()`` are expanded and redacted. Any other object is
+  rendered as ``"<TypeName>"`` only, never ``repr``, so unanticipated shapes
+  cannot leak their fields. Dict keys that JSON cannot carry are stringified.
+* The rule is deliberately over-eager on prefixes: ``token_count`` is redacted
+  (prefix ``token_``) while ``tokens_used`` is kept. LLM products that log token
+  counts should name them ``tokens_used`` / ``input_tokens``... or accept it.
 * Only keys are inspected. Secrets embedded inside free-text values are not found.
 
 ``get_logger`` is annotated ``FilteringBoundLogger``, the type structlog really
@@ -41,10 +48,16 @@ Needs the ``observability`` extra: ``pip install "hephkit[observability]"``.
 
 from __future__ import annotations
 
+import dataclasses
+import datetime
+import decimal
 import logging
 import threading
-from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, Any, Final
+import uuid
+from collections.abc import ItemsView, Iterable, Mapping, Sequence, ValuesView
+from collections.abc import Set as AbstractSet
+from pathlib import PurePath
+from typing import TYPE_CHECKING, Any, Final, cast
 
 import structlog
 from opentelemetry import trace
@@ -79,29 +92,61 @@ REDACTED_KEYS: Final[frozenset[str]] = frozenset(
 
 
 def _is_redacted(key: object, words: frozenset[str]) -> bool:
-    k = _normalise(str(key))
+    k = _normalise(key.decode("utf-8", "replace") if isinstance(key, bytes) else str(key))
     return any(k == w or k.startswith(w + "_") or k.endswith("_" + w) for w in words)
+
+
+def _placeholder(obj: object) -> str:
+    """Render of last resort: the type only, never the fields. ``repr`` of an
+    unknown object can print secrets that key-based redaction cannot see."""
+    return f"<{type(obj).__name__}>"
+
+
+_JSON_KEYS: Final = (str, int, float, bool, type(None))
+_STRINGIFIED: Final = (datetime.date, datetime.time, decimal.Decimal, uuid.UUID, PurePath)
 
 
 def _redact_value(value: object, depth: int, words: frozenset[str]) -> object:
     if depth > _MAX_DEPTH:
         return _TRUNCATED
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    try:
+        return _redact_container(value, depth, words)
+    except Exception:  # a logging call must never raise
+        return _placeholder(value)
+
+
+def _redact_container(value: object, depth: int, words: frozenset[str]) -> object:
+    def sub(item: object) -> object:
+        return _redact_value(item, depth + 1, words)
+
     if isinstance(value, Mapping):
         return {
-            k: REDACTED if _is_redacted(k, words) else _redact_value(v, depth + 1, words) for k, v in value.items()
+            (k if isinstance(k, _JSON_KEYS) else str(k)): REDACTED if _is_redacted(k, words) else sub(v)
+            for k, v in value.items()
         }
-    if isinstance(value, list):
-        return [_redact_value(v, depth + 1, words) for v in value]
+    if isinstance(value, ItemsView):
+        return sub(dict(value))
     if isinstance(value, tuple):
-        return tuple(_redact_value(v, depth + 1, words) for v in value)
-    return value
+        return tuple(sub(v) for v in value)
+    if isinstance(value, (str, bytes, bytearray)):
+        return _placeholder(value) if not isinstance(value, str) else value
+    if isinstance(value, (Sequence, AbstractSet, ValuesView)):
+        return [sub(v) for v in value]
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return sub(dataclasses.asdict(value))
+    dump = getattr(type(value), "model_dump", None)  # pydantic models, without importing pydantic
+    if callable(dump):
+        return sub(dump(value))
+    if isinstance(value, _STRINGIFIED):
+        return value.isoformat() if isinstance(value, (datetime.date, datetime.time)) else str(value)
+    return value  # left to the renderer, whose fallback is the type name
 
 
 def _make_redactor(words: frozenset[str]) -> Processor:
     def redact(_logger: WrappedLogger, _method: str, event_dict: EventDict) -> EventDict:
-        redacted = _redact_value(event_dict, 0, words)
-        assert isinstance(redacted, dict)
-        return redacted
+        return cast(EventDict, _redact_value(event_dict, 0, words))
 
     return redact
 
@@ -123,7 +168,7 @@ def _configure_logging(level: str, words: frozenset[str] = REDACTED_KEYS) -> Non
             structlog.contextvars.merge_contextvars,
             _add_trace_ids,
             _make_redactor(words),
-            structlog.processors.JSONRenderer(default=repr),
+            structlog.processors.JSONRenderer(default=_placeholder),
         ],
         wrapper_class=structlog.make_filtering_bound_logger(numeric),
         logger_factory=structlog.PrintLoggerFactory(),
@@ -207,7 +252,9 @@ class Observability:
         With a reachable collector this returns as soon as the final export
         completes. With an unreachable one, spans still queued after
         ``timeout`` are dropped and the call returns; a product can always exit
-        promptly. Safe to call twice. A later ``setup_observability`` installs a
+        promptly. Spans still in flight when this is called may end after the
+        processor stops; the SDK then prints "Processor is already shutdown" to
+        stderr and drops them. Safe to call twice. A later ``setup_observability`` installs a
         fresh, working provider.
         """
         global _active
@@ -243,6 +290,11 @@ def setup_observability(
     the same ``Observability`` (and instruments ``app`` if it is new). Calling
     with *different* ones raises ``RuntimeError`` rather than silently keeping
     the old service name; call ``shutdown()`` first to reconfigure.
+
+    If the product already installed its own global OpenTelemetry provider,
+    hephkit leaves it alone: only hephkit's FastAPI server spans go to this
+    provider's exporter, and spans made through the global tracer go to the
+    product's. Traces are split across the two; configure one or the other.
 
     This does not install error handlers; call ``install_error_handlers(app)``
     yourself (see the module docstring).
