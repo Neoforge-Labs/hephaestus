@@ -5,7 +5,7 @@
   "packages": {
     ".": {
       "release-type": "simple",
-      "component": "",
+      "component": "hephaestus",
       "include-component-in-tag": false
     },
     "core/hephkit-core": {
@@ -34,7 +34,7 @@
       "type": "linked-versions",
       "groupName": "hephaestus",
       "components": [
-        "",
+        "hephaestus",
         "hephkit-core",
         "hephkit-py",
         "hephkit",

@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 LOCKSTEP = {
-    ".": "",
+    ".": "hephaestus",
     "core/hephkit-core": "hephkit-core",
     "core/hephkit-py": "hephkit-py",
     "python/hephkit": "hephkit",
@@ -65,6 +65,8 @@ def test_root_package_cuts_the_plain_tag() -> None:
     cfg = json.loads((ROOT / "release-please-config.json").read_text())
     assert cfg["include-component-in-tag"] is True
     root = cfg["packages"]["."]
+    # An empty component is falsy and linked-versions silently skips it.
+    assert isinstance(root["component"], str) and root["component"]
     assert root["include-component-in-tag"] is False
     manifest = json.loads((ROOT / ".release-please-manifest.json").read_text())
     assert "." in manifest
