@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "workspaces": ["docs/site"],
+  "overrides": {
+    "zod": "4.3.6"
+  }
+}
