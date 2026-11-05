@@ -104,8 +104,12 @@ def test_negative_and_extreme_tolerance_do_not_abort() -> None:
     with pytest.raises(SignatureError):
         verify(SECRET, headers, b"x", now=5, tolerance=-1)
     verify(SECRET, headers, b"x", now=5, tolerance=2**63 - 1)
-    with pytest.raises(OverflowError):
+    with pytest.raises(OverflowError, match="tolerance outside the signed 64-bit"):
         verify(SECRET, headers, b"x", now=5, tolerance=2**63)
+    with pytest.raises(OverflowError, match="now outside"):
+        verify(SECRET, headers, b"x", now=2**63)
+    with pytest.raises(OverflowError, match="timestamp outside"):
+        sign(SECRET, "m", 2**63, b"")
 
 
 def test_sign_unusable_secret_is_signature_error_with_val_code() -> None:
@@ -116,6 +120,7 @@ def test_sign_unusable_secret_is_signature_error_with_val_code() -> None:
         assert not isinstance(exc.value, HashingError)
 
 
+@pytest.mark.slow
 def test_non_utf8_and_huge_payloads() -> None:
     sig = sign(SECRET, "m", 1, b"\xff\xfe\x00")
     assert sig.startswith("v1,")
@@ -127,6 +132,7 @@ def test_non_utf8_and_huge_payloads() -> None:
         sign(SECRET, "m\ud800", 1, b"")  # lone surrogate cannot be UTF-8
 
 
+@pytest.mark.slow
 def test_huge_string_inputs() -> None:
     from hephkit.money import Money, MoneyError
 
@@ -160,3 +166,34 @@ def test_hashing_error_exported_with_code() -> None:
     with pytest.raises(hashing.HashingError) as exc:
         hashing.canonical_json(float("nan"))
     assert exc.value.code == "HEPH-VAL-422"
+
+
+def _signed(msg_id: str = "m") -> dict[str, str]:
+    sig = sign(SECRET, msg_id, 7, b"x")
+    return {"webhook-timestamp": "7", "webhook-signature": sig}
+
+
+def test_case_colliding_headers_with_different_values_fail_closed_both_orders() -> None:
+    base = _signed("m")
+    ok = {**base, "Webhook-Id": "m"}
+    # Same spelling pair, both insertion orders: always rejected.
+    first = {**base, "webhook-id": "a", "Webhook-Id": "m"}
+    second = {**base, "Webhook-Id": "m", "webhook-id": "a"}
+    assert verify(SECRET, ok, b"x", now=7) is None
+    for headers in (first, second):
+        with pytest.raises(SignatureError) as exc:
+            verify(SECRET, headers, b"x", now=7)
+        assert exc.value.code == "HEPH-WH-401"
+
+
+def test_case_colliding_headers_with_identical_values_pass() -> None:
+    headers = {**_signed("m"), "webhook-id": "m", "Webhook-Id": "m"}
+    assert verify(SECRET, headers, b"x", now=7) is None
+
+
+def test_non_str_header_keys_are_ignored_not_attribute_errors() -> None:
+    headers: dict[object, str] = {**_signed("m"), "webhook-id": "m", 1: "a", b"x": "b"}
+    assert verify(SECRET, headers, b"x", now=7) is None  # type: ignore[arg-type]
+    with pytest.raises(SignatureError) as exc:
+        verify(SECRET, {1: "a"}, b"x", now=7)  # type: ignore[dict-item]
+    assert exc.value.code == "HEPH-WH-401"

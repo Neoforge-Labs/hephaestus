@@ -22,7 +22,7 @@ Rounding = Literal["reject", "half_up", "half_even", "down"]
 # builds a gigantic string for something like Decimal("1E+999999999999").
 # Binding-level policy; see the non-normative note in spec 3.6.
 _MAX_PLAIN_CHARS: Final = 4096
-_TOO_LARGE_CODE: Final = "HEPH-MONEY-422"
+_TOO_LARGE_CODE: Final = _core.MONEY_INVALID_CODE
 
 
 def _decimal_text(value: Decimal) -> str:

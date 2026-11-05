@@ -31,10 +31,6 @@ SCHEMA_DIR = ROOT / "schema"
 Case = dict[str, Any]
 
 
-def _error_class(code: str, kind: type[Exception]) -> type[Exception]:
-    return kind
-
-
 def expect_error(case: Case, kind: type[Exception], thunk: Callable[[], object]) -> bool:
     """If the case expects an error, run `thunk`, check class and code, return True."""
     expect = case["expect"]

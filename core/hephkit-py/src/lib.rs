@@ -11,8 +11,9 @@
 
 use hephkit_core::{CoreError, Currency, Money, Rounding};
 use pyo3::create_exception;
-use pyo3::exceptions::{PyOverflowError, PyValueError};
+use pyo3::exceptions::{PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PyBool;
 
 create_exception!(hephkit.money, MoneyError, PyValueError);
 create_exception!(hephkit.signatures, SignatureError, PyValueError);
@@ -65,6 +66,18 @@ fn minor_arg(py: Python<'_>, minor: &Bound<'_, PyAny>) -> PyResult<i64> {
     minor.extract::<i64>().map_err(|e| {
         if e.is_instance_of::<PyOverflowError>(py) {
             money_invalid(py, "minor units outside the signed 64-bit range")
+        } else {
+            e
+        }
+    })
+}
+
+/// An i64 argument that is not money (timestamp, clock, tolerance). Out of
+/// range is an `OverflowError` naming the real bound, not PyO3's "C long".
+fn int_arg(py: Python<'_>, value: &Bound<'_, PyAny>, name: &str) -> PyResult<i64> {
+    value.extract::<i64>().map_err(|e| {
+        if e.is_instance_of::<PyOverflowError>(py) {
+            PyOverflowError::new_err(format!("{name} outside the signed 64-bit range"))
         } else {
             e
         }
@@ -153,6 +166,9 @@ fn money_allocate(
     let m = money(py, minor, currency)?;
     let mut parsed = Vec::with_capacity(ratios.len());
     for ratio in &ratios {
+        if ratio.is_instance_of::<PyBool>() {
+            return Err(PyTypeError::new_err("ratios must be int, not bool"));
+        }
         let value = ratio.extract::<u64>().map_err(|e| {
             if e.is_instance_of::<PyOverflowError>(py) {
                 money_invalid(py, "ratio outside the unsigned 64-bit range")
@@ -203,9 +219,10 @@ fn sign(
     py: Python<'_>,
     secret: &str,
     msg_id: &str,
-    timestamp: i64,
+    timestamp: &Bound<'_, PyAny>,
     payload: &[u8],
 ) -> PyResult<String> {
+    let timestamp = int_arg(py, timestamp, "timestamp")?;
     hephkit_core::sign(secret, msg_id, timestamp, payload).map_err(|e| map_err(py, e))
 }
 
@@ -218,9 +235,11 @@ fn verify(
     timestamp_header: &str,
     signature_header: &str,
     payload: &[u8],
-    now: i64,
-    tolerance: i64,
+    now: &Bound<'_, PyAny>,
+    tolerance: &Bound<'_, PyAny>,
 ) -> PyResult<()> {
+    let now = int_arg(py, now, "now")?;
+    let tolerance = int_arg(py, tolerance, "tolerance")?;
     hephkit_core::verify(
         secret,
         msg_id,
@@ -239,6 +258,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("MoneyError", py.get_type::<MoneyError>())?;
     m.add("SignatureError", py.get_type::<SignatureError>())?;
     m.add("HashingError", py.get_type::<HashingError>())?;
+    m.add("MONEY_INVALID_CODE", MONEY_INVALID)?;
     m.add(
         "DEFAULT_TOLERANCE_SECS",
         hephkit_core::DEFAULT_TOLERANCE_SECS,

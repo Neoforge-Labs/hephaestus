@@ -133,6 +133,9 @@ def test_allocate_bad_ratios() -> None:
         with pytest.raises(MoneyError) as exc:
             m.allocate(ratios)
         assert exc.value.code == "HEPH-MONEY-422"
+    for ratios in ([True, True], [1, False]):
+        with pytest.raises(TypeError, match="not bool"):
+            m.allocate(ratios)
     for ratios in ([-1, 2], [2**64]):
         with pytest.raises(MoneyError, match="unsigned 64-bit range") as exc:
             m.allocate(ratios)

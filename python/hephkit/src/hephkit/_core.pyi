@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from typing import Final
 
 DEFAULT_TOLERANCE_SECS: Final[int]
+MONEY_INVALID_CODE: Final[str]
 
 class MoneyError(ValueError):
     code: str
