@@ -106,7 +106,7 @@ def test_env_var_names_are_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_unprefixed_env_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SERVICE_NAME", "nope")
-    with pytest.raises(ValidationError):
+    with pytest.raises(SettingsError):
         HephSettings()
 
 
@@ -117,8 +117,52 @@ def test_unknown_env_is_rejected(bad: str) -> None:
 
 
 def test_service_name_is_required() -> None:
+    with pytest.raises(SettingsError) as exc:
+        HephSettings()
+    assert exc.value.missing == ["service_name"]
+
+
+def test_pydantic_required_and_prod_required_reported_together(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HEPH_ENV", "prod")
+    with pytest.raises(SettingsError) as exc:
+        PaySettings()
+    assert exc.value.missing == ["service_name", "database_url", "stripe_key"]
+
+
+def test_bad_env_stays_a_validation_error_even_with_other_gaps(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HEPH_ENV", "staging")
     with pytest.raises(ValidationError):
         HephSettings()
+
+
+def test_non_missing_error_alongside_missing_is_not_laundered() -> None:
+    with pytest.raises(ValidationError):
+        HephSettings(env="prod", database_url=12345)  # type: ignore[arg-type]
+
+
+def test_typo_env_var_is_surfaced_only_in_the_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HEPH_ENV", "prod")
+    monkeypatch.setenv("HEPH_SERVICE_NAME", "x")
+    monkeypatch.setenv("HEPH_DATABASE_URI", SECRET)
+    with pytest.raises(SettingsError) as exc:
+        HephSettings()
+    assert exc.value.missing == ["database_url"]
+    assert exc.value.unused_env == ["HEPH_DATABASE_URI"]
+    assert "HEPH_DATABASE_URI is set and matches no setting" in str(exc.value)
+    assert SECRET not in str(exc.value)
+
+
+def test_unrecognised_env_is_silent_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HEPH_SERVICE_NAME", "x")
+    monkeypatch.setenv("HEPH_FUTURE_MODULE", "1")
+    HephSettings()  # no warning under -W error, no error
+
+
+def test_known_env_vars_are_not_reported_unused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HEPH_ENV", "prod")
+    with pytest.raises(SettingsError) as exc:
+        HephSettings()
+    assert exc.value.unused_env == []
 
 
 def _prod() -> PaySettings:
@@ -180,7 +224,7 @@ def test_wrongly_typed_secret_input_is_not_echoed() -> None:
 def test_settings_error_message_never_contains_values() -> None:
     with pytest.raises(SettingsError) as exc:
         PaySettings(env="prod", service_name="x", stripe_key=SecretStr("  "))
-    assert str(exc.value) == "missing required settings in prod: database_url, stripe_key"
+    assert str(exc.value) == "missing required settings: database_url, stripe_key"
     assert exc.value.missing == ["database_url", "stripe_key"]
 
 
