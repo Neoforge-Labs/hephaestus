@@ -37,9 +37,28 @@ jobs:
       version: ${{ steps.rp.outputs.version }}
       tag: ${{ steps.rp.outputs.tag_name }}
     steps:
+      # Fail with a sentence someone can act on, rather than letting the action
+      # fail opaquely on an empty token.
+      - name: Require the release token
+        env:
+          TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error title=RELEASE_PLEASE_TOKEN is not set::release-please needs a PAT or App token with Contents and Pull requests write on this repository. Add it as the repository secret RELEASE_PLEASE_TOKEN. The default GITHUB_TOKEN cannot be used: see the comment in this workflow."
+            exit 1
+          fi
       - id: rp
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
+          # NOT the default GITHUB_TOKEN, for two independent reasons. First,
+          # the first release run failed with "GitHub Actions is not permitted
+          # to create or approve pull requests" — a repository setting that
+          # blocks the Actions identity from opening the release PR at all.
+          # Second, even where that is allowed, a pull request authored by
+          # GITHUB_TOKEN does not trigger workflows, so the release PR would
+          # arrive with no checks reported — which is the state that invites
+          # merging past it unexamined. A PAT or App token fixes both.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
