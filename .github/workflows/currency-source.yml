@@ -133,6 +133,7 @@ jobs:
           }
           live="$(pin url)"
           archived="$(pin archive_url)"
+          pinned_sha="$(pin sha256)"
 
           fetch() { # fetch <label> <url> -> writes $RUNNER_TEMP/<label>.xml
             echo "::group::GET $1 <- $2"
@@ -144,6 +145,48 @@ jobs:
             echo "::endgroup::"
             echo "could not fetch the $1 location"
             return 1
+          }
+          # A 200 is not proof the right bytes arrived. Wayback serves error
+          # pages, rate-limit notices and re-captures with status 200, and so do
+          # CDNs in front of the live file. The two guards below reject those as
+          # FETCH-class failures, before any step can read them as a finding
+          # about spec/currencies.yaml. They are deliberately different guards,
+          # because the two locations make different promises.
+          #
+          # fetch_pinned: these bytes must BE the pinned publication. True of
+          # the immutable capture always, and of the live file whenever we are
+          # verifying a committed registry. Anything else says nothing about the
+          # registry, so blaming the registry for it (the old behaviour: a
+          # capture serving an error page was annotated "registry drifted,
+          # something was hand-edited") is a misdiagnosis that sends someone
+          # looking for a defect that is not there.
+          fetch_pinned() { # fetch_pinned <label> <url>
+            fetch "$1" "$2" || return 1
+            got="$(sha256sum "$RUNNER_TEMP/$1.xml" | cut -d" " -f1)"
+            if [ "$got" != "$pinned_sha" ]; then
+              echo "the $1 location answered, but served sha256 ${got}, not the pinned ${pinned_sha}: it did not return the pinned publication"
+              return 1
+            fi
+            return 0
+          }
+          # fetch_current: the live list is EXPECTED to stop matching the pin
+          # once the publisher republishes -- reporting that is this job's whole
+          # purpose on a schedule -- so its bytes cannot be hash-gated here or
+          # republication could never be detected. What CAN be required is that
+          # they are a List One document at all. Without this a live 200 serving
+          # a rate-limit page was reported as "ISO 4217 has been republished",
+          # advising a re-pin to bytes that are not the standard.
+          fetch_current() { # fetch_current <label> <url>
+            fetch "$1" "$2" || return 1
+            echo "::group::--derivable: is the $1 copy a List One document at all?"
+            uv run tools/gen_currencies.py --derivable "$RUNNER_TEMP/$1.xml"
+            status=$?
+            echo "::endgroup::"
+            if [ $status -ne 0 ]; then
+              echo "the $1 location answered 200 but did not serve an ISO 4217 List One document"
+              return 1
+            fi
+            return 0
           }
           verify() { # verify <label>
             echo "::group::--verify-source against the $1 copy"
@@ -162,8 +205,8 @@ jobs:
 
           # Keep this condition identical to the scope step's.
           if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
-            if ! fetch live "$live"; then
-              echo "::error title=Could not fetch the live ISO 4217 publication::${live} would not download, so this run cannot say whether the publication has changed. This is a fetch failure, not a finding: the committed registry is not implicated and the pin does not need moving. Re-run, or check by hand per CONTRIBUTING.md."
+            if ! fetch_current live "$live"; then
+              echo "::error title=Could not fetch the live ISO 4217 publication::${live} would not download, or answered with something that is not an ISO 4217 List One document, so this run cannot say whether the publication has changed. This is a fetch failure, not a finding: the committed registry is not implicated and the pin does not need moving. Re-run, or check by hand per CONTRIBUTING.md."
               exit 1
             fi
             if verify live; then
@@ -171,8 +214,8 @@ jobs:
               exit 0
             fi
             echo "the live file downloaded but did not verify; checking the immutable capture to find out why"
-            if ! fetch archive "$archived"; then
-              echo "::error title=Cannot tell the two causes apart::The live file did not verify and the archived capture could not be fetched, so this run cannot say whether the registry drifted or the publication changed. Re-run, or check by hand per CONTRIBUTING.md."
+            if ! fetch_pinned archive "$archived"; then
+              echo "::error title=Cannot tell the two causes apart::The live file did not verify and the archived capture did not yield the pinned bytes, so this run cannot say whether the registry drifted or the publication changed. Re-run, or check by hand per CONTRIBUTING.md."
               exit 1
             fi
             if verify archive; then republished; else drifted; fi
@@ -180,7 +223,7 @@ jobs:
           fi
 
           # pull_request / push: archive first.
-          if fetch archive "$archived"; then
+          if fetch_pinned archive "$archived"; then
             if verify archive; then
               echo "the registry is exactly what its pinned publication derives to"
               exit 0
@@ -188,14 +231,17 @@ jobs:
             drifted
             exit 1
           fi
-          echo "the archived capture is unreachable; falling back to the live file"
-          if ! fetch live "$live"; then
-            echo "::error title=Neither location could be fetched::Both the archived capture and the live file failed to download, so the pin could not be checked at all. This is a fetch failure, not a finding."
+          echo "the archived capture did not yield the pinned bytes; falling back to the live file"
+          if ! fetch_pinned live "$live"; then
+            echo "::error title=Neither location yielded the pinned publication::Neither the archived capture nor the live file returned the pinned bytes -- they failed to download, or answered with something else -- so the pin could not be checked at all. This is a fetch failure, not a finding: the committed registry is not implicated. If the live file has simply moved on, the capture is the location to fix. See CONTRIBUTING.md."
             exit 1
           fi
           if verify live; then
-            echo "the registry verifies against the live file (the archived capture was unreachable)"
+            echo "the registry verifies against the live file (the archived capture was unavailable)"
             exit 0
           fi
-          echo "::error title=Registry did not verify, and the capture was unreachable::The live file did not verify and the archived capture could not be fetched, so this run cannot say whether the registry drifted or the publication changed. Check by hand per CONTRIBUTING.md."
+          # fetch_pinned has already proved these bytes ARE the pinned
+          # publication, so a verify failure here can only be the registry. The
+          # ambiguity the old message hedged about no longer exists.
+          drifted
           exit 1

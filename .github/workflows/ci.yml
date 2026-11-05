@@ -57,6 +57,13 @@ jobs:
   wheels:
     uses: ./.github/workflows/rust-wheels.yml
 
+  # Publishes from every main push, in parallel with the language gates. That is
+  # correct for these images — they are the heph-python and heph-node BASE
+  # images, carrying none of our code, and docker-publish.yml gates them on
+  # their own contract tests and a Trivy scan on both arches — but it means the
+  # registry holds images from arbitrary main commits next to released ones.
+  # The "ci-" prefix keeps the two tellable apart: a CI image is
+  # `ci-sha-<12>`, a released one `sha-<12>` plus its bare version tag.
   images:
     permissions:
       contents: read
@@ -65,6 +72,7 @@ jobs:
     uses: ./.github/workflows/docker-publish.yml
     with:
       push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      tag-prefix: ci-
 
   codeql:
     name: codeql (${{ matrix.language }})

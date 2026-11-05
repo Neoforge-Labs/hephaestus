@@ -20,6 +20,14 @@ Three jobs, one derivation shared between them:
     is not vendored because SIX's terms do not clearly permit redistributing it;
     ``spec/currencies.source.yaml`` records that reasoning.
 
+``uv run tools/gen_currencies.py --derivable list-one.xml``
+    Say only whether the file parses as a List One publication at all, with no
+    reference to the pin. The currency-source workflow needs this to tell a
+    republication from a 200 carrying something that is not List One (a
+    rate-limit page, a CDN interstitial): both differ from the pinned sha256,
+    but only the first is news, and reporting the second as a republication
+    advises an unnecessary re-pin.
+
 ``uv run tools/gen_currencies.py --transcribe list-one.xml``
     Rewrite ``spec/currencies.yaml`` from a List One XML whose hash matches the
     pin, so moving to a newer publication is a command rather than hand work.
@@ -283,8 +291,35 @@ def verify_source(registry: Path, source_path: Path, xml_path: Path) -> list[str
     return found
 
 
+def derivable(xml_path: Path) -> list[str]:
+    """Return error strings if ``xml_path`` is not a List One publication.
+
+    Deliberately says nothing about the pin: this answers "is this the
+    standard's document at all?", which is the question that separates a
+    publisher who has moved on from a location that answered 200 with an error
+    page. ``verify_source`` returns on the sha256 mismatch before it ever
+    parses, so it cannot tell those apart.
+    """
+    try:
+        xml = xml_path.read_bytes()
+    except OSError as exc:
+        return [f"cannot read {xml_path}: {exc}"]
+    try:
+        # Raises on an empty <CcyTbl> too, so "parsed but empty" needs no
+        # separate branch here.
+        entries = derive_from_xml(xml)
+    except (ElementTree.ParseError, ValueError) as exc:
+        return [f"{xml_path}: cannot derive entries: {exc}"]
+    print(f"{xml_path} derives {len(entries)} entries")
+    return []
+
+
 def _usage(message: str) -> int:
-    print(f"usage: gen_currencies.py [--check | --verify-source FILE | --transcribe FILE] ({message})", file=sys.stderr)
+    print(
+        "usage: gen_currencies.py [--check | --verify-source FILE | "
+        f"--derivable FILE | --transcribe FILE] ({message})",
+        file=sys.stderr,
+    )
     return 2
 
 
@@ -297,7 +332,7 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
 
     mode, xml_arg = None, None
     rest = list(args)
-    for flag in ("--verify-source", "--transcribe"):
+    for flag in ("--verify-source", "--derivable", "--transcribe"):
         if flag in rest:
             index = rest.index(flag)
             if index + 1 >= len(rest):
@@ -309,7 +344,14 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     if rest:
         return _usage(f"unknown: {' '.join(rest)}")
     if mode and check:
-        return _usage("--check cannot be combined with --verify-source or --transcribe")
+        return _usage("--check cannot be combined with --verify-source, --derivable or --transcribe")
+
+    if mode == "--derivable":
+        assert xml_arg is not None
+        problems = derivable(Path(xml_arg))
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        return 1 if problems else 0
 
     if mode == "--verify-source":
         assert xml_arg is not None
