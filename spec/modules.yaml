@@ -36,4 +36,4 @@
 - {name: billing, home: python, status: planned, phase: 4, spec_section: null}
 - {name: registry, home: ts, status: planned, phase: 4, spec_section: null}
 - {name: heph new, home: go, status: planned, phase: 5, spec_section: null}
-- {name: lab.repro, home: python, status: planned, phase: 6, spec_section: "7"}
+- {name: lab.repro, home: python, status: planned, phase: 3, spec_section: "7"}
