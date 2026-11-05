@@ -4,8 +4,6 @@
 # `planned` rows are the headline modules named in the design's rollout and are deliberately
 # NOT exhaustive; do not read them as the full scope (see the roadmap page).
 # spec_section is a section number of spec/heph-spec.md, or null.
-# Compose fragment rows (home: compose) are added when the fragments land; the check
-# fails until they are listed.
 
 # Python
 - {name: money, home: python, status: shipped, maturity: experimental, spec_section: "3"}
@@ -25,6 +23,14 @@
 - {name: compose, home: go, status: shipped, maturity: experimental, spec_section: null}
 - {name: fragments, home: go, status: shipped, maturity: experimental, spec_section: null}
 - {name: ingot, home: go, status: shipped, maturity: experimental, spec_section: null}
+
+# Compose fragments
+- {name: mail, home: compose, status: shipped, maturity: experimental, spec_section: null}
+- {name: objects, home: compose, status: shipped, maturity: experimental, spec_section: null}
+- {name: postgres, home: compose, status: shipped, maturity: experimental, spec_section: null}
+- {name: redis, home: compose, status: shipped, maturity: experimental, spec_section: null}
+- {name: stripe, home: compose, status: shipped, maturity: experimental, spec_section: null}
+- {name: telemetry, home: compose, status: shipped, maturity: experimental, spec_section: null}
 
 # Base images
 - {name: node, home: docker, status: shipped, maturity: experimental, spec_section: null}
