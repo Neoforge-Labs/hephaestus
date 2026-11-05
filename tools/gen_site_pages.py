@@ -47,11 +47,15 @@ DESIGN_SRC = Path("docs/superpowers/specs/2026-11-04-hephaestus-design.md")
 
 # Product and research project names that must not appear on the roadmap page.
 # Synced ADR text is exempt: it is copied verbatim.
+MATURITIES = ("experimental", "beta", "stable")
+
 PRIVATE_NAMES = ("Collie", "Domus", "SAWA", "NeoRx")
 
 # Rollout step titles that carry a private name, rewritten to name the capability.
 # The generator fails if the design's wording changes, so a stale override cannot hide.
 _CAPABILITY_TITLES = {"Weeks 3–4: Collie core (product)": "Weeks 3–4: Product core"}
+
+GENERATED_MARKER = "GENERATED FILE - do not edit by hand"
 
 _SPECIAL = re.compile(r"([\\`*_{}\[\]<>|#&~^$!])")
 _ADR_LINK = re.compile(
@@ -113,6 +117,12 @@ PII are redacted from logs by default.
 
 
 def render_modules(mods: list[dict[str, Any]]) -> str:
+    for m in mods:
+        if m.get("status") == "shipped" and m.get("maturity") not in MATURITIES:
+            raise ValueError(
+                f"{MODULES_SRC}: module {m.get('name', '<unnamed>')!r} has maturity {m.get('maturity')!r}; "
+                f"shipped modules need one of {', '.join(MATURITIES)}"
+            )
     shipped = [m for m in mods if m["status"] == "shipped"]
     planned = [m for m in mods if m["status"] == "planned"]
 
@@ -150,25 +160,38 @@ See the [roadmap](/roadmap) for the full picture.
 
 
 def parse_rollout(design: str) -> list[str]:
-    """The titles of the seven numbered rollout phases, in order."""
+    """The titles of the seven rollout phases, in order.
+
+    The Rollout section holds eight bold numbered items: seven phases and a final
+    "On demand" backlog, which is deliberately not a phase. Anything else is an
+    error, so a new or renumbered item cannot be dropped unnoticed.
+    """
     if "\n## Rollout\n" not in design:
         raise ValueError(f"{DESIGN_SRC}: no Rollout section")
     section = design.split("\n## Rollout\n", 1)[1].split("\n## ", 1)[0]
-    titles = re.findall(r"^(\d+)\. \*\*(.+?)\.\*\*", section, re.M)
-    phases = [t for n, t in titles if n.isdigit()][:7]
-    if [int(n) for n, _ in titles[:7]] != list(range(1, 8)) or len(phases) != 7:
-        raise ValueError(f"{DESIGN_SRC}: Rollout does not hold seven numbered steps")
-    return phases
+    items = re.findall(r"^(\d+)\. \*\*(.+?)[.:]\*\*", section, re.M)
+    if [int(n) for n, _ in items] != list(range(1, 9)):
+        raise ValueError(
+            f"{DESIGN_SRC}: Rollout must hold exactly eight numbered items (seven phases, then the "
+            f"on-demand backlog); found {len(items)}: {[int(n) for n, _ in items]}"
+        )
+    if not items[7][1].startswith("On demand"):
+        raise ValueError(f"{DESIGN_SRC}: Rollout item 8 must begin 'On demand', not {items[7][1]!r}")
+    return [t for _, t in items[:7]]
 
 
 def render_roadmap(design: str) -> str:
     items = []
-    for i, title in enumerate(parse_rollout(design), start=1):
+    titles = parse_rollout(design)
+    for i, title in enumerate(titles, start=1):
         title = _CAPABILITY_TITLES.get(title, title)
         for name in PRIVATE_NAMES:
             if name in title:
                 raise ValueError(f"roadmap step {i} names {name}; add a capability title for it")
         items.append(f"{i}. {_escape(title)}")
+    stale = [t for t in _CAPABILITY_TITLES if t not in titles]
+    if stale:
+        raise ValueError(f"the design's rollout no longer has the step(s) {stale}; update _CAPABILITY_TITLES")
     return (
         _front_matter("the Rollout section of the design", "Roadmap")
         + """\
@@ -249,6 +272,14 @@ def generate(repo_root: Path) -> dict[Path, str]:
     return out
 
 
+def _is_generated(path: Path) -> bool:
+    """True if the file carries the generated marker (it is ours to delete)."""
+    try:
+        return GENERATED_MARKER in path.read_text(encoding="utf-8")[:400]
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
 def _orphans(root: Path, pages: dict[Path, str]) -> list[Path]:
     """Files in generated-only directories that no source produces."""
     found: list[Path] = []
@@ -278,12 +309,20 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     if check:
         drift = [p for p, text in pages.items() if not p.is_file() or p.read_text(encoding="utf-8") != text]
         for path in drift + orphans:
-            reason = "has no source" if path in orphans else "is stale or missing"
+            reason = "is stale or missing"
+            if path in orphans:
+                reason = "has no source" if _is_generated(path) else "is hand-written, not generated, and has no source"
             print(f"{path.relative_to(root / CONTENT)} {reason}; run: uv run tools/gen_site_pages.py", file=sys.stderr)
         return 1 if drift or orphans else 0
 
     for path in orphans:
-        path.unlink()
+        if _is_generated(path):
+            path.unlink()
+        else:  # never delete what a human wrote
+            print(
+                f"{path.relative_to(root / CONTENT)} is not generated and has no source; left in place",
+                file=sys.stderr,
+            )
     for path, text in pages.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8", newline="\n")

@@ -187,3 +187,118 @@ def test_check_detects_orphan_adr_page(tmp_path: Path, capsys: pytest.CaptureFix
     (root / "docs/adr/0017-full-iso-4217-currency-table.md").unlink()
     assert main(["--check"], root) == 1
     assert "0017-full-iso-4217-currency-table" in capsys.readouterr().err
+
+
+def _design_edit(root: Path, old: str, new: str) -> None:
+    design = root / "docs/superpowers/specs/2026-11-04-hephaestus-design.md"
+    text = design.read_text(encoding="utf-8")
+    assert old in text, old
+    design.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def _item8(root: Path) -> str:
+    design = (root / "docs/superpowers/specs/2026-11-04-hephaestus-design.md").read_text(encoding="utf-8")
+    return next(line for line in design.splitlines() if line.startswith("8. **On demand"))
+
+
+def test_check_does_not_remove_or_pass_hand_written_pages(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _root(tmp_path)
+    assert main([], root) == 0
+    notes = root / CONTENT / "reference/notes.mdx"
+    notes.write_text("# My notes\n", encoding="utf-8")
+    capsys.readouterr()
+    assert main(["--check"], root) == 1
+    assert "reference/notes.mdx" in capsys.readouterr().err
+    assert notes.read_text(encoding="utf-8") == "# My notes\n"
+
+
+def test_write_keeps_and_reports_hand_written_pages(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _root(tmp_path)
+    assert main([], root) == 0
+    notes = root / CONTENT / "reference/notes.mdx"
+    notes.write_text("# My notes\n", encoding="utf-8")
+    capsys.readouterr()
+    main([], root)
+    assert notes.read_text(encoding="utf-8") == "# My notes\n"  # a generator never deletes a human's file
+    assert "reference/notes.mdx" in capsys.readouterr().err
+
+
+def test_write_still_removes_generated_orphans(tmp_path: Path) -> None:
+    root = _root(tmp_path)
+    assert main([], root) == 0
+    adr = root / "docs/adr/0017-full-iso-4217-currency-table.md"
+    page = root / CONTENT / "adrs" / adr.name
+    assert page.is_file()
+    adr.unlink()
+    assert main([], root) == 0
+    assert not page.exists()  # carries the generated marker, so it is ours to remove
+
+
+def test_roadmap_requires_exactly_eight_items_the_last_on_demand(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ninth = "9. **Weeks 14: Something else.** Not in the design.\n"
+    root = _root(tmp_path / "nine")
+    _design_edit(root, _item8(root) + "\n", _item8(root) + "\n" + ninth)
+    assert main([], root) == 1
+    assert "eight" in capsys.readouterr().err
+
+    root = _root(tmp_path / "six")
+    _design_edit(root, [line for line in _item8(root).splitlines()][0] + "\n", "")
+    seventh = next(
+        line
+        for line in (root / "docs/superpowers/specs/2026-11-04-hephaestus-design.md").read_text("utf-8").splitlines()
+        if line.startswith("7. **")
+    )
+    _design_edit(root, seventh + "\n", "")
+    assert main([], root) == 1
+    assert "eight" in capsys.readouterr().err
+
+    root = _root(tmp_path / "renumbered")  # eight items, but the last is a phase, not the backlog
+    _design_edit(root, "**On demand, entering as experimental:**", "**Week 14: One more phase.**")
+    assert main([], root) == 1
+    assert "On demand" in capsys.readouterr().err
+
+
+def test_roadmap_fails_when_a_step_names_a_private_product(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _root(tmp_path)
+    _design_edit(root, "**Weeks 3–4: Collie core (product).**", "**Weeks 3–4: Domus core.**")
+    assert main([], root) == 1
+    assert "Domus" in capsys.readouterr().err
+    assert not (root / CONTENT / "roadmap.mdx").exists()  # nothing half-written
+
+
+def test_roadmap_fails_when_a_capability_override_goes_stale(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _root(tmp_path)
+    _design_edit(root, "**Weeks 3–4: Collie core (product).**", "**Weeks 3–4: Core build.**")
+    assert main([], root) == 1  # no private name any more, but the override no longer matches anything
+    assert "Collie core (product)" in capsys.readouterr().err
+
+
+def _modules_root(tmp_path: Path, change) -> Path:
+    root = _root(tmp_path)
+    path = root / "spec/modules.yaml"
+    mods = yaml.safe_load(path.read_text(encoding="utf-8"))
+    change(next(m for m in mods if m["status"] == "shipped"))
+    path.write_text(yaml.safe_dump(mods), encoding="utf-8")
+    return root
+
+
+def test_modules_page_rejects_an_unknown_maturity(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _modules_root(tmp_path, lambda m: m.update(maturity="alpha"))
+    name = next(m["name"] for m in yaml.safe_load((root / "spec/modules.yaml").read_text("utf-8")) if m.get("maturity") == "alpha")
+    assert main([], root) == 1
+    err = capsys.readouterr().err
+    assert name in err and "alpha" in err and "Traceback" not in err
+
+
+def test_modules_page_rejects_a_missing_maturity(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _modules_root(tmp_path, lambda m: m.pop("maturity"))
+    name = next(m["name"] for m in yaml.safe_load((root / "spec/modules.yaml").read_text("utf-8")) if m["status"] == "shipped" and "maturity" not in m)
+    assert main([], root) == 1
+    err = capsys.readouterr().err
+    assert name in err and "maturity" in err and "Traceback" not in err
