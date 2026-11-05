@@ -1,0 +1,21 @@
+[package]
+name = "hephkit-core"
+version = "0.1.0"
+description = "Hephaestus correctness core: money, canonical JSON, hashing and signatures (experimental)"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+base64 = "0.22"
+hmac = "0.12"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v7"] }
+
+[dev-dependencies]
+proptest = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+
+[lints.rust]
+unsafe_code = "forbid"

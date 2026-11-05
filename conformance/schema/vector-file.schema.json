@@ -1,0 +1,896 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://heph.neoforgelabs.tech/conformance/vector-file.schema.json",
+  "title": "Hephaestus conformance vector file",
+  "description": "Contract for every conformance/<area>/<suite>.json. An error expectation is {\"error\": \"<HEPH code>\"}; the checker also confirms the code is in spec/errors.yaml.",
+  "type": "object",
+  "required": [
+    "suite",
+    "spec",
+    "cases"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "suite": {
+      "enum": [
+        "money.currency",
+        "money.parse",
+        "money.format",
+        "money.arith",
+        "money.compare",
+        "money.allocate",
+        "hashing.jcs",
+        "hashing.content",
+        "signatures.sign",
+        "signatures.verify"
+      ]
+    },
+    "spec": {
+      "const": "0.2.0"
+    },
+    "description": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "input",
+          "expect"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "input": {
+            "type": "object"
+          },
+          "expect": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "suite": {
+            "const": "money.currency"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "required": [
+                    "code"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "exponent"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "exponent": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 4
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "pattern": "^HEPH-[A-Z]{2,6}-[0-9]{3}$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "suite": {
+            "const": "money.parse"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "required": [
+                    "amount",
+                    "currency",
+                    "rounding"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "amount": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "rounding": {
+                      "enum": [
+                        "reject",
+                        "half_up",
+                        "half_even",
+                        "down"
+                      ]
+                    }
+                  }
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "minor"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "minor": {
+                          "type": "string",
+                          "pattern": "^(0|-?[1-9][0-9]*)$"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "pattern": "^HEPH-[A-Z]{2,6}-[0-9]{3}$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "suite": {
+            "const": "money.format"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "required": [
+                    "minor",
+                    "currency"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "minor": {
+                      "type": "string",
+                      "pattern": "^(0|-?[1-9][0-9]*)$"
+                    },
+                    "currency": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "amount"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "amount": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "pattern": "^HEPH-[A-Z]{2,6}-[0-9]{3}$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "suite": {
+            "const": "money.arith"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "required": [
+                    "op"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "op": {
+                      "enum": [
+                        "add",
+                        "sub",
+                        "neg"
+                      ]
+                    },
+                    "a": {
+                      "type": "object"
+                    },
+                    "b": {
+                      "type": "object"
+                    },
+                    "a_text": {
+                      "type": "string"
+                    },
+                    "b_text": {
+                      "type": "string"
+                    }
+                  },
+                  "oneOf": [
+                    {
+                      "required": [
+                        "a"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "a_text"
+                      ]
+                    }
+                  ],
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "b",
+                          "b_text"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "result"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "result": {
+                          "type": "object",
+                          "required": [
+                            "amount",
+                            "currency"
+                          ],
+                          "additionalProperties": false,
+                          "properties": {
+                            "amount": {
+                              "type": "string",
+                              "pattern": "^(0|-?[1-9][0-9]*)$"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{3}$"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "pattern": "^HEPH-[A-Z]{2,6}-[0-9]{3}$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "suite": {
+            "const": "money.compare"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "a": {
+                      "type": "object"
+                    },
+                    "b": {
+                      "type": "object"
+                    },
+                    "a_text": {
+                      "type": "string"
+                    },
+                    "b_text": {
+                      "type": "string"
+                    }
+                  },
+                  "allOf": [
+                    {
+                      "oneOf": [
+                        {
+                          "required": [
+                            "a"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "a_text"
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "oneOf": [
+                        {
+                          "required": [
+                            "b"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "b_text"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "ordering"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "ordering": {
+                          "enum": [
+                            "lt",
+                            "eq",
+                            "gt"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "pattern": "^HEPH-[A-Z]{2,6}-[0-9]{3}$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "suite": {
+            "const": "money.allocate"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "required": [
+                    "ratios"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "money": {
+                      "type": "object"
+                    },
+                    "money_text": {
+                      "type": "string"
+                    },
+                    "ratios": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    }
+                  },
+                  "oneOf": [
+                    {
+                      "required": [
+                        "money"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "money_text"
+                      ]
+                    }
+                  ]
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "parts"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "parts": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "amount",
+                              "currency"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                              "amount": {
+                                "type": "string",
+                                "pattern": "^(0|-?[1-9][0-9]*)$"
+                              },
+                              "currency": {
+                                "type": "string",
+                                "pattern": "^[A-Z]{3}$"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "pattern": "^HEPH-[A-Z]{2,6}-[0-9]{3}$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "suite": {
+            "const": "hashing.jcs"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "required": [
+                    "json"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "json": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "canonical"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "canonical": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "pattern": "^HEPH-[A-Z]{2,6}-[0-9]{3}$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "suite": {
+            "const": "hashing.content"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "required": [
+                    "json"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "json": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "hash"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "hash": {
+                          "type": "string",
+                          "pattern": "^sha256:[0-9a-f]{64}$"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "pattern": "^HEPH-[A-Z]{2,6}-[0-9]{3}$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "suite": {
+            "const": "signatures.sign"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "required": [
+                    "secret",
+                    "msg_id",
+                    "timestamp",
+                    "payload_b64"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "secret": {
+                      "type": "string"
+                    },
+                    "msg_id": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "payload_b64": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "signature"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "signature": {
+                          "type": "string",
+                          "pattern": "^v1,[A-Za-z0-9+/]{43}=$"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "pattern": "^HEPH-[A-Z]{2,6}-[0-9]{3}$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "suite": {
+            "const": "signatures.verify"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "required": [
+                    "secret",
+                    "headers",
+                    "payload_b64",
+                    "now"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "secret": {
+                      "type": "string"
+                    },
+                    "headers": {
+                      "type": "object",
+                      "required": [
+                        "webhook-id",
+                        "webhook-timestamp",
+                        "webhook-signature"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "webhook-id": {
+                          "type": "string"
+                        },
+                        "webhook-timestamp": {
+                          "type": "string"
+                        },
+                        "webhook-signature": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "payload_b64": {
+                      "type": "string"
+                    },
+                    "now": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "ok"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "ok": {
+                          "const": true
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "pattern": "^HEPH-[A-Z]{2,6}-[0-9]{3}$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

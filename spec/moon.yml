@@ -1,0 +1,11 @@
+language: 'unknown'
+layer: 'library'
+
+tasks:
+  check:
+    command: 'uv run --with pyyaml python ../tools/check_registry.py'
+    inputs:
+      - 'errors.yaml'
+      - 'currencies.yaml'
+      - '/conventions/attributes.yaml'
+      - '/tools/check_registry.py'

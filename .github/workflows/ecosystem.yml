@@ -1,0 +1,107 @@
+# Ecosystem CI: does a change here still work for what is built from it?
+# Runs each consumer at a pinned ref. NO row is enabled yet: examples/hello
+# (this repo's own five-minute path) is the first candidate and its tutorial
+# script does not exist in the tree, so the row stays `enabled: false` rather
+# than make the job permanently red. The product repos are listed so the matrix
+# is complete. An `enabled: false` entry is NOT run: each one emits a visible
+# "skipped" notice instead of passing quietly. Flip `enabled` and set a real
+# `ref` and `command` when a product adopts hephkit.
+#
+# `workflow_call` ONLY, deliberately. It previously also ran on `schedule` and
+# `workflow_dispatch`, and CodeQL flagged that as cache poisoning
+# (actions/cache-poisoning/poisonable-step, high): those two triggers run in the
+# default branch's context, so the job holds write access to the Actions cache
+# while it checks out a third-party repository at `matrix.ref` and runs its
+# command. Untrusted code in a cache-writing job on the default branch can
+# poison a cache that trusted workflows later restore.
+#
+# Do NOT add `schedule` or `workflow_dispatch` back to get the weekly run. The
+# risk is the combination of untrusted execution and a privileged context, so
+# running consumers on a timer needs them executed somewhere other than this
+# repository's default-branch context — dispatched into each consumer's own
+# repository, for instance. That is a design change, not a trigger.
+#   uses: Neoforge-Labs/hephaestus/.github/workflows/ecosystem.yml@v0
+name: ecosystem
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: ${{ matrix.name }} (${{ matrix.enabled && 'enabled' || 'disabled' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Disabled until examples/hello exists. The row was enabled while its
+          # command named a tutorial_test.sh that is not in the tree, so the job
+          # could only ever be red -- and a gate that is always red is a gate
+          # people learn to ignore. Task 15 adds the tutorial; flip this back to
+          # true in the same change, and
+          # test_enabled_ecosystem_rows_are_pinned_and_runnable will then check
+          # that the script it names is really there.
+          - name: examples/hello
+            enabled: false
+            repo: Neoforge-Labs/hephaestus
+            ref: ${{ github.sha }}
+            command: bash examples/hello/tutorial_test.sh
+          # Placeholders: before enabling a row, set ref to a 40-hex commit SHA and set
+          # command. The placeholder ref cannot resolve, so checkout fails loudly.
+          - name: Collie
+            enabled: false
+            repo: Neoforge-Labs/collie
+            ref: TODO-pin-a-commit-sha
+            command: ''
+          - name: Domus
+            enabled: false
+            repo: Neoforge-Labs/domus
+            ref: TODO-pin-a-commit-sha
+            command: ''
+          - name: SAWA
+            enabled: false
+            repo: Neoforge-Labs/sawa
+            ref: TODO-pin-a-commit-sha
+            command: ''
+          - name: NeoRx
+            enabled: false
+            repo: Neoforge-Labs/neorx
+            ref: TODO-pin-a-commit-sha
+            command: ''
+    steps:
+      - name: Skipped, not enabled
+        if: ${{ !matrix.enabled }}
+        run: echo "::notice title=${{ matrix.name }}::skipped, enabled is false in ecosystem.yml"
+      - name: Refuse an enabled row with no command
+        if: ${{ matrix.enabled && matrix.command == '' }}
+        run: |
+          echo "::error::${{ matrix.name }} is enabled but has an empty command"
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ matrix.enabled }}
+        with:
+          repository: ${{ matrix.repo }}
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        if: ${{ matrix.enabled }}
+        with:
+          version: '0.13.6'
+          python-version: '3.12'
+          # This job checks out a third-party repository at `matrix.ref` and then
+          # runs its command. On `workflow_dispatch` and `schedule` it runs in the
+          # default branch's context, so it holds write access to the Actions
+          # cache. A cache keyed on files from an untrusted checkout lets that
+          # checkout poison a cache which trusted default-branch workflows later
+          # restore, so this job must never write one. Do not set this to `true`
+          # to speed the row up.
+          enable-cache: false
+      - name: Run
+        if: ${{ matrix.enabled }}
+        env:
+          COMMAND: ${{ matrix.command }}
+        run: bash -euo pipefail -c "$COMMAND"

@@ -1,0 +1,72 @@
+# Reusable abi3 wheel build for hephkit (PyO3, abi3-py312: one wheel per
+# platform covers CPython >= 3.12). Targets: linux x86_64 and aarch64, each as
+# manylinux and musllinux, plus macOS arm64, and an sdist. Wheels are uploaded
+# as artifacts named wheels-<target>; the release workflow publishes them.
+#   uses: Neoforge-Labs/hephaestus/.github/workflows/rust-wheels.yml@v0
+name: rust-wheels
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    name: wheel ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64-manylinux, runner: ubuntu-latest, target: x86_64-unknown-linux-gnu, manylinux: auto, smoke: true }
+          - { name: linux-aarch64-manylinux, runner: ubuntu-latest, target: aarch64-unknown-linux-gnu, manylinux: auto, smoke: false }
+          - { name: linux-x86_64-musllinux, runner: ubuntu-latest, target: x86_64-unknown-linux-musl, manylinux: musllinux_1_2, smoke: false }
+          - { name: linux-aarch64-musllinux, runner: ubuntu-latest, target: aarch64-unknown-linux-musl, manylinux: musllinux_1_2, smoke: false }
+          - { name: macos-aarch64, runner: macos-14, target: aarch64-apple-darwin, manylinux: 'off', smoke: true }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # One source of truth for the Rust version: rust-toolchain.toml.
+      - name: Read the pinned Rust toolchain
+        id: rust
+        run: echo "channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          command: build
+          working-directory: python/hephkit
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          rust-toolchain: ${{ steps.rust.outputs.channel }}
+          args: --release --out dist
+      - name: Smoke test, install the wheel and call the Rust core
+        if: ${{ matrix.smoke }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --no-index --find-links python/hephkit/dist hephkit
+          "$RUNNER_TEMP/venv/bin/python" -c "import hephkit, hephkit._core as c; print('ok', hephkit.__file__, c)"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wheels-${{ matrix.name }}
+          path: python/hephkit/dist/*.whl
+          if-no-files-found: error
+
+  sdist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          command: sdist
+          working-directory: python/hephkit
+          args: --out dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wheels-sdist
+          path: python/hephkit/dist/*.tar.gz
+          if-no-files-found: error

@@ -1,0 +1,39 @@
+# S3-compatible object store. maturity: experimental
+# Host ports: 54333 S3 API, 54334 master UI. Credentials live in
+# seaweedfs-s3.json next to this file (dev only).
+services:
+  # SeaweedFS, not MinIO: MinIO withdrew its public images (30 Sep 2026; quay.io
+  # now returns 401 and Docker Hub denies the repository), so a documented
+  # stack could no longer be brought up from scratch. SeaweedFS is a real
+  # S3-compatible object store rather than a mock, which keeps dev/prod parity
+  # honest. Do not "upgrade" this back to MinIO. Shape harvested from Nocturna.
+  seaweedfs:
+    image: chrislusf/seaweedfs:3.99
+    command: >
+      server -dir=/data -ip=seaweedfs
+      -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+    ports:
+      - "54333:8333"   # S3 API
+      - "54334:9333"   # master UI
+    volumes:
+      - heph-seaweedfs-data:/data
+      - ./seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      # Two probes, both required. `-ip=seaweedfs` binds that interface, not
+      # loopback, so they use the service name; localhost inside the container
+      # is refused. The master coming up does NOT mean S3 is serving: it lags by
+      # several seconds, and a container reporting healthy in that window breaks
+      # `up -d --wait`. An unauthenticated 403 from S3 is a valid liveness
+      # signal, and wget exits non-zero on it, so match the status line instead
+      # of the exit code.
+      test:
+        - CMD-SHELL
+        - >-
+          wget -q -O /dev/null http://seaweedfs:9333/cluster/healthz &&
+          wget -S -q -O /dev/null http://seaweedfs:8333/ 2>&1 | grep -q 'HTTP/1.1'
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  heph-seaweedfs-data:

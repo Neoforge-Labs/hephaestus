@@ -1,0 +1,45 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "include-component-in-tag": true,
+  "separate-pull-requests": false,
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "component": "hephaestus",
+      "include-component-in-tag": false
+    },
+    "core/hephkit-core": {
+      "release-type": "rust",
+      "component": "hephkit-core"
+    },
+    "core/hephkit-py": {
+      "release-type": "rust",
+      "component": "hephkit-py"
+    },
+    "python/hephkit": {
+      "release-type": "python",
+      "component": "hephkit"
+    },
+    "go": {
+      "release-type": "simple",
+      "component": "go",
+      "extra-files": [
+        "internal/cli/version.go"
+      ],
+      "tag-separator": "/"
+    }
+  },
+  "plugins": [
+    {
+      "type": "linked-versions",
+      "groupName": "hephaestus",
+      "components": [
+        "hephaestus",
+        "hephkit-core",
+        "hephkit-py",
+        "hephkit",
+        "go"
+      ]
+    }
+  ]
+}

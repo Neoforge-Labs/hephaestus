@@ -1,0 +1,7 @@
+{
+  ".": "0.1.0",
+  "core/hephkit-core": "0.1.0",
+  "core/hephkit-py": "0.1.0",
+  "python/hephkit": "0.1.0",
+  "go": "0.1.0"
+}

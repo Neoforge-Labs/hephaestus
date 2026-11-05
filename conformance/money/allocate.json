@@ -1,0 +1,615 @@
+{
+  "suite": "money.allocate",
+  "spec": "0.2.0",
+  "description": "Split an amount so parts sum exactly to the input, by largest remainder with ties to the lower index (spec 3.7). A negative amount allocates its magnitude and negates each part. An empty ratio list and an all-zero ratio list are rejected with HEPH-MONEY-422; negative ratios are not representable.",
+  "source": "Hand-derived arithmetic; exact large values checked by integer division only. 100/[3,1,2]: shares 50, 16.667, 33.333, floors 50,16,33 sum 99, one leftover unit to index 1 (remainder 2/3 is largest) giving 50,17,33 (sequential would give 51,16,33). 1000/[1 x7]: 142.857 each, floors 142 x7 = 994, six leftover units, all remainders tie so indices 0-5 get one each: 143 x6 + 142 = 1000. 9223372036854775807/[2,1]: amount*2 = 18446744073709551614 overflows i64; floors 6148914691236517204 and 3074457345618258602 sum to 9223372036854775806; remainders 2/3 and 1/3, so the one leftover unit goes to index 0 giving 6148914691236517205 + 3074457345618258602 = 9223372036854775807. Ratios stay within 0..2^53-1 so they survive JavaScript numbers. money_text carries exact JSON bytes that a parsed object cannot: allocate-from-wire-text is kes-100-by-1-1-1 written as text, so the text entry point is exercised rather than merely permitted, and allocate-duplicate-amount-member-rejected pins spec 4.3's duplicate-member rejection on the allocate path -- a runner MUST pass those exact bytes to its wire parser, never a loader's collapsed object. Both derived from the spec text and the arithmetic above, not from running an implementation.",
+  "cases": [
+    {
+      "name": "kes-100-by-1-1-1",
+      "input": {
+        "money": {
+          "amount": "100",
+          "currency": "KES"
+        },
+        "ratios": [
+          1,
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "34",
+            "currency": "KES"
+          },
+          {
+            "amount": "33",
+            "currency": "KES"
+          },
+          {
+            "amount": "33",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-5-by-1-1",
+      "input": {
+        "money": {
+          "amount": "5",
+          "currency": "KES"
+        },
+        "ratios": [
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "3",
+            "currency": "KES"
+          },
+          {
+            "amount": "2",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-neg-100-by-1-1-1",
+      "input": {
+        "money": {
+          "amount": "-100",
+          "currency": "KES"
+        },
+        "ratios": [
+          1,
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "-34",
+            "currency": "KES"
+          },
+          {
+            "amount": "-33",
+            "currency": "KES"
+          },
+          {
+            "amount": "-33",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-100-by-0-1",
+      "input": {
+        "money": {
+          "amount": "100",
+          "currency": "KES"
+        },
+        "ratios": [
+          0,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "0",
+            "currency": "KES"
+          },
+          {
+            "amount": "100",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-100-zero-ratios",
+      "input": {
+        "money": {
+          "amount": "100",
+          "currency": "KES"
+        },
+        "ratios": [
+          0,
+          0
+        ]
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-100-no-ratios",
+      "input": {
+        "money": {
+          "amount": "100",
+          "currency": "KES"
+        },
+        "ratios": []
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-1-by-1-1-1",
+      "input": {
+        "money": {
+          "amount": "1",
+          "currency": "KES"
+        },
+        "ratios": [
+          1,
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "1",
+            "currency": "KES"
+          },
+          {
+            "amount": "0",
+            "currency": "KES"
+          },
+          {
+            "amount": "0",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-100-by-1-2-3",
+      "input": {
+        "money": {
+          "amount": "100",
+          "currency": "KES"
+        },
+        "ratios": [
+          1,
+          2,
+          3
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "17",
+            "currency": "KES"
+          },
+          {
+            "amount": "33",
+            "currency": "KES"
+          },
+          {
+            "amount": "50",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-10-by-3-7-exact",
+      "input": {
+        "money": {
+          "amount": "10",
+          "currency": "KES"
+        },
+        "ratios": [
+          3,
+          7
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "3",
+            "currency": "KES"
+          },
+          {
+            "amount": "7",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-10-by-1-1-1-1",
+      "input": {
+        "money": {
+          "amount": "10",
+          "currency": "KES"
+        },
+        "ratios": [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "3",
+            "currency": "KES"
+          },
+          {
+            "amount": "3",
+            "currency": "KES"
+          },
+          {
+            "amount": "2",
+            "currency": "KES"
+          },
+          {
+            "amount": "2",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-0-by-1-1",
+      "input": {
+        "money": {
+          "amount": "0",
+          "currency": "KES"
+        },
+        "ratios": [
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "0",
+            "currency": "KES"
+          },
+          {
+            "amount": "0",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-100-single-ratio",
+      "input": {
+        "money": {
+          "amount": "100",
+          "currency": "KES"
+        },
+        "ratios": [
+          5
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "100",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-neg-1-by-1-1",
+      "input": {
+        "money": {
+          "amount": "-1",
+          "currency": "KES"
+        },
+        "ratios": [
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "-1",
+            "currency": "KES"
+          },
+          {
+            "amount": "0",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "jpy-7-by-1-1-1",
+      "input": {
+        "money": {
+          "amount": "7",
+          "currency": "JPY"
+        },
+        "ratios": [
+          1,
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "3",
+            "currency": "JPY"
+          },
+          {
+            "amount": "2",
+            "currency": "JPY"
+          },
+          {
+            "amount": "2",
+            "currency": "JPY"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-i64-max-by-1-1",
+      "input": {
+        "money": {
+          "amount": "9223372036854775807",
+          "currency": "KES"
+        },
+        "ratios": [
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "4611686018427387904",
+            "currency": "KES"
+          },
+          {
+            "amount": "4611686018427387903",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-i64-max-by-1-1-1",
+      "input": {
+        "money": {
+          "amount": "9223372036854775807",
+          "currency": "KES"
+        },
+        "ratios": [
+          1,
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "3074457345618258603",
+            "currency": "KES"
+          },
+          {
+            "amount": "3074457345618258602",
+            "currency": "KES"
+          },
+          {
+            "amount": "3074457345618258602",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-i64-max-by-2-1-needs-wide-intermediate",
+      "input": {
+        "money": {
+          "amount": "9223372036854775807",
+          "currency": "KES"
+        },
+        "ratios": [
+          2,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "6148914691236517205",
+            "currency": "KES"
+          },
+          {
+            "amount": "3074457345618258602",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-leading-zero-amount",
+      "input": {
+        "money": {
+          "amount": "007",
+          "currency": "KES"
+        },
+        "ratios": [
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "unknown-currency",
+      "input": {
+        "money": {
+          "amount": "100",
+          "currency": "XYZ"
+        },
+        "ratios": [
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-json-number-amount",
+      "input": {
+        "money": {
+          "amount": 100,
+          "currency": "KES"
+        },
+        "ratios": [
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    },
+    {
+      "name": "kes-100-by-3-1-2-largest-remainder-not-sequential",
+      "input": {
+        "money": {
+          "amount": "100",
+          "currency": "KES"
+        },
+        "ratios": [
+          3,
+          1,
+          2
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "50",
+            "currency": "KES"
+          },
+          {
+            "amount": "17",
+            "currency": "KES"
+          },
+          {
+            "amount": "33",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kes-1000-by-seven-equal-ratios-ties-to-lower-index",
+      "input": {
+        "money": {
+          "amount": "1000",
+          "currency": "KES"
+        },
+        "ratios": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "143",
+            "currency": "KES"
+          },
+          {
+            "amount": "143",
+            "currency": "KES"
+          },
+          {
+            "amount": "143",
+            "currency": "KES"
+          },
+          {
+            "amount": "143",
+            "currency": "KES"
+          },
+          {
+            "amount": "143",
+            "currency": "KES"
+          },
+          {
+            "amount": "143",
+            "currency": "KES"
+          },
+          {
+            "amount": "142",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "allocate-from-wire-text",
+      "input": {
+        "money_text": "{\"amount\":\"100\",\"currency\":\"KES\"}",
+        "ratios": [
+          1,
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "parts": [
+          {
+            "amount": "34",
+            "currency": "KES"
+          },
+          {
+            "amount": "33",
+            "currency": "KES"
+          },
+          {
+            "amount": "33",
+            "currency": "KES"
+          }
+        ]
+      }
+    },
+    {
+      "name": "allocate-duplicate-amount-member-rejected",
+      "input": {
+        "money_text": "{\"amount\":\"100\",\"amount\":\"200\",\"currency\":\"KES\"}",
+        "ratios": [
+          1,
+          1
+        ]
+      },
+      "expect": {
+        "error": "HEPH-MONEY-422"
+      }
+    }
+  ]
+}

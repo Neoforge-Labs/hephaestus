@@ -1,0 +1,44 @@
+# Reusable Rust gate: tests, clippy -D warnings, and the 90% line-coverage floor.
+#   uses: Neoforge-Labs/hephaestus/.github/workflows/rust-ci.yml@v0
+name: rust-ci
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # moon compares against the base branch on a pull_request. A shallow
+          # clone has no merge base to resolve, so its git call fails with exit
+          # 128 (it only warns on push, where there is no explicit base).
+          fetch-depth: 0
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          moon-version: '2.6.5'
+      # Coverage must use the rustup toolchain (rust-toolchain.toml, 1.99.1):
+      # a distro or Homebrew cargo has no llvm-profdata and cannot merge
+      # profiles. rustup installs the pinned toolchain on first use; llvm-tools
+      # is the one component the toml does not carry.
+      - name: Install the pinned toolchain and llvm-tools
+        run: |
+          rustup show active-toolchain
+          rustup component add llvm-tools
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-llvm-cov
+      - name: cargo test
+        run: moon run core:test
+      - name: clippy -D warnings (hephkit-core)
+        run: moon run core:lint
+      - name: clippy -D warnings (hephkit-py)
+        run: moon run core:lint-py
+      - name: Coverage floor, 90% lines
+        run: moon run core:coverage

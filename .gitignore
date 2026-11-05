@@ -1,0 +1,33 @@
+# Rust
+target/
+
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+*.so
+
+# Secrets and Terraform state (public repo)
+.env*
+!.env.example
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# Node
+node_modules/
+
+# moon
+.moon/cache/
+
+# Generated copy produced by a later task
+go/bin/
+
+# Scratch workspace for the build process; never committed
+.superpowers/
+
+.DS_Store

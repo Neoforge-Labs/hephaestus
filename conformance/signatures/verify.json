@@ -1,0 +1,424 @@
+{
+  "suite": "signatures.verify",
+  "spec": "0.2.0",
+  "description": "Verification (spec 5). `now` is the verifier clock in integer seconds. All three header keys are always present; an absent header is the empty string. Tolerance 300 s, inclusive.",
+  "source": "standardwebhooks.Webhook.verify with its clock pinned to `now` (rfc8785 0.1.4, standardwebhooks 1.1.0); any exception counts as rejection (spec 5.6); the two non-UTF-8 cases, the leading-zero-timestamp case and the empty-key case are derived with stdlib hmac (the package only takes str and formats integer timestamps). Every case's intended outcome is also stated in this script and the run aborts if the package disagrees.",
+  "cases": [
+    {
+      "name": "valid",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "payload-tampered",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNX0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "timestamp-301-seconds-old",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265631
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "timestamp-301-seconds-in-the-future",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265029
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "timestamp-exactly-300-seconds-old-accepted",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265630
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "timestamp-exactly-300-seconds-in-the-future-accepted",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265030
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "two-signatures-only-second-matches",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "two-signatures-only-first-matches",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE= v1,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "unknown-version-before-valid-v1-ignored",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1a,abc v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "only-unknown-version-with-correct-mac-rejected",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v2,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "missing-webhook-id-is-empty-string",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "missing-webhook-timestamp-is-empty-string",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "",
+          "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "missing-webhook-signature-is-empty-string",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": ""
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "malformed-signature-no-comma",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "malformed-signature-bad-base64",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,!!!"
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "wrong-secret",
+      "input": {
+        "secret": "whsec_MDEyMzQ1Njc4OWFiY2RlZg==",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "secret-without-whsec-prefix-accepted-as-raw-base64",
+      "input": {
+        "secret": "MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "timestamp-header-differs-from-signed-timestamp",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265331",
+          "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "msg-id-header-differs-from-signed-id",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_other",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "timestamp-header-not-a-number",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "abc",
+          "webhook-signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        "payload_b64": "eyJ0ZXN0IjogMjQzMjIzMjMxNH0=",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "signature-for-empty-payload",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,v48jdbgvh29KJz2Qc+ghw8G6vG3nAKnujWBg8oM/62A="
+        },
+        "payload_b64": "",
+        "now": 1614265340
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "signature-for-non-ascii-payload",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,iENl6vMpRAScaigXd3FyM+4e/0ZxBwrp3oDfUyL8G6I="
+        },
+        "payload_b64": "eyJuYW1lIjoiWm/DqyDigqwifQ==",
+        "now": 1614265340
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "non-utf8-payload-signed-as-raw-bytes",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,BsqgULOjB9VT4MJ6Jp6Iu61u1fHthNAJZFYQCeTZsGI="
+        },
+        "payload_b64": "//4AYmluYXJ5",
+        "now": 1614265340
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "non-utf8-payload-signature-over-lossy-decoded-text-rejected",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,F5U/iNAhEB7YTiEj7ytWGzmi8nxeHWgFm1/EwFSK6zk="
+        },
+        "payload_b64": "//4AYmluYXJ5",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    },
+    {
+      "name": "leading-zero-timestamp-literal-header-text-signed-numeric-value-for-tolerance",
+      "input": {
+        "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "01000",
+          "webhook-signature": "v1,eO5QUEVaP6K7KG+MYs/d4IYzJVtd4frUME3hcBh5P1E="
+        },
+        "payload_b64": "eyJsZWFkaW5nIjoiemVybyJ9",
+        "now": 1010
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "empty-key-secret-rejected-even-with-matching-empty-key-mac",
+      "input": {
+        "secret": "whsec_",
+        "headers": {
+          "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+          "webhook-timestamp": "1614265330",
+          "webhook-signature": "v1,d06yHHcysjM83YZ/lL/ZP4xPcTC49MwpfqUANjZQPkk="
+        },
+        "payload_b64": "eyJsZWFkaW5nIjoiemVybyJ9",
+        "now": 1614265340
+      },
+      "expect": {
+        "error": "HEPH-WH-401"
+      }
+    }
+  ]
+}

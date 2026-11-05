@@ -1,0 +1,95 @@
+name: ci
+
+on:
+  pull_request:
+  workflow_dispatch: # pre-merge way to run the slow tests: run this workflow on a branch
+  schedule:
+    - cron: '43 4 * * 1' # weekly, on main
+  push:
+    branches:
+      - main
+      - 'work/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Never cancel a run on main: it may be publishing images.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  repo-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.6'
+          python-version: '3.12'
+      - run: uv run python tools/check_adrs.py
+      - run: uv run --with pyyaml python tools/check_registry.py
+      # The core's currency table is generated from spec/currencies.yaml; fail
+      # if the committed file is stale. Also runs locally as core:gen-currencies.
+      - run: uv run tools/gen_currencies.py --check
+      # --check only proves the Rust table matches the registry. That the
+      # registry matches the ISO 4217 publication it is pinned to is checked by
+      # the currency-source workflow, which needs the network and so is
+      # path-filtered to the files that can break it.
+      # check_vectors.py runs in python-ci as conformance:check.
+
+  rust:
+    uses: ./.github/workflows/rust-ci.yml
+
+  python:
+    uses: ./.github/workflows/python-ci.yml
+    with:
+      include-slow: ${{ github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/heads/work/') || github.event_name == 'workflow_dispatch' }}
+
+  go:
+    uses: ./.github/workflows/go-ci.yml
+
+  compose-boot:
+    uses: ./.github/workflows/compose-boot.yml
+
+  wheels:
+    uses: ./.github/workflows/rust-wheels.yml
+
+  # Publishes from every main push, in parallel with the language gates. That is
+  # correct for these images — they are the heph-python and heph-node BASE
+  # images, carrying none of our code, and docker-publish.yml gates them on
+  # their own contract tests and a Trivy scan on both arches — but it means the
+  # registry holds images from arbitrary main commits next to released ones.
+  # The "ci-" prefix keeps the two tellable apart: a CI image is
+  # `ci-sha-<12>`, a released one `sha-<12>` plus its bare version tag.
+  images:
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      tag-prefix: ci-
+
+  codeql:
+    name: codeql (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, go, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.language == 'go' && 'autobuild' || 'none' }}
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3

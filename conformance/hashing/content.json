@@ -1,0 +1,116 @@
+{
+  "suite": "hashing.content",
+  "spec": "0.2.0",
+  "description": "Content hash (spec 4.2): sha256 over the UTF-8 bytes of the RFC 8785 output.",
+  "source": "hashlib.sha256 over rfc8785 output (rfc8785 0.1.4, standardwebhooks 1.1.0); {}, null and the spec 2.2 fingerprint example cross-checked against independently stated digests.",
+  "cases": [
+    {
+      "name": "empty-object",
+      "input": {
+        "json": "{}"
+      },
+      "expect": {
+        "hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      }
+    },
+    {
+      "name": "null",
+      "input": {
+        "json": "null"
+      },
+      "expect": {
+        "hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+      }
+    },
+    {
+      "name": "spec-2.2-fingerprint-example",
+      "input": {
+        "json": "{\"method\":\"POST\",\"path\":\"/v1/charges\",\"body\":{\"b\":1,\"a\":2}}"
+      },
+      "expect": {
+        "hash": "sha256:9d7a9f8a22e4d35d3efc80eafe7f0026713f6ad9ba4a3abd5c025e92036fd6eb"
+      }
+    },
+    {
+      "name": "key-order-does-not-change-hash",
+      "input": {
+        "json": "{\"a\":2,\"b\":1}"
+      },
+      "expect": {
+        "hash": "sha256:d3626ac30a87e6f7a6428233b3c68299976865fa5508e4267c5415c76af7a772"
+      }
+    },
+    {
+      "name": "whitespace-does-not-change-hash",
+      "input": {
+        "json": " { \"b\" : 1 , \"a\" : 2 } "
+      },
+      "expect": {
+        "hash": "sha256:d3626ac30a87e6f7a6428233b3c68299976865fa5508e4267c5415c76af7a772"
+      }
+    },
+    {
+      "name": "rfc8785-3.2.2-sample",
+      "input": {
+        "json": "{\"numbers\":[333333333.33333329,1E30,4.50,2e-3,0.000000000000000000000000001],\"string\":\"\\u20ac$\\u000F\\u000aA'\\u0042\\u0022\\u005c\\\\\\\"\\/\",\"literals\":[null,true,false]}"
+      },
+      "expect": {
+        "hash": "sha256:2d5e01a318d0f0879ab568c4be289c8b1f64ef8921a53c6277d5e069978baacb"
+      }
+    },
+    {
+      "name": "rfc8785-3.2.3-utf16-key-sort",
+      "input": {
+        "json": "{\"\\u20ac\":\"Euro Sign\",\"\\r\":\"Carriage Return\",\"\\ufb33\":\"Hebrew Letter Dalet With Dagesh\",\"1\":\"One\",\"\\ud83d\\ude00\":\"Emoji: Grinning Face\",\"\\u0080\":\"Control\",\"\\u00f6\":\"Latin Small Letter O With Diaeresis\"}"
+      },
+      "expect": {
+        "hash": "sha256:5e321556d22018a9656991a9e94f77ec175fa193e52a2429d312f8419ec8b08c"
+      }
+    },
+    {
+      "name": "non-ascii-string-hashed-as-utf8",
+      "input": {
+        "json": "{\"name\":\"Zo\u00eb \u20ac \ud83d\ude00\"}"
+      },
+      "expect": {
+        "hash": "sha256:051897ed2926ebd256ec412218e873dbcc11bc4d38debc8a6e49f777dc39db15"
+      }
+    },
+    {
+      "name": "empty-string",
+      "input": {
+        "json": "\"\""
+      },
+      "expect": {
+        "hash": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+      }
+    },
+    {
+      "name": "number-1e21",
+      "input": {
+        "json": "{\"n\":1e21}"
+      },
+      "expect": {
+        "hash": "sha256:f1ee2b60ee95a3170fdc07a577e5f3514ced26867443d69da265acadead81007"
+      }
+    },
+    {
+      "name": "integer-literal-2-pow-53-rejected",
+      "input": {
+        "json": "{\"n\":9007199254740992}"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "duplicate-member-names-rejected",
+      "input": {
+        "json": "{\"a\":1,\"a\":2}"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    }
+  ]
+}

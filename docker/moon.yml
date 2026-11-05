@@ -1,0 +1,38 @@
+language: 'unknown'
+layer: 'tool'
+
+tasks:
+  build-python:
+    command: 'docker build -t heph-python:dev python'
+    inputs:
+      - 'python/Dockerfile'
+    options:
+      cache: false
+  build-node:
+    command: 'docker build -t heph-node:dev node'
+    inputs:
+      - 'node/Dockerfile'
+    options:
+      cache: false
+  test-python:
+    command: 'bash test/image_test.sh heph-python:dev'
+    deps:
+      - '~:build-python'
+    inputs:
+      - 'test/image_test.sh'
+      - 'python/Dockerfile'
+    options:
+      cache: false
+  test-node:
+    command: 'bash test/image_test.sh heph-node:dev'
+    deps:
+      - '~:build-node'
+    inputs:
+      - 'test/image_test.sh'
+      - 'node/Dockerfile'
+    options:
+      cache: false
+  test:
+    deps:
+      - '~:test-python'
+      - '~:test-node'
