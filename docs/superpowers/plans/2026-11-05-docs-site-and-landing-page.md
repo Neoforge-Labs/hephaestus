@@ -23,6 +23,7 @@
 - Conventional Commits; branch `work/docs-site`; no AI attribution in commits, PR bodies or branch names.
 - Budget values live only in `tools/dx_budget.json`: 60 seconds to healthy, 5 MB wheel (manylinux x86_64).
 - `hephkit` has no `money` extra — money is in the base package. Extras are `fastapi`, `settings`, `observability`.
+- **The tutorial pins an explicit `go install …/cmd/heph@v<version>`, never `@v0`.** The `go/v0` alias may be solving a non-problem: `@v0` is a semver prefix query resolved from the proxy's version list, which is itself built from the `go/vX.Y.Z` tags, so it likely already worked without an alias. Until one real `go install` after the first publish settles it, `@v0` is unverified and must not appear in the docs as fact.
 
 ## Review Focus
 
