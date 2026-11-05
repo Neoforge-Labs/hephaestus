@@ -19,11 +19,12 @@ pub(crate) fn invalid(message: impl Into<String>) -> CoreError {
     }
 }
 
-/// How `Money::parse` treats input with more fractional digits than the
-/// currency's exponent.
+/// How `Money::parse` treats input whose fractional digits beyond the
+/// currency's exponent are not all zero. Digits beyond the exponent that are
+/// all zero preserve the value exactly and are accepted under every mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rounding {
-    /// Excess precision is an error.
+    /// Precision that would be lost is an error.
     Reject,
     /// A tie rounds away from zero.
     HalfUp,

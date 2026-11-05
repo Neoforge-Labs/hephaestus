@@ -138,8 +138,11 @@ def test_huge_string_inputs() -> None:
 
     with pytest.raises(MoneyError):
         Money.parse("1" * 10_000_000, "KES")
+    # Ten million trailing zeros preserve the value, so this is 1.00 (ADR 0016),
+    # and one non-zero digit ten million places out still has to be found.
+    assert Money.parse("1." + "0" * 10_000_000, "KES").minor == 100
     with pytest.raises(MoneyError):
-        Money.parse("1." + "0" * 10_000_000, "KES")
+        Money.parse("1." + "0" * 10_000_000 + "1", "KES")
     assert Money.parse("0." + "0" * 10_000_000, "KES", "down").minor == 0
     assert len(canonical_json("x" * 10_000_000)) == 10_000_002
 

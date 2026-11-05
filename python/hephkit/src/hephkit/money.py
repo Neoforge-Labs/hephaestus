@@ -29,7 +29,8 @@ def _decimal_text(value: Decimal) -> str:
     """Plain decimal text for ``value`` (never scientific, never via ``float``).
 
     Trailing zeros are kept, so ``Decimal("10.290")`` keeps its three
-    fractional digits and the core's digit-count rule (spec 3.6) applies to it.
+    fractional digits; the core then accepts them because every digit beyond
+    the currency's exponent is zero and the value is preserved (spec 3.6).
     A non-finite value yields text the core rejects. A value whose plain form
     would exceed ``_MAX_PLAIN_CHARS`` raises ``MoneyError``.
     """
@@ -84,6 +85,10 @@ class Money:
         cls, value: Decimal, currency: str, rounding: Rounding = "reject"
     ) -> "Money":
         """Convert a ``Decimal`` exactly; only ``Decimal`` is accepted (no ``float``, no ``int``).
+
+        Fractional digits beyond the currency's exponent are accepted when every
+        one of them is zero, so ``Decimal("5000.00")`` is 5000 JPY minor units
+        (spec 3.6). A non-zero digit beyond the exponent needs ``rounding``.
 
         Size limit: a value whose plain (non-scientific) form would exceed 4096
         characters is rejected with ``MoneyError`` (``HEPH-MONEY-422``, "too large

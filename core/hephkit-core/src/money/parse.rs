@@ -20,7 +20,11 @@ pub(super) fn parse(s: &str, currency: Currency, rounding: Rounding) -> Result<M
 
     let exp = usize::from(currency.exponent);
     let (kept_frac, excess) = frac.split_at(frac.len().min(exp));
-    if !excess.is_empty() && rounding == Rounding::Reject {
+    // Excess digits that are all zero carry no value, so dropping them is exact
+    // and needs no rounding mode (spec 3.6, ADR 0016). Any non-zero digit beyond
+    // the exponent is real precision and only a rounding mode may discard it.
+    let lossy = excess.iter().any(|&d| d != b'0');
+    if lossy && rounding == Rounding::Reject {
         return Err(invalid("more fractional digits than the currency allows"));
     }
 

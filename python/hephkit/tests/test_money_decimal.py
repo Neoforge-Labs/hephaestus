@@ -54,12 +54,20 @@ def test_decimal_negative_zero() -> None:
     assert str(m) == "KES 0.00"
 
 
-def test_decimal_trailing_zero_excess_is_excess_precision() -> None:
-    # Spec 3.6: digit count, not value, decides. KES allows two fractional digits.
-    with pytest.raises(MoneyError) as exc:
-        Money.from_decimal(Decimal("0.000"), "KES")
-    assert exc.value.code == "HEPH-MONEY-422"
+def test_decimal_trailing_zero_excess_is_value_preserving() -> None:
+    # Spec 3.6 and ADR 0016: the value decides, not the digit count. KES allows
+    # two fractional digits; a third digit that is zero loses nothing.
+    assert Money.from_decimal(Decimal("0.000"), "KES").minor == 0
     assert Money.from_decimal(Decimal("0.000"), "KES", "down").minor == 0
+    assert Money.from_decimal(Decimal("10.290"), "KES").minor == 1029
+    # A zero-exponent currency against a NUMERIC(n,2) column, the case that
+    # motivated ADR 0016.
+    assert Money.from_decimal(Decimal("5000.00"), "JPY").minor == 5000
+    # A non-zero digit beyond the exponent is still real precision.
+    with pytest.raises(MoneyError) as exc:
+        Money.from_decimal(Decimal("5000.50"), "JPY")
+    assert exc.value.code == "HEPH-MONEY-422"
+    assert Money.from_decimal(Decimal("5000.50"), "JPY", "half_up").minor == 5001
 
 
 def test_decimal_fifty_digits_overflows_cleanly() -> None:
