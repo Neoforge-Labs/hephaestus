@@ -314,8 +314,17 @@ def test_committed_registry_is_exactly_what_the_renderer_produces() -> None:
 def test_rust_banner_names_the_pinned_publication() -> None:
     source = _source()
     text = render(_entries(), source)
-    for field in ("url", "published", "retrieved", "sha256"):
+    for field in ("url", "archive_url", "published", "retrieved", "sha256"):
         assert str(source[field]) in text, field
+
+
+def test_source_pins_an_immutable_fallback_location() -> None:
+    # `url` is a rolling current-list file: once the publisher republishes it no
+    # longer serves the pinned bytes, and --verify-source could never re-check
+    # the committed registry again. archive_url must be a different location.
+    source = _source()
+    assert source["archive_url"] != source["url"]
+    assert str(source["archive_url"]).startswith("https://")
 
 
 def test_source_pin_is_a_well_formed_sha256() -> None:

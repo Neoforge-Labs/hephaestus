@@ -49,7 +49,18 @@ REGISTRY_RELPATH = Path("spec/currencies.yaml")
 SOURCE_RELPATH = Path("spec/currencies.source.yaml")
 
 NO_EXPONENT = "N.A."
-SOURCE_FIELDS = ("standard", "publisher", "url", "published", "retrieved", "amendment", "amendment_date", "sha256", "bytes")
+SOURCE_FIELDS = (
+    "standard",
+    "publisher",
+    "url",
+    "archive_url",
+    "published",
+    "retrieved",
+    "amendment",
+    "amendment_date",
+    "sha256",
+    "bytes",
+)
 
 # Our commentary on particular entries, carried into the registry so that
 # --transcribe reproduces it instead of wiping it. Notes are about why the
@@ -78,6 +89,7 @@ RUST_BANNER = """\
 //! Derived from {standard},
 //! published by {publisher}:
 //!   url       {url}
+//!   archive   {archive_url}
 //!   published {published} (the XML root's Pblshd attribute)
 //!   retrieved {retrieved}
 //!   amendment {amendment} of {amendment_date}
@@ -85,6 +97,8 @@ RUST_BANNER = """\
 //! The published file is not vendored (its terms of use do not clearly permit
 //! redistribution); `uv run tools/gen_currencies.py --verify-source <file>`
 //! checks a local copy against that hash and re-derives the registry from it.
+//! `url` is a rolling current-list file, so use `archive` once SIX has
+//! republished and the live bytes have moved on.
 
 /// Every ISO 4217 code with a defined minor-unit exponent, ordered by code.
 """
@@ -97,6 +111,7 @@ REGISTRY_HEADER = """\
 # Source: {standard},
 #         as published by {publisher}.
 #   URL:       {url}
+#   Archive:   {archive_url}
 #   Published: {published} (the XML root's Pblshd attribute)
 #   Retrieved: {retrieved}
 #   Amendment: {amendment}, dated {amendment_date}, is the latest amendment SIX
@@ -232,8 +247,11 @@ def verify_source(registry: Path, source_path: Path, xml_path: Path) -> list[str
         return [
             f"{xml_path}: sha256 {digest} does not match the pinned "
             f"{source['sha256']} from {source_path.name}. This is a different "
-            f"publication; fetch {source['url']}, or update the pin and "
-            f"re-transcribe with --transcribe.",
+            f"publication. To re-check the committed registry, fetch the pinned "
+            f"bytes: {source['url']} while it is still current, otherwise the "
+            f"immutable capture {source['archive_url']} (gzip-encoded, so use "
+            f"curl --compressed). To adopt a newer publication instead, update "
+            f"the pin in {source_path.name} and re-run with --transcribe.",
         ]
     if len(xml) != source["bytes"]:
         found.append(f"{xml_path}: {len(xml)} bytes, pinned as {source['bytes']}")

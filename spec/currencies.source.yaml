@@ -20,8 +20,8 @@
 # So instead the exact bytes are pinned by hash, and the derivation from them is
 # executable:
 #
-#   curl -sSL -o list-one.xml "$(uv run python -c \
-#     'import yaml,pathlib; print(yaml.safe_load(pathlib.Path("spec/currencies.source.yaml").read_text())["url"])')"
+#   curl -sSL --compressed -o list-one.xml "<url, or archive_url once SIX has
+#                                            republished and url has moved on>"
 #   uv run tools/gen_currencies.py --verify-source list-one.xml
 #
 # That asserts the file hashes to `sha256` below and that spec/currencies.yaml is
@@ -36,7 +36,19 @@
 
 standard: 'ISO 4217 List One, "Current currency & funds code list"'
 publisher: 'SIX Group, in its capacity as the ISO 4217 Maintenance Agency'
+
+# `url` is a rolling "current list" file: the moment SIX republishes, the bytes
+# pinned below are gone from it and --verify-source can never re-check the
+# committed registry against its own publication again. `archive_url` is an
+# immutable Wayback capture of exactly those bytes, so verification keeps
+# working past the next publication. It was confirmed, not assumed: fetched and
+# hashed to the sha256 below. The capture stores the response gzip-encoded, so a
+# fetch needs curl --compressed (or pipe it through gunzip).
+#
+# Three further captures hold byte-identical content if this one ever goes:
+# timestamps 20261005142327, 20261019191639 and 20261019230101 on the same URL.
 url: 'https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml'
+archive_url: 'https://web.archive.org/web/20260929233225id_/https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml'
 
 # The XML root's Pblshd attribute, not the day we fetched it.
 published: '2026-09-17'

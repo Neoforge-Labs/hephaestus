@@ -21,6 +21,7 @@ labelled `experimental`; see [ADR 0015](docs/adr/0015-maturity-levels.md).
 - Design: `docs/superpowers/specs/2026-11-04-hephaestus-design.md`
 - Decisions: `docs/adr/`
 - Contributor rules: `CLAUDE.md`
+- Review steps a check cannot enforce: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
 ## Development
 

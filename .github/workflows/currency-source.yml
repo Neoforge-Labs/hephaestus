@@ -1,0 +1,83 @@
+# Re-derives spec/currencies.yaml from the ISO 4217 publication it is pinned to,
+# so the exponents are reproducible from the standard and not merely asserted
+# (CLAUDE.md rule 2). This is the only gate that catches a hand-edited exponent
+# on a code no conformance vector covers: the shape stays valid, so
+# check_registry passes, and the table regenerates, so gen_currencies --check
+# passes too.
+#
+# Own workflow rather than a job in ci.yml because GitHub filters paths at the
+# workflow level, and this needs the network: on a pull request it runs only when
+# the registry, its source pin or the generator changes, so flakiness cannot
+# reach unrelated work. The schedule run has no path filter on purpose -- it is
+# what notices that SIX has republished, which no PR would.
+name: currency-source
+
+on:
+  pull_request:
+    paths:
+      - 'spec/currencies.yaml'
+      - 'spec/currencies.source.yaml'
+      - 'tools/gen_currencies.py'
+      - '.github/workflows/currency-source.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'spec/currencies.yaml'
+      - 'spec/currencies.source.yaml'
+      - 'tools/gen_currencies.py'
+      - '.github/workflows/currency-source.yml'
+  schedule:
+    - cron: '17 5 * * 1' # weekly, on main: catches upstream republication
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: currency-source-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  verify-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.6' # keep equal to uv in .prototools
+          python-version: '3.12'
+      # `url` is a rolling current-list file, so once SIX republishes it stops
+      # serving the pinned bytes; `archive_url` is an immutable capture of them.
+      # Try the live file first so a scheduled run reports a new publication,
+      # then fall back so the committed registry stays checkable either way.
+      # --compressed because the archive stores the response gzip-encoded.
+      - name: Fetch the pinned ISO 4217 List One
+        run: |
+          pin() {
+            uv run --with pyyaml python -c 'import pathlib, sys, yaml; print(yaml.safe_load(pathlib.Path("spec/currencies.source.yaml").read_text())[sys.argv[1]])' "$1"
+          }
+          live="$(pin url)"
+          archived="$(pin archive_url)"
+          for candidate in "$live" "$archived"; do
+            echo "::group::GET $candidate"
+            if curl -sSfL --compressed --retry 3 --max-time 120 \
+                 -o "$RUNNER_TEMP/list-one.xml" "$candidate"; then
+              echo "fetched $(wc -c < "$RUNNER_TEMP/list-one.xml") bytes"
+              echo "::endgroup::"
+              exit 0
+            fi
+            echo "::endgroup::"
+            echo "could not fetch $candidate"
+          done
+          echo "::error::neither the live nor the archived List One could be fetched"
+          exit 1
+      # Asserts the file hashes to the pin, then that every one of the 178
+      # entries is exactly what those bytes derive to, N.A. rows included.
+      # A failure means our registry drifted or SIX published a new list. Both
+      # want a human: the fix is --transcribe, never a hand-edited exponent.
+      - name: Registry is derivable from it, code by code
+        run: uv run tools/gen_currencies.py --verify-source "$RUNNER_TEMP/list-one.xml"
