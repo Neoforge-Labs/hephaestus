@@ -1,9 +1,11 @@
 # Ecosystem CI: does a change here still work for what is built from it?
-# Runs each consumer at a pinned ref. Only examples/hello (this repo's own
-# five-minute path) is enabled in phase 1; the product repos are listed so the
-# matrix is complete, but `enabled: false` entries are NOT run: each one emits
-# a visible "skipped" notice instead of passing quietly. Flip `enabled` and set
-# a real `ref` and `command` when a product adopts hephkit.
+# Runs each consumer at a pinned ref. NO row is enabled yet: examples/hello
+# (this repo's own five-minute path) is the first candidate and its tutorial
+# script does not exist in the tree, so the row stays `enabled: false` rather
+# than make the job permanently red. The product repos are listed so the matrix
+# is complete. An `enabled: false` entry is NOT run: each one emits a visible
+# "skipped" notice instead of passing quietly. Flip `enabled` and set a real
+# `ref` and `command` when a product adopts hephkit.
 #
 # Runs weekly, on demand, and as a reusable workflow.
 #   uses: Neoforge-Labs/hephaestus/.github/workflows/ecosystem.yml@v0
