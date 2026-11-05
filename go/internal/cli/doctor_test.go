@@ -415,9 +415,24 @@ func TestDevUpStillRefusesForeignPort(t *testing.T) {
 // If ownership cannot be determined the preflight stays strict.
 func TestDevUpOwnershipQueryFailureStaysStrict(t *testing.T) {
 	h := newHarness(t, healthyEnv(), hephToml)
-	h.runner.psErr = errors.New("boom")
+	h.runner.psErr = errors.New("unknown flag: --format")
 	h.deps.PortInUse = func(p int) bool { return p == 54318 }
 	if code := h.run("dev", "up"); code != 2 {
 		t.Fatalf("exit = %d, want 2", code)
+	}
+	if m := h.errb.String(); !strings.Contains(m, "warning") || !strings.Contains(m, "unknown flag: --format") {
+		t.Fatalf("failure reason not surfaced: %q", m)
+	}
+}
+
+func TestDevUpUnparseablePSOutputWarnsAndStaysStrict(t *testing.T) {
+	h := newHarness(t, healthyEnv(), hephToml)
+	h.runner.psOut = "not json at all"
+	h.deps.PortInUse = func(p int) bool { return p == 54318 }
+	if code := h.run("dev", "up"); code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+	if m := h.errb.String(); !strings.Contains(m, "unexpected `ps --format json` output") {
+		t.Fatalf("stderr = %q", m)
 	}
 }

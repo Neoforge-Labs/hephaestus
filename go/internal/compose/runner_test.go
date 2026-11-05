@@ -1,7 +1,11 @@
 package compose
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -35,5 +39,20 @@ func TestArgsUpExactBriefValue(t *testing.T) {
 	want := []string{"compose", "-p", "hello", "-f", "/f/a.yaml", "-f", "/f/b.yaml", "up", "-d", "--wait"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v", got)
+	}
+}
+
+// ExecRunner.Output must put docker's stderr in the error. A stub `docker` on
+// PATH stands in for the real one, so no daemon is involved.
+func TestExecRunnerOutputIncludesStderr(t *testing.T) {
+	dir := t.TempDir()
+	stub := "#!/bin/sh\necho 'unknown flag: --format' >&2\nexit 125\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	_, err := ExecRunner{}.Output(context.Background(), []string{"compose", "ps"})
+	if err == nil || !strings.Contains(err.Error(), "unknown flag: --format") {
+		t.Fatalf("err = %v", err)
 	}
 }

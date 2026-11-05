@@ -4,8 +4,11 @@ package compose
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // Runner executes `docker <args>`. Everything that would shell out goes through
@@ -44,6 +47,14 @@ func (ExecRunner) Run(ctx context.Context, args []string) error {
 }
 
 // Output implements Runner.
+// A failing command's stderr is folded into the error so the cause is legible.
 func (ExecRunner) Output(ctx context.Context, args []string) ([]byte, error) {
-	return exec.CommandContext(ctx, "docker", args...).Output()
+	out, err := exec.CommandContext(ctx, "docker", args...).Output()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		if msg := strings.TrimSpace(string(ee.Stderr)); msg != "" {
+			return out, fmt.Errorf("%w: %s", err, msg)
+		}
+	}
+	return out, err
 }

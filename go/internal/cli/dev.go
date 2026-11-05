@@ -86,7 +86,12 @@ func devRun(ctx context.Context, d Deps, verb string, checkPorts bool, extra []s
 	if checkPorts {
 		// `up` is idempotent: ports held by this project's own containers are
 		// not collisions. Anything else holding a port still is.
-		own := ownPorts(ctx, d, cfg.Ingot.Name, files)
+		own, qerr := ownPorts(ctx, d, cfg.Ingot.Name, files)
+		if qerr != nil {
+			// Stay strict, but say why: without this a wrong `ps` shape would
+			// silently bring the re-run refusal back.
+			fmt.Fprintf(d.Err, "heph: warning: could not list this project's running containers (%v); treating every busy port as a conflict\n", qerr)
+		}
 		for _, f := range frs {
 			for _, p := range f.Ports {
 				if !own[p] && d.portInUse(p) {
@@ -135,11 +140,12 @@ func newSyncFragmentsCmd(Deps) *cobra.Command {
 }
 
 // ownPorts returns the host ports published by this project's running
-// containers. Failure to query means "none": the preflight then stays strict.
-func ownPorts(ctx context.Context, d Deps, project string, files []string) map[int]bool {
+// containers. On error it returns what it has (possibly nothing) plus the
+// reason; the caller stays strict.
+func ownPorts(ctx context.Context, d Deps, project string, files []string) (map[int]bool, error) {
 	out, err := d.Runner.Output(ctx, compose.Args(project, files, "ps", "--format", "json"))
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	type container struct {
 		Publishers []struct {
@@ -149,13 +155,15 @@ func ownPorts(ctx context.Context, d Deps, project string, files []string) map[i
 	var all []container
 	trimmed := bytes.TrimSpace(out)
 	if bytes.HasPrefix(trimmed, []byte("[")) { // older Compose: one JSON array
-		_ = json.Unmarshal(trimmed, &all)
+		if err := json.Unmarshal(trimmed, &all); err != nil {
+			return nil, fmt.Errorf("unexpected `ps --format json` output: %w", err)
+		}
 	} else { // newer Compose: one JSON object per line
 		dec := json.NewDecoder(bytes.NewReader(trimmed))
-		for {
+		for dec.More() {
 			var c container
-			if dec.Decode(&c) != nil {
-				break
+			if err := dec.Decode(&c); err != nil {
+				return nil, fmt.Errorf("unexpected `ps --format json` output: %w", err)
 			}
 			all = append(all, c)
 		}
@@ -168,5 +176,5 @@ func ownPorts(ctx context.Context, d Deps, project string, files []string) map[i
 			}
 		}
 	}
-	return own
+	return own, nil
 }
