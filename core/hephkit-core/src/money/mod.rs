@@ -43,6 +43,10 @@ pub enum Rounding {
 /// compare field by field in declaration order and answer `KES 100 < USD 50`
 /// with a confident `true` or `false` decided by nothing but that order. Use
 /// [`Money::checked_cmp`], which returns `HEPH-MONEY-409` instead (spec 3.8).
+///
+/// Today such a derive does not compile, because [`Currency`] derives no
+/// ordering either; `tests/money_no_infallible_ordering.rs` guards both, since
+/// the compiler's error for the derive here recommends adding `Ord` there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Money {

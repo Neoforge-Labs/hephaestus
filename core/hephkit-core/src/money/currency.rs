@@ -3,6 +3,18 @@ use super::invalid;
 use crate::CoreError;
 
 /// An ISO 4217 currency with a defined minor-unit exponent.
+///
+/// Deliberately derives no `PartialOrd`/`Ord`, and the absence is load-bearing
+/// outside this file: it is the only reason `#[derive(PartialOrd)]` on [`Money`]
+/// does not compile, and the compiler's error for that derive suggests adding
+/// `Ord` here by name. An ordering on `Currency` would therefore unlock a
+/// field-order ordering on `Money`, where `KES 100 < USD 50` must be
+/// `HEPH-MONEY-409` and not a boolean (spec 3.8). If a `BTreeMap<Currency, _>`
+/// or a sorted code list ever needs one, key it on the public `code` field
+/// (`[u8; 3]`, which orders by ASCII) at the call site rather than ordering the
+/// currency itself. `tests/money_no_infallible_ordering.rs` enforces this.
+///
+/// [`Money`]: super::Money
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct Currency {

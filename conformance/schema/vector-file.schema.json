@@ -405,10 +405,6 @@
               "properties": {
                 "input": {
                   "type": "object",
-                  "required": [
-                    "a",
-                    "b"
-                  ],
                   "additionalProperties": false,
                   "properties": {
                     "a": {
@@ -416,8 +412,44 @@
                     },
                     "b": {
                       "type": "object"
+                    },
+                    "a_text": {
+                      "type": "string"
+                    },
+                    "b_text": {
+                      "type": "string"
                     }
-                  }
+                  },
+                  "allOf": [
+                    {
+                      "oneOf": [
+                        {
+                          "required": [
+                            "a"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "a_text"
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "oneOf": [
+                        {
+                          "required": [
+                            "b"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "b_text"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
                 },
                 "expect": {
                   "oneOf": [
