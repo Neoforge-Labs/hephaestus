@@ -22,7 +22,13 @@ jobs:
           - { name: linux-aarch64-manylinux, runner: ubuntu-latest, target: aarch64-unknown-linux-gnu, manylinux: auto, smoke: false }
           - { name: linux-x86_64-musllinux, runner: ubuntu-latest, target: x86_64-unknown-linux-musl, manylinux: musllinux_1_2, smoke: false }
           - { name: linux-aarch64-musllinux, runner: ubuntu-latest, target: aarch64-unknown-linux-musl, manylinux: musllinux_1_2, smoke: false }
-          - { name: macos-aarch64, runner: macos-14, target: aarch64-apple-darwin, manylinux: 'off', smoke: true }
+          # macos-latest, not a pinned label: a retired macOS image is not served at
+          # all, and the job is cancelled a second after it starts with no runner
+          # assigned and no steps. One cancelled job marks the whole run cancelled,
+          # so main reads as "CI cancelled" while every other job passes — which is
+          # how macos-14 went unnoticed from 2026-11-05. If the wheel's minimum macOS
+          # version ever has to be fixed, pin MACOSX_DEPLOYMENT_TARGET, not the runner.
+          - { name: macos-aarch64, runner: macos-latest, target: aarch64-apple-darwin, manylinux: 'off', smoke: true }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     steps:
