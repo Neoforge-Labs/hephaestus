@@ -1,0 +1,16 @@
+# Pin the working tree to LF.
+#
+# WHY THIS EXISTS. `tools/brand-provenance.txt` records the sha256 of the brand
+# SVGs, of `palette.json` and of the two generated PNGs, and
+# `uv run tools/gen_brand_raster.py --check` compares those hashes over raw bytes.
+# Git on Windows with `core.autocrlf=true` rewrites every text file on checkout,
+# which would change the bytes of each hashed source and fail the check for a
+# contributor who changed nothing — the same flip-flop the hash pin replaced
+# re-rendering to avoid. `.editorconfig` asks editors for LF; this asks git.
+#
+# Nothing is renormalised by adding this: no tracked file holds a carriage return,
+# which `tools/tests/test_line_endings.py` keeps true.
+* text=auto eol=lf
+
+# Never touch a binary's bytes, above all the two PNGs whose hashes are pinned.
+*.png binary
