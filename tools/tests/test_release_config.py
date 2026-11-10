@@ -206,7 +206,11 @@ def test_release_please_does_not_use_the_actions_token() -> None:
     # not accessible by personal access token" from a token that WAS set. The
     # preflight must prove the token can write refs before release-please
     # spends a minute discovering it cannot.
-    assert any("permissions.push" in str(s.get("run", "")) for s in steps)
+    # `.permissions.push` is the USER's role, not the token's scopes, so it
+    # cannot prove this; the probe must actually create a ref. Behaviour is
+    # pinned in test_release_preflight_workflow.py.
+    runs = [str(s.get("run", "")) for s in steps]
+    assert any("git/refs" in r and "-X POST" in r for r in runs)
 
 
 def test_breaking_changes_stay_in_zero_x() -> None:
