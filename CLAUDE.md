@@ -69,7 +69,9 @@ summarise them away. Done means green.
 - Rust: `cargo test -p hephkit-core && cargo clippy --all-targets -- -D warnings && cargo llvm-cov -p hephkit-core --fail-under-lines 90`
 - Python: `cd python/hephkit && uv run maturin develop --uv && uv run pytest --cov=hephkit && uv run mypy --strict src`
 - Go: `cd go && go test ./... && go vet ./... && staticcheck ./...`
-- Generators: `python tools/gen_errors.py --check && python tools/gen_conventions.py --check`
+- Generators: `python tools/gen_errors.py --check && python tools/gen_conventions.py --check && uv run tools/gen_brand_raster.py --check`
+  (The brand-raster `--check` compares bytes rendered by this machine's Pillow, so it
+  is a local gate: PNGs generated on another platform may legitimately differ.)
 - Repo checks: `python tools/check_adrs.py && python tools/check_registry.py && python tools/check_vectors.py`
 - Local stack: `bash compose/test/boot_test.sh`
 - Five-minute path: `bash examples/hello/tutorial_test.sh`
@@ -81,8 +83,9 @@ summarise them away. Done means green.
 - Local host ports use the 54xxx block (Grafana 54300, OTLP 54317/54318,
   Postgres 54320, S3 54333, Redis 54379, Mailpit 54025/54825).
 - Error codes match `^HEPH-[A-Z]{2,6}-\d{3}$` and live only in `spec/errors.yaml`.
-- Generated files (`_codes.py`, `conventions.py`, synced Compose fragments) are
-  never edited by hand.
+- Generated files (`_codes.py`, `conventions.py`, synced Compose fragments, and
+  the brand PNGs `apple-touch-icon.png` and `og-card.png`) are never edited by
+  hand. Edit the brand SVGs and run `uv run tools/gen_brand_raster.py`.
 - Every new module ships with: spec section, vectors or contract tests, a docs
   page with a runnable example, a maturity label, and an entry in ecosystem CI
   once an ingot uses it.

@@ -7,7 +7,11 @@ plain arithmetic.
 
 import json
 import re
+import shutil
+import struct
+import subprocess
 import xml.etree.ElementTree as ET
+import zlib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -165,3 +169,110 @@ def test_lockup_is_text_in_a_system_stack_with_no_embedded_font() -> None:
     assert "sans-serif" in text.get("font-family", "")
     raw = (BRAND / "lockup.svg").read_text()
     assert "@font-face" not in raw and "data:" not in raw and "<image" not in raw
+
+
+# --- generated rasters ------------------------------------------------------
+# The generator declares its own dependency (Pillow) in a PEP 723 header, and CI's
+# tools/tests line does not carry it. So the tests run it as a subprocess through
+# `uv run` and read PNG sizes from the IHDR header, never importing Pillow.
+
+GENERATOR = REPO_ROOT / "tools" / "gen_brand_raster.py"
+RASTERS = ("apple-touch-icon.png", "og-card.png")
+SVG_SOURCES = (*ALL_SVGS, "palette.json")
+
+
+def _generate(root: Path, *flags: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["uv", "run", str(GENERATOR), "--root", str(root), *flags],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _scratch_root(tmp_path: Path) -> Path:
+    """A repo-shaped tree holding only the generator's inputs."""
+    brand = tmp_path / "docs" / "site" / "public" / "brand"
+    brand.mkdir(parents=True)
+    for name in SVG_SOURCES:
+        shutil.copy(BRAND / name, brand / name)
+    return tmp_path
+
+
+def _png_size(path: Path) -> tuple[int, int]:
+    data = path.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", f"{path.name} is not a PNG"
+    return struct.unpack(">II", data[16:24])
+
+
+def test_raster_generator_is_deterministic_and_check_detects_staleness(tmp_path: Path) -> None:
+    # Everything here compares output from the same machine. Byte equality with the
+    # PNGs committed from another platform is deliberately not asserted: FreeType and
+    # Pillow's resampling can differ across platforms, so that would be untrue.
+    root = _scratch_root(tmp_path)
+    out = root / "docs" / "site" / "public" / "brand"
+
+    missing = _generate(root, "--check")
+    assert missing.returncode == 1, "--check must fail while the PNGs do not exist"
+
+    first_run = _generate(root)
+    assert first_run.returncode == 0, first_run.stderr
+    first = {name: (out / name).read_bytes() for name in RASTERS}
+    assert all(first.values())
+
+    for name in RASTERS:
+        (out / name).unlink()
+    assert _generate(root).returncode == 0
+    assert {name: (out / name).read_bytes() for name in RASTERS} == first, "two runs differ"
+
+    assert _generate(root, "--check").returncode == 0
+
+    for name in RASTERS:
+        stale = bytearray(first[name])
+        stale[-20] ^= 0xFF
+        (out / name).write_bytes(bytes(stale))
+        result = _generate(root, "--check")
+        assert result.returncode == 1, f"--check missed a corrupted {name}"
+        assert name in result.stderr
+        assert (out / name).read_bytes() == bytes(stale), "--check must not write"
+        (out / name).write_bytes(first[name])
+
+
+def test_raster_follows_an_svg_edit(tmp_path: Path) -> None:
+    # The reason the generator exists: edit a source SVG and the PNG changes with it.
+    root = _scratch_root(tmp_path)
+    brand = root / "docs" / "site" / "public" / "brand"
+    assert _generate(root).returncode == 0
+    before = {name: (brand / name).read_bytes() for name in RASTERS}
+
+    for svg, png in (("avatar.svg", "apple-touch-icon.png"), ("lockup.svg", "og-card.png")):
+        source = (brand / svg).read_text()
+        assert 'rx="18"' in source
+        (brand / svg).write_text(source.replace('rx="18"', 'rx="30"').replace("#C2884A", "#336699"))
+    assert _generate(root).returncode == 0
+    for name in RASTERS:
+        assert (brand / name).read_bytes() != before[name], f"{name} ignored an SVG edit"
+
+
+def _first_pixel(path: Path) -> tuple[int, int, int]:
+    """Top-left RGB of an 8-bit RGB PNG. The first scanline's filters all unfilter
+    against an implicit zero row, so its first pixel is the raw bytes after the filter byte."""
+    data, pos, idat = path.read_bytes(), 8, b""
+    while pos < len(data):
+        (length,) = struct.unpack(">I", data[pos : pos + 4])
+        if data[pos + 4 : pos + 8] == b"IDAT":
+            idat += data[pos + 8 : pos + 8 + length]
+        pos += 12 + length
+    r, g, b = zlib.decompress(idat)[1:4]
+    return r, g, b
+
+
+def test_touch_icon_is_a_full_bleed_bronze_tile() -> None:
+    # iOS applies its own corner mask, so the corner must be bronze, not an ink border.
+    assert _first_pixel(BRAND / "apple-touch-icon.png") == (0xC2, 0x88, 0x4A)
+
+
+def test_raster_sizes_are_exactly_what_the_platforms_require() -> None:
+    # A wrong og-card ratio is cropped by every social preview, silently.
+    assert _png_size(BRAND / "apple-touch-icon.png") == (180, 180)
+    assert _png_size(BRAND / "og-card.png") == (1200, 630)
