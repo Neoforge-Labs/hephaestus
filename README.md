@@ -9,6 +9,7 @@ labelled `experimental`; see [ADR 0015](docs/adr/0015-maturity-levels.md).
 
 | Where | Name |
 | --- | --- |
+| Site | `hephkit.dev` |
 | Repo, CLI | `Neoforge-Labs/hephaestus`, `heph` |
 | PyPI | `hephkit` |
 | crates.io | `hephkit-core` |
@@ -18,6 +19,7 @@ labelled `experimental`; see [ADR 0015](docs/adr/0015-maturity-levels.md).
 
 ## Where to look
 
+- Site: https://hephkit.dev
 - Design: `docs/superpowers/specs/2026-11-04-hephaestus-design.md`
 - Decisions: `docs/adr/`
 - Contributor rules: `CLAUDE.md`

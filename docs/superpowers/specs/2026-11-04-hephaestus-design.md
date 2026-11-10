@@ -137,13 +137,13 @@ hephaestus/
   terraform/         # modules/ and stacks/
   .github/workflows/ # reusable CI workflows
   templates/         # Copier templates: saas, research
-  docs/              # Nextra site at heph.neoforgelabs.tech (also serves /r/*.json)
+  docs/              # Nextra site at hephkit.dev (also serves /r/*.json)
 ```
 
 **How products consume it**
 
 - Python: `uv add "hephkit[money,idempotency,webhooks,auth]"`. One version number, with the Rust core shipped inside prebuilt wheels.
-- UI: `heph add data-table`, which wraps `npx shadcn add https://heph.neoforgelabs.tech/r/data-table.json`.
+- UI: `heph add data-table`, which wraps `npx shadcn add https://hephkit.dev/r/data-table.json`.
 - TypeScript: the `@hephkit/*` npm packages.
 - Go: `go get github.com/Neoforge-Labs/hephaestus/go`. The CLI comes from release binaries or `go install`.
 - Infrastructure: Terraform modules pinned by git tag, and CI through `uses: Neoforge-Labs/hephaestus/.github/workflows/python-ci.yml@v1`.

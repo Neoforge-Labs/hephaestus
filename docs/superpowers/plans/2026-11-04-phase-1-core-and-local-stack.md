@@ -17,7 +17,7 @@
 - Python floor `>=3.12`; wheels are abi3 (`abi3-py312`), built for Linux x86_64 and aarch64 (glibc and musl) and macOS arm64.
 - Rust core: no I/O, no global state, no `unsafe` outside PyO3 glue; every public function returns `Result` rather than panicking.
 - Money is integer minor units (`i64`); floating point never touches money.
-- Error codes match `^HEPH-[A-Z]{2,6}-\d{3}$`; problem `type` URL is `https://heph.neoforgelabs.tech/errors/<code>`.
+- Error codes match `^HEPH-[A-Z]{2,6}-\d{3}$`; problem `type` URL is `https://hephkit.dev/errors/<code>`.
 - Canonical JSON is RFC 8785 (JCS). Content hashes are `sha256:` + lowercase hex.
 - Webhook signing follows Standard Webhooks (`webhook-id`, `webhook-timestamp`, `webhook-signature`, `v1,<base64>`), tolerance 300 s.
 - Local host ports live in the 54xxx block so Hephaestus stacks never fight other local stacks (Grafana on 3000 collides with Docker on this machine, per Domus).
@@ -188,7 +188,7 @@
 - Consumes: `spec/errors.yaml` (Task 2); `MoneyError`, `SignatureError` (Task 7).
 - Produces: `class HephError(Exception)` with `__init__(self, code: str, detail: str | None = None, **extensions: Any)` and properties `code`, `status`, `title`, `type_url`; generated constants in `_codes.py` (e.g. `IDEMP_409 = "HEPH-IDEMP-409"`); `def install_error_handlers(app: FastAPI) -> None`.
 
-- [ ] **Step 1: Write the failing tests** — `test_gen_errors.py`: running the generator twice produces identical output, and `--check` exits 1 when `_codes.py` is stale. `test_errors.py`: raising `HephError("HEPH-IDEMP-409")` inside a FastAPI route returns status 409, `content-type: application/problem+json`, body `{"type": "https://heph.neoforgelabs.tech/errors/HEPH-IDEMP-409", "title": <registry title>, "status": 409, "code": "HEPH-IDEMP-409"}` plus `trace_id` when a span is active; an unknown code raises `ValueError` at construction; a raised `MoneyError` maps to 422 `HEPH-MONEY-422`; an unhandled exception maps to 500 `HEPH-GEN-500` without leaking the exception message; FastAPI request validation errors map to 422 `HEPH-VAL-422` with the field errors under `errors`.
+- [ ] **Step 1: Write the failing tests** — `test_gen_errors.py`: running the generator twice produces identical output, and `--check` exits 1 when `_codes.py` is stale. `test_errors.py`: raising `HephError("HEPH-IDEMP-409")` inside a FastAPI route returns status 409, `content-type: application/problem+json`, body `{"type": "https://hephkit.dev/errors/HEPH-IDEMP-409", "title": <registry title>, "status": 409, "code": "HEPH-IDEMP-409"}` plus `trace_id` when a span is active; an unknown code raises `ValueError` at construction; a raised `MoneyError` maps to 422 `HEPH-MONEY-422`; an unhandled exception maps to 500 `HEPH-GEN-500` without leaking the exception message; FastAPI request validation errors map to 422 `HEPH-VAL-422` with the field errors under `errors`.
 - [ ] **Step 2: Run to verify failure** — `uv run pytest tests/test_errors.py -v` → FAIL.
 - [ ] **Step 3: Implement** `tools/gen_errors.py` (YAML → `_codes.py` with a `REGISTRY: dict[str, tuple[int, str]]`), `HephError`, and `install_error_handlers`.
 - [ ] **Step 4: Verify** — tests PASS; `python tools/gen_errors.py --check` exit 0; mypy strict clean.

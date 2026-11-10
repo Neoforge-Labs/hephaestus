@@ -52,7 +52,7 @@ def _scratch(tmp_path: Path, file_suite: str, cases: object, **top: object) -> P
         (CONFORMANCE / "schema" / "vector-file.schema.json").read_text(encoding="utf-8"), encoding="utf-8"
     )
     (tmp_path / area).mkdir()
-    body = {"suite": file_suite, "spec": "0.2.0", "cases": cases}
+    body = {"suite": file_suite, "spec": "0.3.0", "cases": cases}
     body.update(top)
     (tmp_path / area / f"{name}.json").write_text(json.dumps(body), encoding="utf-8")
     return tmp_path
