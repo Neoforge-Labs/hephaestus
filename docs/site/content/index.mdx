@@ -11,15 +11,15 @@ product and research project is built from. Each project it creates is an
 ## Where this stands
 
 Hephaestus is in Phase 1: the core and the local stack are under construction.
-Every module is labelled `experimental`, which means its interfaces can change
-without notice and nothing here should sit in a production money path yet. The
-[roadmap](/roadmap) shows what comes next.
+Every module is labelled `experimental`: the API may change and it is not for
+production, per [ADR 0015](/adrs/0015-maturity-levels). The [roadmap](/roadmap)
+shows what comes next.
 
 ## What is documented here
 
 - [Error codes](/errors): every `HEPH-` error code, with what it means and how to respond.
 - [Specification](/spec): `heph-spec`, the behaviour every implementation follows.
-- [Decisions](/adrs/0001-record-decisions): the architecture decision records, listed in the sidebar. Maturity levels are defined in [ADR 0015](/adrs/0015-maturity-levels).
+- [Decisions](/adrs): the architecture decision records, including how maturity levels are defined.
 - [Modules](/reference/modules): what exists today and its maturity level.
 - [Telemetry conventions](/reference/conventions): the shared attribute names.
 - [Roadmap](/roadmap): the phases and where each one ends.

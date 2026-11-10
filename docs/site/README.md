@@ -21,14 +21,23 @@ the site on every push, which is the design's choice.
    repo root, and a project rooted at `docs/site` cannot install.
 3. Leave **Framework Preset**, build command, output directory and install
    command alone. They come from [`/vercel.json`](../../vercel.json), which sets
-   framework `null` (not Next.js), install `bun install --frozen-lockfile`,
-   build `bun run --cwd docs/site build`, output `docs/site/out`, and
+   framework `null` (not Next.js), install `bunx bun@1.4.4 install --frozen-lockfile`,
+   build `bunx bun@1.4.4 run --cwd docs/site build`, output `docs/site/out`, and
    `cleanUrls: true` so `/errors/HEPH-MONEY-422` serves
    `out/errors/HEPH-MONEY-422.html`.
 4. Set the production branch to `main`.
-5. Check **Node.js Version** under Settings > General. `.prototools` pins node
-   26 and Vercel does not read it; choose the newest version it offers that
-   builds cleanly.
+5. Node and bun versions are pinned in the repo as far as Vercel allows:
+   - **Node**: Vercel reads `engines.node` from the root `package.json`
+     (`26.x`), which overrides the Node.js Version project setting. Vercel does
+     not read `.prototools`. Keep `engines.node` equal to `node` in `.prototools`.
+     Vercel offers 26.x, 24.x and 22.x; 26.x is also its default.
+   - **Bun**: Vercel's `bunVersion` only selects the *Functions* runtime, not the
+     build, so it is not used. Instead `vercel.json` runs install and build via
+     `bunx bun@1.4.4`, the pattern Vercel's own guide gives for pinning Bun
+     in the Install Command. Keep it equal to `bun` in `.prototools`; a test
+     (`tools/tests/test_vercel_config.py`) fails if they differ.
+   - Left to project settings: nothing is required. If you change the Node.js
+     Version setting, `engines.node` still wins.
 
 ### 2. Add the custom domain
 
