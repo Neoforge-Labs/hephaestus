@@ -4,6 +4,7 @@ import type { MetaRecord } from 'nextra'
 // Regenerate with `uv run tools/gen_site_pages.py`; CI runs --check.
 // Sidebar order of the ADRs: numeric.
 const meta: MetaRecord = {
+  "index": "Decisions",
   "0001-record-decisions": "0001. Record decisions as ADRs",
   "0002-mit-licence": "0002. Public repository under the MIT licence",
   "0003-name-hephaestus-hephkit": "0003. Name the kit Hephaestus, published as hephkit",

@@ -71,7 +71,7 @@ def test_adr_pages_match_sources() -> None:
     )
     assert len(sources) >= 17
     adr_dir = REPO_ROOT / CONTENT / "adrs"
-    adr_pages = {p: t for p, t in pages.items() if p.parent == adr_dir and p.suffix == ".md"}
+    adr_pages = {p: t for p, t in pages.items() if p.parent == adr_dir and p.suffix == ".md" and p.name != "index.md"}
     assert {p.name for p in adr_pages} == {s.name for s in sources}  # both directions
     for src in sources:
         original = src.read_text(encoding="utf-8")
@@ -80,6 +80,50 @@ def test_adr_pages_match_sources() -> None:
         assert rewrite_adr_links(original) == original
     order = re.findall(r'"(\d{4}-[^"]+)":', _page(pages, "adrs/_meta.ts"))
     assert order == [s.stem for s in sources]
+
+
+def _index_targets(text: str) -> list[str]:
+    return re.findall(r"\]\(/adrs/([^)]+)\)", text)
+
+
+def test_adr_index_links_equal_adr_sources() -> None:
+    """The /adrs list and docs/adr/ name the same ADRs, in both directions."""
+    sources = [
+        p.stem
+        for p in sorted((REPO_ROOT / "docs/adr").glob("[0-9][0-9][0-9][0-9]-*.md"))
+        if not p.name.startswith("0000-")
+    ]
+    committed = (REPO_ROOT / CONTENT / "adrs/index.md").read_text(encoding="utf-8")
+    assert _index_targets(committed) == sources
+    assert committed.startswith("---\n# GENERATED") and "docs/adr/*.md" in committed
+    for slug in sources:
+        assert (REPO_ROOT / CONTENT / "adrs" / f"{slug}.md").is_file()  # no dead link
+
+
+def test_check_fails_when_a_new_adr_has_no_index_entry(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _root(tmp_path)
+    assert main([], root) == 0
+    new = root / "docs/adr/0099-new-decision.md"
+    new.write_text("# 0099. New\n\n## Status\n\nAccepted.\n", encoding="utf-8")
+    # Give the ADR its page but leave the committed index as it was: only the index is stale.
+    pages = generate(root)
+    page = root / CONTENT / "adrs/0099-new-decision.md"
+    page.write_text(pages[page], encoding="utf-8")
+    meta = root / CONTENT / "adrs/_meta.ts"
+    meta.write_text(pages[meta], encoding="utf-8")
+    assert main(["--check"], root) == 1
+    assert "adrs/index.md" in capsys.readouterr().err
+
+
+def test_check_fails_when_the_index_lists_an_adr_that_does_not_exist(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _root(tmp_path)
+    assert main([], root) == 0
+    index = root / CONTENT / "adrs/index.md"
+    index.write_text(index.read_text(encoding="utf-8") + "- [0099. Ghost](/adrs/0099-ghost)\n", encoding="utf-8")
+    assert main(["--check"], root) == 1
+    assert "adrs/index.md" in capsys.readouterr().err
 
 
 def test_adr_pages_keep_private_names_verbatim() -> None:
@@ -239,6 +283,7 @@ def test_check_detects_drift(tmp_path: Path, capsys: pytest.CaptureFixture[str])
         "roadmap.mdx",
         "adrs/0015-maturity-levels.md",
         "adrs/_meta.ts",
+        "adrs/index.md",
     ],
 )
 def test_check_detects_hand_edit_of_each_output_kind(

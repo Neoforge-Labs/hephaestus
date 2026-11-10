@@ -14,7 +14,8 @@ Sources and outputs, all under ``docs/site/content/``:
 * ``spec/modules.yaml``           -> ``reference/modules.mdx``
 * ``spec/heph-spec.md``           -> ``spec/index.md`` (behind a generated note that
   separates the spec version from the package version)
-* ``docs/adr/NNNN-*.md``          -> ``adrs/NNNN-*.md`` and ``adrs/_meta.ts``
+* ``docs/adr/NNNN-*.md``          -> ``adrs/NNNN-*.md``, ``adrs/index.md`` (the ``/adrs``
+  list, one link per ADR) and ``adrs/_meta.ts``
 * the design's Rollout section    -> ``roadmap.mdx``
 
 ``reference/_meta.ts`` orders the two reference pages.
@@ -262,6 +263,22 @@ def adr_sources(repo_root: Path) -> list[Path]:
     )
 
 
+def render_adr_index(rows: list[tuple[str, str]]) -> str:
+    """The ``/adrs`` landing page: every ADR by number and title, linked to its page."""
+    items = "\n".join(f"- [{_escape(title)}](/adrs/{slug})" for slug, title in rows)
+    return (
+        _front_matter("docs/adr/*.md", "Decisions")
+        + f"""\
+# Decisions
+
+Architecture decision records. Each is numbered and never edited after
+acceptance; a changed decision is superseded by a new record.
+
+{items}
+"""
+    )
+
+
 def generate(repo_root: Path) -> dict[Path, str]:
     """Map each output path to its content."""
     content = repo_root / CONTENT
@@ -292,7 +309,10 @@ def generate(repo_root: Path) -> dict[Path, str]:
             f"docs/adr/{src.name}", title, rewrite_adr_links(text, known)
         )
         rows.append((src.stem, title))
-    out[content / "adrs/_meta.ts"] = _meta("docs/adr/*.md", "Sidebar order of the ADRs: numeric.", rows)
+    out[content / "adrs/index.md"] = render_adr_index(rows)
+    out[content / "adrs/_meta.ts"] = _meta(
+        "docs/adr/*.md", "Sidebar order of the ADRs: numeric.", [("index", "Decisions"), *rows]
+    )
     return out
 
 
