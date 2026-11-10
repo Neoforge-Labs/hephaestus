@@ -1,4 +1,4 @@
-"""Fail-fast settings (spec: settings). Experimental.
+"""Fail-fast settings (spec: settings). Maturity: experimental.
 
 ``HephSettings`` loads ``HEPH_*`` environment variables. In ``prod`` it refuses
 to construct unless every name in ``required_in_prod`` holds a non-blank value,

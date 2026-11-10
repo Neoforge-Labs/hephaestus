@@ -9,10 +9,10 @@ projects:
   conformance: 'conformance'
   core: 'core'
   hephkit: 'python/hephkit'
-  docs: 'docs'
   spec: 'spec'
   docker: 'docker'
   compose: 'compose'
+  docs-site: 'docs/site'
   heph-cli: 'go'
 
 vcs:

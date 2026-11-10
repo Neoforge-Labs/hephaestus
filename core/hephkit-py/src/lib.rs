@@ -1,4 +1,4 @@
-//! PyO3 glue for `hephkit-core`, exposed to Python as `hephkit._core`.
+//! PyO3 glue for `hephkit-core`, exposed to Python as `hephkit._core`. Maturity: experimental.
 //!
 //! This crate converts types and maps errors and nothing else: every parse
 //! rule, rounding decision and signature comparison lives in the core

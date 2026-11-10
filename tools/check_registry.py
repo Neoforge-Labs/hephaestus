@@ -6,7 +6,8 @@
 
 Run with ``uv run tools/check_registry.py`` (PyYAML is declared inline, PEP 723).
 
-Error entries need ``{code, status, title, area, detail_hint}``: the code matches
+Error entries need ``{code, status, title, area, detail_hint, guidance}``: ``guidance`` is
+developer-facing prose and must differ from the caller-facing ``detail_hint``; the code matches
 ``HEPH-[A-Z]{2,6}-[0-9]{3}`` (full match, ASCII digits), is unique, ``status`` is 400-599 and ``area`` equals
 the code's middle segment. Attribute entries need ``{name, type, description,
 pii}``: names are dotted lowercase, unique, and ``pii`` is a real boolean.
@@ -29,7 +30,7 @@ CODE_RE = re.compile(r"HEPH-[A-Z]{2,6}-[0-9]{3}")
 ATTR_RE = re.compile(r"[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+")
 CCY_RE = re.compile(r"[A-Z]{3}")
 CCY_NBR_RE = re.compile(r"[0-9]{3}")
-ERROR_FIELDS = ("code", "status", "title", "area", "detail_hint")
+ERROR_FIELDS = ("code", "status", "title", "area", "detail_hint", "guidance")
 ATTRIBUTE_FIELDS = ("name", "type", "description", "pii")
 CURRENCY_FIELDS = ("code", "numeric", "name", "minor_units")
 # ISO 4217 publishes no exponent above 4 (CLF and UYW); Currency.exponent is a u8.
@@ -65,6 +66,10 @@ def _check_errors(path: Path, errors: list[str]) -> None:
         for field in ERROR_FIELDS:
             if entry.get(field) in (None, ""):
                 errors.append(f"{path.name}: {code}: missing '{field}'")
+        for field in ("guidance", "detail_hint"):
+            value = entry.get(field)
+            if value not in (None, "") and not (isinstance(value, str) and value.strip()):
+                errors.append(f"{path.name}: {code}: '{field}' must be a non-empty string")
         if not CODE_RE.fullmatch(code):
             errors.append(f"{path.name}: {code}: code must match {CODE_RE.pattern}")
         else:
@@ -73,6 +78,12 @@ def _check_errors(path: Path, errors: list[str]) -> None:
         if code in seen:
             errors.append(f"{path.name}: duplicate code {code}")
         seen.add(code)
+        guidance, hint = entry.get("guidance"), entry.get("detail_hint")
+        if isinstance(guidance, str) and isinstance(hint, str) and guidance.strip() == hint.strip():
+            errors.append(
+                f"{path.name}: {code}: 'guidance' must differ from 'detail_hint' "
+                "(caller copy is not developer guidance)"
+            )
         status = entry.get("status")
         if not isinstance(status, int) or isinstance(status, bool) or not 400 <= status <= 599:
             errors.append(f"{path.name}: {code}: status must be an integer 400-599")

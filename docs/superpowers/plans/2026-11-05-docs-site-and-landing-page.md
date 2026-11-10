@@ -23,6 +23,7 @@
 - Conventional Commits; branch `work/docs-site`; no AI attribution in commits, PR bodies or branch names.
 - Budget values live only in `tools/dx_budget.json`: 60 seconds to healthy, 5 MB wheel (manylinux x86_64).
 - `hephkit` has no `money` extra — money is in the base package. Extras are `fastapi`, `settings`, `observability`.
+- **The tutorial pins an explicit `go install …/cmd/heph@v<version>`, never `@v0`.** The `go/v0` alias may be solving a non-problem: `@v0` is a semver prefix query resolved from the proxy's version list, which is itself built from the `go/vX.Y.Z` tags, so it likely already worked without an alias. Until one real `go install` after the first publish settles it, `@v0` is unverified and must not appear in the docs as fact.
 
 ## Review Focus
 
@@ -44,12 +45,19 @@ Everything the landing page prints must resolve, so the release comes first. Thi
 - Modify: none. `release-please-config.json` and `.release-please-manifest.json` (already `0.1.0` across all five components) drive it.
 
 **Interfaces:**
-- Produces: `hephkit` 0.1.0 on PyPI; tags `v0.1.0` and `go/v0.1.0`; `heph` installable with `go install github.com/Neoforge-Labs/hephaestus/go/cmd/heph@v0.1.0`.
+- Produces: `hephkit` on PyPI at the first released version; tags `v<X.Y.Z>` and `go/v<X.Y.Z>`; `heph` installable with `go install github.com/Neoforge-Labs/hephaestus/go/cmd/heph@v<X.Y.Z>`.
+- **The version is not `0.1.0`, and the reason is a config flag, not a default.** `.release-please-manifest.json` records `0.1.0` as released for all five components, and Phase 1 carries two breaking commits (`feat(money)!: generate the full ISO 4217 currency table`, `feat(money)!: accept value-preserving trailing zeros`).
+
+  An earlier revision of this plan claimed release-please bumps the *minor* for a breaking change below 1.0.0. **That was wrong.** Release-please's default for a 0.x version is to bump a breaking change straight to **1.0.0**, and the first release run (42096862010) duly computed 1.0.0 across all five components. Publishing that would have asserted a committed API on the first ever release, which ADR 0015 forbids — everything in Phase 1 ships `experimental`, and `stable` requires the coverage gate, two production ingots and passing ecosystem CI, none of which exist.
+
+  `bump-minor-pre-major: true` in `release-please-config.json` (added in `7ac0937`) is what makes the first release **0.2.0**, and `tools/tests/test_release_config.py` pins it with that reasoning so it cannot be dropped back to the default silently. **Do not remove that flag**, and do not restate the old reasoning: the number is 0.2.0 because the flag is set, not because the tool defaults that way.
+
+  Later tasks must not hard-code a version: the tutorial prints `uv add hephkit` unpinned, and Task 1 Step 4 verifies whatever release-please actually cut. PyPI version numbers cannot be reused, so settle the number before merging the release PR, not after.
 
 - [ ] **Step 1: Prerequisite (Kelyn, manual)** — configure the PyPI trusted publisher for `hephkit`, pointing at `Neoforge-Labs/hephaestus` and the `release.yml` workflow. Nothing downstream works until this exists; stop and ask rather than working around it.
 - [ ] **Step 2: Merge `work/phase-1` to `main`** so release-please opens its release PR. Confirm `compose/` is committed first (Task 12 of the Phase 1 plan — the design's blocking prerequisite).
 - [ ] **Step 3: Merge the release PR** and confirm the tags `v0.1.0` and `go/v0.1.0` exist, and that `release.yml` published wheels.
-- [ ] **Step 4: Verify** — in an empty directory: `uv venv && uv pip install hephkit==0.1.0 && python -c "import hephkit.money"` → succeeds; `go install github.com/Neoforge-Labs/hephaestus/go/cmd/heph@v0.1.0 && heph version` → prints `0.1.0`. Paste both outputs; if either fails, the hero's copy is still a lie and later tasks must not assume it.
+- [ ] **Step 4: Verify** — read the released version from the merged release PR, then in an empty directory: `uv venv && uv pip install hephkit==<version> && python -c "import hephkit.money"` → succeeds; `go install github.com/Neoforge-Labs/hephaestus/go/cmd/heph@v<version> && heph version` → prints that version. Paste both outputs; if either fails, the hero's copy is still a lie and later tasks must not assume it.
 
 ---
 
@@ -123,7 +131,8 @@ The site head must wire them in: `<link rel="icon" type="image/svg+xml" href="/b
 ### Task 5: Generated error pages
 
 **Files:**
-- Create: `tools/gen_error_pages.py`, `tools/tests/test_gen_error_pages.py`, `docs/site/content/errors/_meta.ts`, `docs/site/content/reference/errors.mdx`
+- Create: `tools/gen_error_pages.py`, `tools/tests/test_gen_error_pages.py`
+- Generated: `docs/site/content/errors/HEPH-*.mdx` (12), `docs/site/content/errors/index.mdx`, `docs/site/content/errors/_meta.ts` — all committed and all covered by `--check`
 - Generated: `docs/site/content/errors/HEPH-*.mdx` (12 files, committed)
 
 **Interfaces:**
@@ -138,7 +147,7 @@ The site head must wire them in: `<link rel="icon" type="image/svg+xml" href="/b
   - `test_output_is_deterministic` — two calls produce identical bytes (no timestamps).
   - `test_every_registry_code_has_a_committed_page` — **Review Focus 1**: the committed `content/errors/` set equals the registry's code set; a registry code with no file fails.
 - [ ] **Step 2: Run to verify failure** — `uv run --with pyyaml pytest tools/tests/test_gen_error_pages.py -v` → FAIL.
-- [ ] **Step 3: Implement** the generator and run it to write the 12 pages. Each page: front-matter `title: <code> — <title>`, then the status, the caller-facing `detail_hint`, the developer `guidance`, and a link back to `spec/heph-spec.md` §1. Write `content/reference/errors.mdx` as a hand-written index that links to all twelve by code; `content/errors/_meta.ts` orders them by registry order.
+- [ ] **Step 3: Implement** the generator and run it to write the 12 pages. Each page: front-matter `title: <code> — <title>`, then the status, the caller-facing `detail_hint`, the developer `guidance`, and a link back to `spec/heph-spec.md` §1. `generate()` also emits `content/errors/index.mdx` (the `/errors` landing page, listing every code with its status and title) and `content/errors/_meta.ts` (registry order, index first). Nothing keyed to the registry is hand-maintained.
 - [ ] **Step 4: Run tests to verify they pass** — same command → PASS; `uv run tools/gen_error_pages.py --check` → exit 0.
 - [ ] **Step 5: Commit** — `feat(docs): generate one page per error code`
 

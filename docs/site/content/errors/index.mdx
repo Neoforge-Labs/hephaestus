@@ -1,0 +1,28 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "Error codes"
+---
+
+# Error codes
+
+Every problem+json error body the kit emits carries a `type` URL of the form
+`https://hephkit.dev/errors/<code>`. Each code has its own page with
+the caller-facing message and developer guidance.
+
+| Code | Status | Title |
+| --- | --- | --- |
+| [HEPH-GEN-500](/errors/HEPH-GEN-500) | 500 | Internal error |
+| [HEPH-VAL-422](/errors/HEPH-VAL-422) | 422 | Validation failed |
+| [HEPH-NF-404](/errors/HEPH-NF-404) | 404 | Resource not found |
+| [HEPH-AUTH-401](/errors/HEPH-AUTH-401) | 401 | Authentication required |
+| [HEPH-AUTH-403](/errors/HEPH-AUTH-403) | 403 | Permission denied |
+| [HEPH-RATE-429](/errors/HEPH-RATE-429) | 429 | Rate limit exceeded |
+| [HEPH-IDEMP-400](/errors/HEPH-IDEMP-400) | 400 | Idempotency key missing or malformed |
+| [HEPH-IDEMP-409](/errors/HEPH-IDEMP-409) | 409 | Original request still in flight |
+| [HEPH-IDEMP-422](/errors/HEPH-IDEMP-422) | 422 | Idempotency key reused with a different payload |
+| [HEPH-MONEY-422](/errors/HEPH-MONEY-422) | 422 | Invalid money amount |
+| [HEPH-MONEY-409](/errors/HEPH-MONEY-409) | 409 | Currency mismatch |
+| [HEPH-WH-401](/errors/HEPH-WH-401) | 401 | Webhook signature invalid or expired |
+
+The registry is `spec/errors.yaml`; these pages are generated from it.

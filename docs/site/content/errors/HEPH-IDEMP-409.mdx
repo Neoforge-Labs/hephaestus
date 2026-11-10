@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-IDEMP-409 — Original request still in flight"
+---
+
+# HEPH-IDEMP-409
+
+**Original request still in flight**
+
+| | |
+| --- | --- |
+| HTTP status | `409` |
+| Area | `IDEMP` |
+| Problem `type` | `https://hephkit.dev/errors/HEPH-IDEMP-409` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+A request with this key is still being processed. Retry after it completes.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+A request with the same Idempotency-Key and the same fingerprint is still being processed, and its lease (60 seconds by default) has not expired. This is a retry-later condition, not a failure, so wait and retry with the same key, which replays the stored response once the original completes. If you see it constantly, the client is retrying too fast or the operation outlasts the lease, so shorten the work or lengthen the configured lease. Do not generate a new key to get past it, which would run the operation twice.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error index](/errors).

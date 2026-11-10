@@ -1,4 +1,4 @@
-"""Money as integer minor units plus a currency (spec section 3). Experimental.
+"""Money as integer minor units plus a currency (spec section 3). Maturity: experimental.
 
 All parsing, rounding, arithmetic, comparison and wire rules live in the Rust
 core, the currency-mismatch check among them (spec 3.8). This module converts

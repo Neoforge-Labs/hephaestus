@@ -1,0 +1,21 @@
+---
+# GENERATED FILE - do not edit by hand. Source: conventions/attributes.yaml.
+# Regenerate with `uv run tools/gen_site_pages.py`; CI runs --check.
+title: "Telemetry conventions"
+---
+
+# Telemetry conventions
+
+Attribute names shared by every language. Constants for Python, TypeScript, Go
+and Rust are generated from `conventions/attributes.yaml`. Attributes marked
+PII are redacted from logs by default.
+
+| Attribute | Type | Meaning | PII |
+| --- | --- | --- | --- |
+| `tenant.id` | string | Identifier of the tenant (account or organisation) the work runs for. | no |
+| `user.id` | string | Identifier of the authenticated end user. | **PII** |
+| `idempotency.key` | string | Idempotency-Key value, used to correlate a request with its replays. Clients MUST send opaque keys and no personal data. | no |
+| `job.name` | string | Name of the background job being executed. | no |
+| `webhook.provider` | string | Provider a webhook came from or is sent to, for example stripe or paystack. | no |
+| `money.currency` | string | ISO 4217 alphabetic currency code of a monetary amount. | no |
+| `heph.error.code` | string | The HEPH-\* error code returned or recorded for the operation. | no |

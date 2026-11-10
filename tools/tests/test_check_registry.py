@@ -3,11 +3,12 @@
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from check_registry import check_registry  # noqa: E402
+from check_registry import check_errors, check_registry  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ERRORS = REPO_ROOT / "spec" / "errors.yaml"
@@ -76,7 +77,7 @@ def _write(tmp_path: Path, errors: str, attributes: str) -> tuple[Path, Path]:
 
 
 GOOD_ATTR = "- {name: user.id, type: string, description: d, pii: true}\n"
-GOOD_ERR = "- {code: HEPH-GEN-500, status: 500, title: t, area: GEN, detail_hint: h}\n"
+GOOD_ERR = "- {code: HEPH-GEN-500, status: 500, title: t, area: GEN, detail_hint: h, guidance: g}\n"
 
 
 def test_rejects_bad_code_and_area(tmp_path: Path) -> None:
@@ -143,3 +144,44 @@ def test_reports_non_utf8_files(tmp_path: Path) -> None:
     e.write_bytes(b"- {code: \xff\xfe}\n")
     errors = check_registry(e, a)
     assert any("cannot read file" in x for x in errors)
+
+
+def test_every_code_has_guidance() -> None:
+    for entry in _load(ERRORS):
+        guidance = entry.get("guidance")
+        assert isinstance(guidance, str) and guidance.strip(), entry["code"]
+
+
+def test_guidance_differs_from_detail_hint() -> None:
+    for entry in _load(ERRORS):
+        assert entry["guidance"].strip() != entry["detail_hint"].strip(), entry["code"]
+
+
+def test_guidance_required(tmp_path: Path) -> None:
+    no_guidance = "- {code: HEPH-GEN-500, status: 500, title: t, area: GEN, detail_hint: h}\n"
+    path = tmp_path / "errors.yaml"
+    path.write_text(no_guidance)
+    errors = check_errors(path)
+    assert any("HEPH-GEN-500" in e and "missing 'guidance'" in e for e in errors)
+
+
+def test_rejects_guidance_equal_to_detail_hint(tmp_path: Path) -> None:
+    same = "- {code: HEPH-GEN-500, status: 500, title: t, area: GEN, detail_hint: h, guidance: h}\n"
+    path = tmp_path / "errors.yaml"
+    path.write_text(same)
+    errors = check_errors(path)
+    assert any("HEPH-GEN-500" in e and "guidance" in e and "detail_hint" in e for e in errors)
+
+
+@pytest.mark.parametrize("field", ["guidance", "detail_hint"])
+@pytest.mark.parametrize("value", ['"   "', "[]", "[x]", "7"])
+def test_rejects_blank_or_non_string_prose(tmp_path: Path, field: str, value: str) -> None:
+    prose = {"detail_hint": "h", "guidance": "g", field: value}
+    entry = (
+        "- {code: HEPH-GEN-500, status: 500, title: t, area: GEN, "
+        f"detail_hint: {prose['detail_hint']}, guidance: {prose['guidance']}}}\n"
+    )
+    path = tmp_path / "errors.yaml"
+    path.write_text(entry)
+    errors = check_errors(path)
+    assert any("HEPH-GEN-500" in e and field in e and "non-empty string" in e for e in errors), errors

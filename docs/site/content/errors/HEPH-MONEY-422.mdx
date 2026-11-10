@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-MONEY-422 — Invalid money amount"
+---
+
+# HEPH-MONEY-422
+
+**Invalid money amount**
+
+| | |
+| --- | --- |
+| HTTP status | `422` |
+| Area | `MONEY` |
+| Problem `type` | `https://hephkit.dev/errors/HEPH-MONEY-422` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+The amount is not a valid integer minor-units string, or has more precision than its currency allows.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+A money value or decimal input was rejected. On the wire, amount must be a JSON string matching \^(0\|-?\[1-9\]\[0-9\]\*)\$, an integer count of minor units with no decimal point, no leading zeros, no plus sign and no JSON number, and it must fit in a signed 64-bit integer. The object must have exactly the members amount and currency, and currency must be a code that ISO 4217 List One gives a numeric exponent. When parsing decimal text, strict ASCII is required and input with more fractional digits than the currency allows is rejected unless every excess digit is zero or you pass an explicit rounding mode (half\_up, half\_even or down). Convert to integer minor units before sending, and never use floating point.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error index](/errors).

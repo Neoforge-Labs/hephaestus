@@ -1,0 +1,28 @@
+language: 'typescript'
+layer: 'application'
+
+tasks:
+  build:
+    command: 'bun run build'
+    inputs:
+      - 'app/**/*'
+      - 'content/**/*'
+      - 'public/**/*'
+      - 'next.config.mjs'
+      - 'mdx-components.tsx'
+      - 'package.json'
+    outputs:
+      - 'out'
+  dev:
+    command: 'bun run dev'
+    preset: 'server'
+    options:
+      cache: false
+  check:
+    command: 'bun test'
+    deps:
+      - '~:build'
+    inputs:
+      - 'tests/**/*'
+    options:
+      cache: false

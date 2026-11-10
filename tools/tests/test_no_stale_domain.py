@@ -22,6 +22,17 @@ MOVE_DOCUMENTS = frozenset(
     }
 )
 
+# The docs site publishes every ADR verbatim (tools/gen_site_pages.py), so an
+# allow-listed ADR has a generated twin under the site's content tree. It is the
+# same deliberate record, carried by the same decision to keep it; redacting the
+# copy would make the published ADR disagree with the one in the repo. Derived
+# from MOVE_DOCUMENTS rather than listed, so the two can never drift apart.
+GENERATED_ADR_PAGES = frozenset(
+    f"docs/site/content/adrs/{Path(rel).name}" for rel in MOVE_DOCUMENTS if rel.startswith("docs/adr/")
+)
+
+EXEMPT = MOVE_DOCUMENTS | GENERATED_ADR_PAGES
+
 
 def _tracked_and_new_files() -> list[str]:
     # Tracked files plus untracked-but-not-ignored ones, so the guard also covers
@@ -39,7 +50,7 @@ def _tracked_and_new_files() -> list[str]:
 def test_old_host_appears_in_no_tracked_file() -> None:
     offenders: list[str] = []
     for rel in _tracked_and_new_files():
-        if rel in MOVE_DOCUMENTS:
+        if rel in EXEMPT:
             continue
         path = REPO_ROOT / rel
         if not path.is_file():
@@ -57,3 +68,10 @@ def test_type_base_url_is_hephkit_dev_and_keeps_its_trailing_slash() -> None:
 
 def test_composed_type_matches_the_spec_example() -> None:
     assert TYPE_BASE_URL + "HEPH-VAL-422" == "https://hephkit.dev/errors/HEPH-VAL-422"
+
+
+def test_each_exempt_adr_page_is_actually_generated() -> None:
+    # If an allow-listed ADR has no published twin, the exemption covers a path
+    # that does not exist, and a real stale reference could later claim it.
+    for rel in sorted(GENERATED_ADR_PAGES):
+        assert (REPO_ROOT / rel).is_file(), f"{rel} is exempt but not generated; run tools/gen_site_pages.py"

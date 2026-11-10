@@ -227,8 +227,12 @@ Proposed copy, correctable:
   spec-mandated `/errors/<code>`. `--check` runs in CI.
 - `reference/modules.mdx` — the maturity table from `spec/modules.yaml`.
 - `reference/conventions.mdx` — **generated** from `conventions/`.
-- `reference/errors.mdx` — an index that links to `/errors/<code>`; it does not
-  duplicate the pages.
+- `errors/index.mdx` — **generated** from the same registry, so `/errors` itself
+  resolves and the sidebar folder has a landing page. The first draft had a
+  hand-written `reference/errors.mdx` instead; that duplicated every code,
+  status and title with nothing checking them, so it was dropped during
+  implementation (ledger R25). `errors/_meta.ts` is generated too, for the same
+  reason (R21).
 - `spec/` and `adrs/` — **synced** from `spec/heph-spec.md` and `docs/adr/` by
   the same generator pass, with front-matter added, so the rendered copies
   cannot drift. Synced verbatim: the repo is already public, so the site adds no
@@ -302,6 +306,25 @@ proof block and the tiles become assertions, which is the anti-goal above.
 - Test and task names, the exact link-checker, and the shape of
   `tools/dx_budget.json` beyond holding the two thresholds.
 - Copy polish throughout. The proposed hero lines are a starting point.
+
+## Phase 4 deferral, closed early (favicon and brand)
+
+**The site shipped without a favicon on purpose, and no longer does.** The
+original deferral stood on a real argument: a favicon is a brand surface, and
+picking a mark was Kelyn's decision rather than a builder's. The logo work
+settled the mark before Phase 4
+(`docs/superpowers/specs/2026-11-10-hephkit-logo-design.md`), and
+`docs/site/public/brand/` now holds `favicon.svg`, `apple-touch-icon.png` and
+`og-card.png`. The site head wires all three, so the gap is closed rather than
+deferred.
+
+Worth keeping from the deferral, because it generalises: the gap was found by
+running the dev server, not by any test. Under `next dev`, every
+`/favicon.ico` request fell through the MDX catch-all and emitted two
+`MODULE_NOT_FOUND` traces plus a 404, and the static export contained no
+`out/favicon.ico`. The site tests assert what `out/` contains; they never
+assert what a browser requests and fails to find. That is why the head wiring
+carries a test of its own rather than resting on the brand files existing.
 
 ## Review notes
 

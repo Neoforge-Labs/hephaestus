@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-MONEY-409 — Currency mismatch"
+---
+
+# HEPH-MONEY-409
+
+**Currency mismatch**
+
+| | |
+| --- | --- |
+| HTTP status | `409` |
+| Area | `MONEY` |
+| Problem `type` | `https://hephkit.dev/errors/HEPH-MONEY-409` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+This operation mixes two different currencies; both amounts must use the same currency.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+An operation combined two amounts in different currencies, such as adding USD to EUR. The core never converts. Make sure both operands carry the same currency, or convert one explicitly, at a rate and rounding you choose, before the operation. A malformed money object is HEPH-MONEY-422, not this code.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error index](/errors).

@@ -1,4 +1,4 @@
-"""One-call OpenTelemetry tracing and structured, redacted logging. Experimental.
+"""One-call OpenTelemetry tracing and structured, redacted logging. Maturity: experimental.
 
 ``setup_observability(settings, app)`` builds a tracer provider whose resource
 carries ``service.name`` and ``deployment.environment``, exports spans over OTLP

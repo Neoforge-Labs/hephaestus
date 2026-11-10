@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-WH-401 — Webhook signature invalid or expired"
+---
+
+# HEPH-WH-401
+
+**Webhook signature invalid or expired**
+
+| | |
+| --- | --- |
+| HTTP status | `401` |
+| Area | `WH` |
+| Problem `type` | `https://hephkit.dev/errors/HEPH-WH-401` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+The webhook signature is invalid or has expired.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+A webhook could not be verified. The response deliberately does not say which check failed, so work through the causes yourself. Check that the secret is the one issued for this endpoint, with any whsec\_ prefix handled as Standard Webhooks specifies. Check that the signature was computed over webhook-id, webhook-timestamp and the raw request body exactly as received, not a re-serialised copy. Check that your clock is within 300 seconds of webhook-timestamp, and that the signature is v1 followed by canonically padded base64.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error index](/errors).

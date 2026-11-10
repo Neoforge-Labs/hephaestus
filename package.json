@@ -1,0 +1,9 @@
+{
+  "//": "Root declares the workspace only, with two exceptions. engines.node exists because Vercel reads the Node major from package.json engines (it does not read .prototools); keep it equal to node in .prototools. The other is the zod override below. bun reads overrides only from the root. zod 4.6.7 breaks nextra-theme-docs' Layout schema ('expected nonoptional at children') and fails every prerender. 4.3.6 is a known-good version, NOT a bisected upper bound; the real boundary was never established. Revisit when nextra-theme-docs ships a fix.",
+  "private": true,
+  "engines": { "node": "26.x" },
+  "workspaces": ["docs/site"],
+  "overrides": {
+    "zod": "4.3.6"
+  }
+}

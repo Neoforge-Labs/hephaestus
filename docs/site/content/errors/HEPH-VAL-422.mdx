@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-VAL-422 — Validation failed"
+---
+
+# HEPH-VAL-422
+
+**Validation failed**
+
+| | |
+| --- | --- |
+| HTTP status | `422` |
+| Area | `VAL` |
+| Problem `type` | `https://hephkit.dev/errors/HEPH-VAL-422` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+The request failed validation. Each offending field and the rule it broke is listed under errors.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+The request parsed but broke a validation rule, or a JSON document could not be canonicalised (for example an integer literal above 2\^53-1, a duplicate member name or nesting deeper than 128). Fix the offending field in the request; the response lists each field and the rule it broke under errors. When your own handler rejects input, return this code with one entry per field rather than inventing a new code. It is also what signing a webhook with an unusable secret returns, which is a configuration fault, so fix the secret.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error index](/errors).
