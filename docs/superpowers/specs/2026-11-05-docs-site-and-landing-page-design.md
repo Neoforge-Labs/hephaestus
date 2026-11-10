@@ -27,10 +27,10 @@ So the two sites have two jobs:
 
 **Who is reading** (my call, from the brainstorming conversation): Kelyn in six
 months casting the next ingot, plus whoever he hands a repo to. Outsiders are
-welcome to find it — it is MIT, the repo is public, and the packages are headed
-for PyPI, crates.io and npm — but we do not court them while every module is
-`experimental`. That keeps the copy plain and lets the page publish an honest
-maturity table instead of adopting a pricing-page tone.
+welcome to find it and adopt it — it is MIT, the repo is public, and the
+packages are headed for PyPI, crates.io and npm (ADR 0019). We address them in
+plain copy, not marketing: while every module is `experimental`, the page
+publishes an honest maturity table instead of adopting a pricing-page tone.
 
 ## Goals
 
@@ -40,7 +40,7 @@ maturity table instead of adopting a pricing-page tone.
    yet built. The roadmap stays visible rather than implied.
 3. The docs carry the five-minute path, the module guides, the rendered spec,
    one page per error code, the ADR index and the roadmap.
-4. One Nextra app, one build, one domain (`heph.neoforgelabs.tech`), with
+4. One Nextra app, one build, one domain (`hephkit.dev`), with
    `/r/*.json` reserved for the Phase 4 registry.
 5. The site build is a CI gate, so docs cannot rot silently.
 6. Nothing on the site is hand-maintained where a generator can derive it from
@@ -51,8 +51,9 @@ maturity table instead of adopting a pricing-page tone.
 
 ## Non-goals
 
-- Courting external adopters: no SEO campaign, no newsletter, no blog, no
-  testimonials, no pricing.
+- Marketing: no SEO campaign, no newsletter, no blog, no testimonials, no
+  pricing. (The earlier blanket "courting external adopters" non-goal was
+  reversed by ADR 0019; addressing adopters is in scope, marketing is not.)
 - Versioned (multi-release) docs, i18n, or a search backend beyond Pagefind.
 - The registry JSON itself and the UI component docs — Phase 4.
 - Generated API reference for Go, TypeScript or Rust. Phase 1 documents what
@@ -85,7 +86,7 @@ These would make the work a failure even if the site builds and looks good:
   hand; maturity levels are enforced; conventional commits; branch
   `work/<topic>`; no AI attribution; local ports in the 54xxx block.
 - **The error-page URL is fixed by the spec.** `heph-spec` §1.4 MUSTs
-  `https://heph.neoforgelabs.tech/errors/<code>`, §1.8 makes registry entries
+  `https://hephkit.dev/errors/<code>`, §1.8 makes registry entries
   permanent, and `python/hephkit/src/hephkit/errors/__init__.py:17` ships the
   base URL. Generated pages therefore live at `content/errors/<code>.mdx` and
   serve `/errors/<code>`. `reference/` links to them; it does not own them. No
@@ -129,7 +130,7 @@ These would make the work a failure even if the site builds and looks good:
 | | Approach | Trades off |
 | --- | --- | --- |
 | **A (picked)** | One Nextra app at `docs/site/`; the landing page is its index route with a custom layout, docs in the same tree | One build, one domain, no new ADR, `public/r/` ready for Phase 4. Cost: the hero is written inside a docs theme, so the look stays close to Nextra's |
-| B | Separate Next app for the landing page, Nextra for docs | Total freedom on the front page, but two builds, two dependency trees, a rewrite layer for one domain, and it overrides a recorded design decision, so it needs an ADR. Unjustifiable for a page we agreed not to court strangers with |
+| B | Separate Next app for the landing page, Nextra for docs | Total freedom on the front page, but two builds, two dependency trees, a rewrite layer for one domain, and it overrides a recorded design decision, so it needs an ADR. Unjustifiable for a single front page that a second app and a rewrite layer would only complicate |
 | C | No landing page; the docs index does the job | Cheapest and finishes Task 15 today, but buries the ten-second promise in a tutorial, which is the thing the work is for |
 
 ### Front-page direction (decided from mockups)
@@ -209,7 +210,7 @@ Proposed copy, correctable:
 7. **Roadmap**, the seven rollout steps condensed, with "you are here" on
    Phase 1. Phases are named by capability, not by product: the front page does
    not name Collie, Domus, SAWA or NeoRx (my call — they are in the public repo's
-   ADRs already, but a marketing page naming unreleased products invites
+   ADRs already, but a public front page naming unreleased products invites
    questions nobody wants to field).
 8. **Footer:** MIT, repo, ADR index.
 
@@ -269,7 +270,7 @@ In scope: the Nextra app, the landing page, the docs tree above, the generators
 and their `--check` modes, `spec/modules.yaml`, the `guidance:` field,
 `tools/dx_budget.json`, the root bun workspace, the moon project and the CI job.
 Plus, from the decisions below: cutting the `0.1` release, and the Vercel config
-and deploy workflow that put the site on `heph.neoforgelabs.tech`.
+and deploy workflow that put the site on `hephkit.dev`.
 
 Blocking prerequisite, not in scope: Task 12's `compose/` fragments land as
 their own commit first (decision 3). The tutorial cannot be verified before
@@ -306,26 +307,24 @@ proof block and the tiles become assertions, which is the anti-goal above.
   `tools/dx_budget.json` beyond holding the two thresholds.
 - Copy polish throughout. The proposed hero lines are a starting point.
 
-## Deferred to Phase 4 (brand presets)
+## Phase 4 deferral, closed early (favicon and brand)
 
-**The site has no favicon, deliberately.** There is no `public/favicon.ico`, no
-`app/favicon.ico` and no `app/icon.*`. Two consequences to expect until Phase 4
-supplies one:
+**The site shipped without a favicon on purpose, and no longer does.** The
+original deferral stood on a real argument: a favicon is a brand surface, and
+picking a mark was Kelyn's decision rather than a builder's. The logo work
+settled the mark before Phase 4
+(`docs/superpowers/specs/2026-11-10-hephkit-logo-design.md`), and
+`docs/site/public/brand/` now holds `favicon.svg`, `apple-touch-icon.png` and
+`og-card.png`. The site head wires all three, so the gap is closed rather than
+deferred.
 
-- Under `next dev`, every `/favicon.ico` request falls through the MDX catch-all
-  and emits two `MODULE_NOT_FOUND` traces plus a 404. **This is expected output,
-  not a bug** — worth knowing in a repo that treats noisy output as a defect,
-  so nobody spends an afternoon chasing it.
-- The static export contains no `out/favicon.ico`, so every browser that asks
-  gets a 404.
-
-Left open on purpose: a favicon is a brand surface, Phase 4 owns the brand
-presets, and picking a mark is Kelyn's decision rather than a builder's. When it
-lands, add a test asserting `out/favicon.ico` exists, so the gap cannot reopen.
-
-Found by running the dev server, not by any test. The site tests assert what
-`out/` contains; they never assert what a browser requests and fails to find.
-That distinction is worth carrying into Phase 4's tests.
+Worth keeping from the deferral, because it generalises: the gap was found by
+running the dev server, not by any test. Under `next dev`, every
+`/favicon.ico` request fell through the MDX catch-all and emitted two
+`MODULE_NOT_FOUND` traces plus a 404, and the static export contained no
+`out/favicon.ico`. The site tests assert what `out/` contains; they never
+assert what a browser requests and fails to find. That is why the head wiring
+carries a test of its own rather than resting on the brand files existing.
 
 ## Review notes
 

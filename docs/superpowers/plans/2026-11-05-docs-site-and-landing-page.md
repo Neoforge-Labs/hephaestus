@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship `heph.neoforgelabs.tech` — a command-first landing page and the Phase 1 docs — as one Nextra app whose every claim is generated from `spec/` or from the tutorial script CI runs.
+**Goal:** Ship `hephkit.dev` — a command-first landing page and the Phase 1 docs — as one Nextra app whose every claim is generated from `spec/` or from the tutorial script CI runs.
 
 **Architecture:** One Nextra 4 app at `docs/site/`, static-exported, with the landing page as its index route and MDX docs under `content/`. Nothing on the site is hand-typed where it can be derived: error pages come from `spec/errors.yaml`, the maturity ledger from `spec/modules.yaml`, the budget tiles from `tools/dx_budget.json`, and the hero's commands from markers inside `examples/hello/tutorial_test.sh`. Python generators own every derived page and all run `--check` in CI, so a stale page fails the build.
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Tool versions are pinned and must not be changed: bun 1.4.4, node 26, python 3.12, uv 0.13.6 (`.prototools`); Rust via `rust-toolchain.toml`.
-- Error-page URLs are `https://heph.neoforgelabs.tech/errors/<code>` — `heph-spec` §1.4 MUST, already shipped as `hephkit.errors.TYPE_BASE_URL`. Pages live at `docs/site/content/errors/<code>.mdx`; nothing else may own that path.
+- Error-page URLs are `https://hephkit.dev/errors/<code>` — `heph-spec` §1.4 MUST, already shipped as `hephkit.errors.TYPE_BASE_URL`. Pages live at `docs/site/content/errors/<code>.mdx`; nothing else may own that path.
 - Error codes match `^HEPH-[A-Z]{2,6}-\d{3}$` and live only in `spec/errors.yaml`. Registry entries are permanent (§1.8).
 - Generated files are never edited by hand: `_codes.py`, `conventions.py`, and every page produced by `gen_error_pages.py` and `gen_site_pages.py`. Each carries a "GENERATED FILE - do not edit by hand" header and a `--check` mode.
 - Maturity levels are `experimental`, `beta`, `stable`. New work starts `experimental`; nothing below `stable` goes in a money path.
@@ -112,6 +112,10 @@ Everything the landing page prints must resolve, so the release comes first. Thi
 - Create: `package.json`, `bun.lock`, `docs/site/package.json`, `docs/site/next.config.mjs`, `docs/site/mdx-components.tsx`, `docs/site/tsconfig.json`, `docs/site/app/layout.tsx`, `docs/site/app/[[...mdxPath]]/page.tsx`, `docs/site/content/index.mdx`, `docs/site/content/_meta.ts`, `docs/site/moon.yml`, `docs/site/public/r/.gitkeep`
 - Modify: `.moon/workspace.yml`, `.gitignore`
 
+`docs/site/public/brand/` already exists (the mark, favicon, avatar and lockup from the logo design), so the Nextra scaffold must merge into the directory rather than refuse or clobber it.
+
+The site head must wire them in: `<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">`, `<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">` and an `og:image` of `/brand/og-card.png` (the files are `public/brand/favicon.svg`, `public/brand/apple-touch-icon.png` and `public/brand/og-card.png`). Without this the social preview is blank even though the card exists.
+
 **Interfaces:**
 - Produces: `bun run --cwd docs/site build` → static export in `docs/site/out/`, including `out/_pagefind/pagefind.js`. moon project `docs-site` with `build`, `dev` and `check` tasks.
 - Consumed by: Tasks 5–8 write MDX into `docs/site/content/`.
@@ -185,7 +189,7 @@ Everything the landing page prints must resolve, so the release comes first. Thi
 
 - [ ] **Step 1: Write the failing tests** — `examples/hello/tests/test_app.py`:
   - `/price?amount=10.2&currency=KES` → 200 `{"price": {"amount": "1020", "currency": "KES"}}`
-  - `/price?amount=1,000&currency=KES` → 422 problem+json with `code == "HEPH-MONEY-422"` and `type == "https://heph.neoforgelabs.tech/errors/HEPH-MONEY-422"`
+  - `/price?amount=1,000&currency=KES` → 422 problem+json with `code == "HEPH-MONEY-422"` and `type == "https://hephkit.dev/errors/HEPH-MONEY-422"`
   - `/split?amount=1.00&currency=KES&ways=3` → `parts == ["34","33","33"]`
   - a request emits a span carrying `money.currency == "KES"`
   And `tools/tests/test_gen_quickstart.py`: `test_commands_come_from_the_script` — the extracted commands equal the lines between the markers in `tutorial_test.sh`; `test_marker_missing_is_an_error`; `test_check_detects_drift`.
@@ -254,7 +258,7 @@ The only substantial hand-written prose on the site. It comes after the landing 
 
 - [ ] **Step 1: Write the failing test** — extend `tools/tests/test_release_config.py` (which already asserts CI shape) with `test_docs_job_runs_every_generator_check`: `ci.yml` has a `docs` job, and `docs-ci.yml` runs `gen_error_pages.py --check`, `gen_site_pages.py --check`, `gen_quickstart.py --check` and the site build.
 - [ ] **Step 2: Run to verify failure** — `uv run --with pyyaml pytest tools/tests/test_release_config.py -v` → FAIL.
-- [ ] **Step 3: Implement** — `docs-ci.yml`: checkout with `persist-credentials: false`, `oven-sh/setup-bun` pinned by SHA at 1.4.4, `bun install --frozen-lockfile` at the root, the four checks above, `bun test --cwd docs/site`, an internal-link check over `docs/site/out/` that fails on any relative href with no file behind it (the design's link check; Task 5 already covers the `/errors/<code>` set specifically), and upload `docs/site/out` as an artifact. In `ci.yml`, add `docs: uses: ./.github/workflows/docs-ci.yml`, and pass `enforce-budget: ${{ github.event_name == 'schedule' }}` to `compose-boot`, which runs `tools/dx_budget.sh` with `--enforce` only when true — a 60-second assertion on a shared runner would otherwise make the advertised number flaky. Add `docs/site/vercel.json` and document the project settings Kelyn must create (root directory `docs/site`, build command `bun run build`, output directory `out`, plus the CNAME for `heph.neoforgelabs.tech`); the Git integration builds it, so no deploy token is added to this repo.
+- [ ] **Step 3: Implement** — `docs-ci.yml`: checkout with `persist-credentials: false`, `oven-sh/setup-bun` pinned by SHA at 1.4.4, `bun install --frozen-lockfile` at the root, the four checks above, `bun test --cwd docs/site`, an internal-link check over `docs/site/out/` that fails on any relative href with no file behind it (the design's link check; Task 5 already covers the `/errors/<code>` set specifically), and upload `docs/site/out` as an artifact. In `ci.yml`, add `docs: uses: ./.github/workflows/docs-ci.yml`, and pass `enforce-budget: ${{ github.event_name == 'schedule' }}` to `compose-boot`, which runs `tools/dx_budget.sh` with `--enforce` only when true — a 60-second assertion on a shared runner would otherwise make the advertised number flaky. Add `docs/site/vercel.json` and document the project settings Kelyn must create (root directory `docs/site`, build command `bun run build`, output directory `out`, plus an apex A or ALIAS record for `hephkit.dev` (not a CNAME: the site sits at the apex, and an apex cannot be a CNAME)); the Git integration builds it, so no deploy token is added to this repo.
 - [ ] **Step 4: Verify** — tests PASS; `uv run tools/gen_error_pages.py --check && uv run tools/gen_site_pages.py --check && uv run tools/gen_quickstart.py --check` → all exit 0; `bun run --cwd docs/site build && bun test --cwd docs/site` → PASS.
 - [ ] **Step 5: Update the repo's docs** — add the site's `check` and build to `CLAUDE.md`'s "Verify before you claim" list; add the site URL to `README.md`'s "Where to look"; amend the Phase 1 plan's Task 15 to point at `content/` rather than the stale `pages/`.
 - [ ] **Step 6: Commit** — `ci(docs): build, check and deploy the docs site`

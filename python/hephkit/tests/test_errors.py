@@ -20,7 +20,7 @@ from hephkit.hashing import HashingError, canonical_json
 from hephkit.money import Money, MoneyError
 from hephkit.signatures import SignatureError, verify
 
-TYPE_BASE = "https://heph.neoforgelabs.tech/errors/"
+TYPE_BASE = "https://hephkit.dev/errors/"
 PROBLEM = "application/problem+json"
 SECRET_TEXT = "db password hunter2 at /srv/app/secret.py"
 

@@ -30,6 +30,15 @@ from typing import Any
 import yaml
 from check_registry import check_errors
 
+# The problem ``type`` host is normative (heph-spec 1.4, ADR 0019) and already
+# ships as ``hephkit.errors.TYPE_BASE_URL``. Import that value instead of
+# keeping a third copy of the host: a page that disagreed with the wheel would
+# send readers to a URL the kit never emits. ADR 0019's move is exactly the
+# drift this prevents.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python" / "hephkit" / "src"))
+
+from hephkit.errors import TYPE_BASE_URL  # noqa: E402 - needs the path above
+
 PAGES_RELDIR = Path("docs/site/content/errors")
 META_RELPATH = PAGES_RELDIR / "_meta.ts"
 INDEX_RELPATH = PAGES_RELDIR / "index.mdx"
@@ -64,7 +73,7 @@ title: {json.dumps(f"{code} — {entry['title']}", ensure_ascii=False)}
 | --- | --- |
 | HTTP status | `{entry["status"]}` |
 | Area | `{entry["area"]}` |
-| Problem `type` | `https://heph.neoforgelabs.tech/errors/{code}` |
+| Problem `type` | `{TYPE_BASE_URL}{code}` |
 
 ## What the caller sees
 
@@ -101,7 +110,7 @@ title: "Error codes"
 # Error codes
 
 Every problem+json error body the kit emits carries a `type` URL of the form
-`https://heph.neoforgelabs.tech/errors/<code>`. Each code has its own page with
+`{TYPE_BASE_URL}<code>`. Each code has its own page with
 the caller-facing message and developer guidance.
 
 | Code | Status | Title |

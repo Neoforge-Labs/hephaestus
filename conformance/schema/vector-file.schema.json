@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://heph.neoforgelabs.tech/conformance/vector-file.schema.json",
+  "$id": "https://hephkit.dev/conformance/vector-file.schema.json",
   "title": "Hephaestus conformance vector file",
   "description": "Contract for every conformance/<area>/<suite>.json. An error expectation is {\"error\": \"<HEPH code>\"}; the checker also confirms the code is in spec/errors.yaml.",
   "type": "object",
@@ -26,7 +26,7 @@
       ]
     },
     "spec": {
-      "const": "0.2.0"
+      "const": "0.3.0"
     },
     "description": {
       "type": "string"

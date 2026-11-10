@@ -34,9 +34,22 @@ test('test_search_index_has_indexed_pages', () => {
   expect(pages).toBeGreaterThan(0)
 })
 
+test('test_exported_head_wires_the_brand_assets', () => {
+  // The brand files existing is not the same as the site using them. The
+  // missing favicon was found by running the dev server, never by a test;
+  // this is that gap closed, asserted on the exported HTML a browser gets.
+  const html = readFileSync(join(out, 'index.html'), 'utf8')
+  expect(html).toContain('/brand/favicon.svg')
+  expect(html).toContain('/brand/apple-touch-icon.png')
+  expect(html).toContain('https://hephkit.dev/brand/og-card.png')
+  for (const asset of ['favicon.svg', 'apple-touch-icon.png', 'og-card.png']) {
+    expect(existsSync(join(out, 'brand', asset))).toBe(true)
+  }
+})
+
 test('test_static_export_is_not_older_than_its_sources', () => {
   const built = statSync(join(out, 'index.html')).mtimeMs
-  for (const dir of ['content', 'app']) {
+  for (const dir of ['content', 'app', 'public']) {
     const latest = newest(join(site, dir))
     // A source newer than the export means out/ is stale: rebuild before testing.
     expect(`${latest.path} ${latest.mtime > built ? 'is newer than out/index.html' : 'is not newer'}`).toBe(

@@ -4,11 +4,11 @@
 title: "heph-spec"
 ---
 
-> **Two version numbers.** This page is version 0.2.0 of the specification. The packages (`hephkit`, `hephkit-core` and the Go module) are versioned independently: a change to the specification bumps the spec version, while package releases follow their own commit history, so the two numbers need not match. Package versions are published with the project's releases.
+> **Two version numbers.** This page is version 0.3.0 of the specification. The packages (`hephkit`, `hephkit-core` and the Go module) are versioned independently: a change to the specification bumps the spec version, while package releases follow their own commit history, so the two numbers need not match. Package versions are published with the project's releases.
 
 # heph-spec
 
-- **Version:** 0.2.0
+- **Version:** 0.3.0
 - **Status:** Draft for implementation in Phase 1; every module implementing it is `experimental`.
 - **Registries:** `spec/errors.yaml` (error codes), `conventions/attributes.yaml` (telemetry attributes), `spec/currencies.yaml` (ISO 4217 minor units, with its publication pinned by `spec/currencies.source.yaml`).
 
@@ -16,6 +16,7 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 
 ## Decisions this version settles
 
+- The problem `type` host is `hephkit.dev`: `type` is `https://hephkit.dev/errors/<code>` (1.4, ADR 0019).
 - Idempotency records are scoped by `(tenant id or "", key)`, so keys never collide across tenants (2.3).
 - A fingerprint mismatch returns `HEPH-IDEMP-422` even while the original is in flight (2.6).
 - Fingerprint `path` is the raw request target including the query string, never normalised (2.2).
@@ -37,7 +38,7 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 
 1.3. `code` MUST be a code from `spec/errors.yaml`. Codes match `^HEPH-[A-Z]{2,6}-[0-9]{3}$` (ASCII digits only; the whole string must match, with no trailing newline); the middle segment is the entry's `area`. Implementations MUST NOT emit a code absent from the registry.
 
-1.4. `type` MUST be `https://heph.neoforgelabs.tech/errors/<code>`, for example `https://heph.neoforgelabs.tech/errors/HEPH-VAL-422`.
+1.4. `type` MUST be `https://hephkit.dev/errors/<code>`, for example `https://hephkit.dev/errors/HEPH-VAL-422`.
 
 1.5. `title` MUST equal the registry `title`. `status` MUST equal the registry `status` and the HTTP status line.
 
@@ -51,7 +52,7 @@ Example:
 
 ```json
 {
-  "type": "https://heph.neoforgelabs.tech/errors/HEPH-IDEMP-409",
+  "type": "https://hephkit.dev/errors/HEPH-IDEMP-409",
   "title": "Original request still in flight",
   "status": 409,
   "detail": "A request with this Idempotency-Key is still being processed.",

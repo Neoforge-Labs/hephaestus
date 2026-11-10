@@ -5,7 +5,7 @@ index in `out/_pagefind`). It is served as pre-built files; nothing re-renders a
 deploy time.
 
 Every error response from `hephkit` carries
-`type: https://heph.neoforgelabs.tech/errors/<code>` (`heph-spec` section 1.4), so
+`type: https://hephkit.dev/errors/<code>` (`heph-spec` section 1.4, ADR 0019), so
 this site must be reachable at that domain with extensionless URLs.
 
 ## Deploying (your own accounts; nobody else can do this)
@@ -46,22 +46,27 @@ the site on every push, which is the design's choice.
 
 ### 2. Add the custom domain
 
-1. In the project, **Settings > Domains**, add `heph.neoforgelabs.tech`.
-2. At the DNS provider for `neoforgelabs.tech`, add the record Vercel shows. For
-   a subdomain that is a `CNAME` named `heph` pointing at the target Vercel gives
-   you (typically `cname.vercel-dns.com`). Use the value on the Domains screen if
-   it differs.
+The host is `hephkit.dev`, at the apex with no `www` (ADR 0019). Register the
+domain first; it is not a subdomain of anything we already own.
+
+1. In the project, **Settings > Domains**, add `hephkit.dev`.
+2. At the DNS provider for `hephkit.dev`, add the record Vercel shows. At the
+   apex that is an `A` record (or an `ALIAS`/`ANAME` if the provider offers one),
+   **not a `CNAME`** — DNS does not allow a CNAME at a zone apex. Use the value
+   on the Domains screen; Vercel's apex A record is typically `76.76.21.21`.
 3. Wait for Vercel to report the domain as valid and issue the certificate.
+   `.dev` is HSTS-preloaded, so the site is unreachable over plain HTTP until
+   the certificate exists — a failure before then is expected, not a misconfig.
 
 ### 3. Check it
 
 After the first production deploy, these should all return 200:
 
 ```
-curl -sI https://heph.neoforgelabs.tech/errors/HEPH-MONEY-422
-curl -sI https://heph.neoforgelabs.tech/errors
-curl -sI https://heph.neoforgelabs.tech/adrs
-curl -sI https://heph.neoforgelabs.tech/
+curl -sI https://hephkit.dev/errors/HEPH-MONEY-422
+curl -sI https://hephkit.dev/errors
+curl -sI https://hephkit.dev/adrs
+curl -sI https://hephkit.dev/
 ```
 
 and `/errors/HEPH-MONEY-422.html` should answer 308 to the extensionless URL.

@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in Hephaestus behaves differently from the spec or from what you expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Behaviour is defined in `spec/heph-spec.md` and pinned by the vectors in
+        `conformance/`. If you can point at the spec section or vector that
+        disagrees with what you saw, please do. For security problems, do not
+        use this form; see `SECURITY.md`.
+  - type: input
+    id: module
+    attributes:
+      label: Module
+      description: Which module is affected, e.g. money, ledger, idempotency, the `heph` CLI.
+    validations:
+      required: true
+  - type: dropdown
+    id: binding
+    attributes:
+      label: Language binding
+      description: Where you hit it.
+      options:
+        - Rust (hephkit-core)
+        - Python (hephkit)
+        - Go (CLI or service kit)
+        - TypeScript (@hephkit/*)
+        - Compose, Terraform or CI
+        - Templates (heph new)
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Package version or commit SHA.
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+      description: Steps to reproduce, the output you saw, and what the spec says should happen.
+    validations:
+      required: true
+  - type: dropdown
+    id: vector
+    attributes:
+      label: Can you share a failing vector?
+      description: |
+        A JSON input and expected output in the shape of the files under
+        `conformance/`, with the expected value taken from an RFC, a reference
+        package or a hand derivation, not from running our code.
+      options:
+        - "Yes, it's attached"
+        - "Yes, I can write one"
+        - "No"
+    validations:
+      required: true
