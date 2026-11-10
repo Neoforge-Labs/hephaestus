@@ -55,7 +55,7 @@ import standardwebhooks
 from standardwebhooks import webhooks
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = "0.2.0"
+SPEC = "0.3.0"
 VAL = "HEPH-VAL-422"
 WH = "HEPH-WH-401"
 

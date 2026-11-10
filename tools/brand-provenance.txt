@@ -1,0 +1,27 @@
+# Provenance of the brand rasters in docs/site/public/brand/ (apple-touch-icon.png and
+# og-card.png). Written by tools/gen_brand_raster.py; never edit by hand.
+#
+# WHY THIS IS A HASH FILE AND NOT A RE-RENDER. The PNGs are drawn from the SVGs with
+# Pillow, and text rasterisation (FreeType, resampling) is not reproducible across
+# platforms: the same SVGs give different bytes on macOS and on Linux. A check that
+# re-rendered and compared bytes would fail for whoever is not on the machine that
+# generated the files, and regenerating there would flip the bytes back for the next
+# person. So, as spec/currencies.source.yaml does for the SIX list, provenance is pinned
+# by sha256 instead:
+#
+#   source  sha256 of an input the PNGs are derived from
+#   output  sha256 of a committed PNG
+#
+#   uv run tools/gen_brand_raster.py --check
+#
+# fails if a source no longer hashes to what is recorded (an SVG was edited and the
+# rasters were not regenerated) or if a PNG no longer hashes to what is recorded (a PNG
+# was edited by hand). After editing an SVG, run `uv run tools/gen_brand_raster.py`
+# and commit the PNGs together with this file.
+source fba2a365726bcba768ad2ccc407629fda7df4ca2bc52c33b6b38e1cd92ff8c48 mark.svg
+source 31984d1c9cfc2c343b8158bd0cdfe2018fb2819967cd36b2304161d187e3db6b favicon.svg
+source c544d7ea0db12b48d519f6e191dc8eb52b23f0fac2f0a77f7fe1c33e7d8c6e65 avatar.svg
+source 91ad290378bb608d057c695743ca2526993d6f7784b272310c9a6e27861971c2 lockup.svg
+source 4fb3b6f69fd7dd05037a7f9c131ff6bd72add9fa28d03b8cb0db7eaf0092da70 palette.json
+output 486b5c9ae16fb2b64ef8d698ffedc28b18fbcbed4c04e8536c836266fec5f0a9 apple-touch-icon.png
+output 6052afca6c8250b41729ceacdd81685a012327547a71a84a77ea29952e936a83 og-card.png

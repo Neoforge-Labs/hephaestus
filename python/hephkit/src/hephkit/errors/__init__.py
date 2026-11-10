@@ -14,7 +14,7 @@ from hephkit.errors._codes import DETAIL_HINTS, REGISTRY
 
 __all__ = ["DETAIL_HINTS", "REGISTRY", "TYPE_BASE_URL", "HephError", *[n for n in dir(_codes) if n[:1].isupper() and n != "Final"]]
 
-TYPE_BASE_URL = "https://heph.neoforgelabs.tech/errors/"
+TYPE_BASE_URL = "https://hephkit.dev/errors/"
 
 # Members of the problem+json body that an extension may not overwrite.
 RESERVED_MEMBERS = frozenset({"type", "title", "status", "detail", "code", "trace_id"})
