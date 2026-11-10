@@ -51,14 +51,59 @@ jobs:
             echo "::error title=RELEASE_PLEASE_TOKEN is not set::Add a PAT or App token as the repository secret RELEASE_PLEASE_TOKEN. The default GITHUB_TOKEN cannot be used; the comment below says why."
             exit 1
           fi
-          # `push` is false unless the token can write refs, which is what
-          # release-please needs to create its release branch.
-          push=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.permissions.push' 2>&1) || {
-            echo "::error title=RELEASE_PLEASE_TOKEN cannot read this repository::gh api said: ${push}. The token is set but cannot see ${GITHUB_REPOSITORY}. For an organisation-owned repository a fine-grained PAT also needs the organisation to allow it: check Settings -> Personal access tokens for a pending or denied request. A GitHub App installation token avoids that policy entirely and does not expire."
+          if [ -z "${GITHUB_RUN_ID:-}" ] || [ -z "${GITHUB_RUN_ATTEMPT:-}" ] || [ -z "${GITHUB_SHA:-}" ]; then
+            echo "::error title=Cannot name a probe ref::GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT and GITHUB_SHA must all be set. The probe ref is named from the run and attempt so that it cannot collide with another run; without them it would have to use a shared name."
+            exit 1
+          fi
+          # Readable at all? This separates "the token cannot see the
+          # repository" from "it can see it but cannot write", which need
+          # different fixes. It deliberately does NOT read `.permissions.push`:
+          # that field is the authenticated USER's role, so a fine-grained PAT
+          # whose owner has push access reports true while holding no
+          # Contents: write. Release run 42117513449 failed twice behind
+          # exactly that false assurance.
+          seen=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.full_name' 2>&1) || {
+            echo "::error title=RELEASE_PLEASE_TOKEN cannot read this repository::gh api said: ${seen}. The token is set but cannot see ${GITHUB_REPOSITORY}. For an organisation-owned repository a fine-grained PAT also needs the organisation to allow it: check Settings -> Personal access tokens for a pending or denied request. A GitHub App installation token avoids that policy entirely and does not expire."
             exit 1
           }
-          if [ "$push" != "true" ]; then
-            echo "::error title=RELEASE_PLEASE_TOKEN cannot write to this repository::permissions.push is '${push}'. release-please must create a branch, so the token needs Contents: Read and write (ref creation) as well as Pull requests: Read and write. If both are already granted and this still fails, the organisation has not approved the token: check Settings -> Personal access tokens."
+          # Prove the capability by performing it: create a git ref with this
+          # token, which is what release-please does to open its release
+          # branch, then delete it. The name carries the run id (unique per
+          # workflow run, so concurrent runs differ) and the attempt (so a
+          # re-run differs from its first attempt). It is not under work/**,
+          # the only branch prefix ci.yml triggers on.
+          probe="release-preflight-probe/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          attempted=0
+          created=0
+          # Runs on every way out of the step: success, failure, set -e, and
+          # INT/TERM (a cancelled run). A delete that fails is reported but
+          # never changes the exit status, so it can neither mask a refused
+          # create nor fail a token that has just proved it can write. If
+          # nothing was created the delete is still attempted, silently,
+          # because a create that errors on the wire may have landed; a 404 or
+          # 422 there is expected.
+          cleanup() {
+            status=$?
+            if [ "$attempted" = 1 ]; then
+              if gone=$(gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${probe}" 2>&1); then
+                :
+              elif [ "$created" = 1 ]; then
+                echo "::warning title=Probe branch was not deleted::Could not delete refs/heads/${probe} from ${GITHUB_REPOSITORY}: ${gone}. It is harmless but should be removed by hand."
+              fi
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          attempted=1
+          got=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" -f "ref=refs/heads/${probe}" -f "sha=${GITHUB_SHA}" --jq '.object.sha' 2>&1) || {
+            echo "::error title=RELEASE_PLEASE_TOKEN cannot create a git ref::Creating refs/heads/${probe} in ${GITHUB_REPOSITORY} failed: ${got}. release-please must create a branch, so the token needs Contents: Read and write (ref creation), and it also needs Pull requests: Read and write to open the release PR. If both are already granted and this still fails, the organisation has not approved the token: check Settings -> Personal access tokens for a pending or denied request. A GitHub App installation token avoids the organisation-approval path and does not expire."
+            exit 1
+          }
+          created=1
+          if [ "$got" != "$GITHUB_SHA" ]; then
+            echo "::error title=RELEASE_PLEASE_TOKEN created a ref that points elsewhere::Asked for refs/heads/${probe} at ${GITHUB_SHA} but the API reported '${got}'. The preflight will not vouch for a token whose result is not what release-please relies on."
             exit 1
           fi
           echo "token can write to ${GITHUB_REPOSITORY}"
