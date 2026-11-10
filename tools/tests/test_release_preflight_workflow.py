@@ -153,12 +153,16 @@ def test_a_token_that_cannot_create_a_ref_fails_the_preflight(tmp_path: Path) ->
     assert CREATE_CALL in calls, calls
 
 
-def test_the_refusal_explains_org_approval_and_the_app_alternative(tmp_path: Path) -> None:
+def test_the_refusal_explains_the_apps_permissions_and_pending_acceptance(tmp_path: Path) -> None:
+    """With an app, the live trap is different from a PAT's. Changing an app's
+    permissions does not change what an existing installation may do until that
+    installation accepts them, so a correctly configured app can still be
+    refused. The message has to say so, or the reader re-checks settings that
+    already look right."""
     _, output, _ = run_step(tmp_path, create="refused")
     assert "Contents: Read and write" in output
     assert "Pull requests: Read and write" in output
-    assert "Settings -> Personal access tokens" in output, "org approval is the live cause here"
-    assert "GitHub App" in output and "does not expire" in output
+    assert "accept" in output.lower(), "pending permission acceptance is the live cause here"
     assert REPO in output
 
 
@@ -235,14 +239,14 @@ def test_a_missing_run_identity_fails_rather_than_probing_a_shared_name(tmp_path
 def test_an_unset_token_still_fails_with_its_own_message_and_never_calls_gh(tmp_path: Path) -> None:
     code, output, calls = run_step(tmp_path, token="")
     assert code == 1, output
-    assert "RELEASE_PLEASE_TOKEN is not set" in output
+    assert "release app is not configured" in output
     assert calls == [], calls
 
 
 def test_a_token_that_cannot_read_the_repo_still_fails_with_its_own_message(tmp_path: Path) -> None:
     code, output, calls = run_step(tmp_path, read="dead")
     assert code == 1, output
-    assert "RELEASE_PLEASE_TOKEN cannot read this repository" in output
+    assert "cannot read this repository" in output
     assert "Not Found" in output, "gh's own words must be shown"
     assert not any(c.startswith(("POST", "DELETE")) for c in calls), "nothing to probe or clean up"
 
