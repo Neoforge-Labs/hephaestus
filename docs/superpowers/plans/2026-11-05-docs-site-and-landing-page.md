@@ -104,6 +104,8 @@ Everything the landing page prints must resolve, so the release comes first. Thi
 - Create: `package.json`, `bun.lock`, `docs/site/package.json`, `docs/site/next.config.mjs`, `docs/site/mdx-components.tsx`, `docs/site/tsconfig.json`, `docs/site/app/layout.tsx`, `docs/site/app/[[...mdxPath]]/page.tsx`, `docs/site/content/index.mdx`, `docs/site/content/_meta.ts`, `docs/site/moon.yml`, `docs/site/public/r/.gitkeep`
 - Modify: `.moon/workspace.yml`, `.gitignore`
 
+`docs/site/public/brand/` already exists (the mark, favicon, avatar and lockup from the logo design), so the Nextra scaffold must merge into the directory rather than refuse or clobber it.
+
 **Interfaces:**
 - Produces: `bun run --cwd docs/site build` → static export in `docs/site/out/`, including `out/_pagefind/pagefind.js`. moon project `docs-site` with `build`, `dev` and `check` tasks.
 - Consumed by: Tasks 5–8 write MDX into `docs/site/content/`.

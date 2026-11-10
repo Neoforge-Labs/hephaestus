@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="hephkit">
+  <!-- Primary mark, for dark backgrounds: a four-point strike punched OUT of a solid plate.
+       Light background: change the plate's fill below from #C2884A to #8A5A24 (palette.json "bronze-deep"). -->
+  <title>hephkit</title>
+  <defs>
+    <mask id="heph-mark" maskUnits="userSpaceOnUse" x="0" y="0" width="96" height="96">
+      <rect width="96" height="96" fill="#fff"/>
+      <path d="M48 18 L55 41 L78 48 L55 55 L48 78 L41 55 L18 48 L41 41 Z" fill="#000"/>
+    </mask>
+  </defs>
+  <rect x="10" y="10" width="76" height="76" rx="18" fill="#C2884A" mask="url(#heph-mark)"/>
+</svg>

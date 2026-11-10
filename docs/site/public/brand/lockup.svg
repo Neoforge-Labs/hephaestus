@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 302 96" width="302" height="96" role="img" aria-label="hephkit">
+  <!-- Mark plus the lowercase wordmark, for dark backgrounds. The wordmark is live text in a
+       system sans stack, so no font is embedded or downloaded.
+       Light background: change the plate fill from #C2884A to #8A5A24 and the wordmark fill
+       from #F5F0E8 to #0C0A09 (the two fill="" values below; see palette.json). -->
+  <title>hephkit</title>
+  <defs>
+    <mask id="heph-lockup" maskUnits="userSpaceOnUse" x="0" y="0" width="96" height="96">
+      <rect width="96" height="96" fill="#fff"/>
+      <path d="M48 18 L55 41 L78 48 L55 55 L48 78 L41 55 L18 48 L41 41 Z" fill="#000"/>
+    </mask>
+  </defs>
+  <rect x="10" y="10" width="76" height="76" rx="18" fill="#C2884A" mask="url(#heph-lockup)"/>
+  <text x="104" y="65" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="52" font-weight="700" letter-spacing="-0.03em" fill="#F5F0E8">hephkit</text>
+</svg>
