@@ -46,7 +46,13 @@ Everything the landing page prints must resolve, so the release comes first. Thi
 
 **Interfaces:**
 - Produces: `hephkit` on PyPI at the first released version; tags `v<X.Y.Z>` and `go/v<X.Y.Z>`; `heph` installable with `go install github.com/Neoforge-Labs/hephaestus/go/cmd/heph@v<X.Y.Z>`.
-- **The version is not `0.1.0`.** `.release-please-manifest.json` already records `0.1.0` as released for all five components, and `work/phase-1` carries two breaking commits (`feat(money)!: generate the full ISO 4217 currency table`, `feat(money)!: accept value-preserving trailing zeros`). On a 0.x manifest release-please bumps the minor for a breaking change, so the release PR will propose **0.2.0**. Later tasks must not hard-code a version: the tutorial prints `uv add hephkit` unpinned, and Task 1 Step 4 verifies whatever release-please actually cut. PyPI version numbers cannot be reused, so settle the number before merging the release PR, not after.
+- **The version is not `0.1.0`, and the reason is a config flag, not a default.** `.release-please-manifest.json` records `0.1.0` as released for all five components, and Phase 1 carries two breaking commits (`feat(money)!: generate the full ISO 4217 currency table`, `feat(money)!: accept value-preserving trailing zeros`).
+
+  An earlier revision of this plan claimed release-please bumps the *minor* for a breaking change below 1.0.0. **That was wrong.** Release-please's default for a 0.x version is to bump a breaking change straight to **1.0.0**, and the first release run (42096862010) duly computed 1.0.0 across all five components. Publishing that would have asserted a committed API on the first ever release, which ADR 0015 forbids — everything in Phase 1 ships `experimental`, and `stable` requires the coverage gate, two production ingots and passing ecosystem CI, none of which exist.
+
+  `bump-minor-pre-major: true` in `release-please-config.json` (added in `7ac0937`) is what makes the first release **0.2.0**, and `tools/tests/test_release_config.py` pins it with that reasoning so it cannot be dropped back to the default silently. **Do not remove that flag**, and do not restate the old reasoning: the number is 0.2.0 because the flag is set, not because the tool defaults that way.
+
+  Later tasks must not hard-code a version: the tutorial prints `uv add hephkit` unpinned, and Task 1 Step 4 verifies whatever release-please actually cut. PyPI version numbers cannot be reused, so settle the number before merging the release PR, not after.
 
 - [ ] **Step 1: Prerequisite (Kelyn, manual)** — configure the PyPI trusted publisher for `hephkit`, pointing at `Neoforge-Labs/hephaestus` and the `release.yml` workflow. Nothing downstream works until this exists; stop and ask rather than working around it.
 - [ ] **Step 2: Merge `work/phase-1` to `main`** so release-please opens its release PR. Confirm `compose/` is committed first (Task 12 of the Phase 1 plan — the design's blocking prerequisite).
