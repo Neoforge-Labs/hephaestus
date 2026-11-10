@@ -22,7 +22,7 @@ the site on every push, which is the design's choice.
 3. Leave **Framework Preset**, build command, output directory and install
    command alone. They come from [`/vercel.json`](../../vercel.json), which sets
    framework `null` (not Next.js), install `bunx bun@1.4.4 install --frozen-lockfile`,
-   build `bunx bun@1.4.4 run --cwd docs/site build`, output `docs/site/out`, and
+   build `bun run --cwd docs/site build`, output `docs/site/out`, and
    `cleanUrls: true` so `/errors/HEPH-MONEY-422` serves
    `out/errors/HEPH-MONEY-422.html`.
 4. Set the production branch to `main`.
@@ -31,11 +31,16 @@ the site on every push, which is the design's choice.
      (`26.x`), which overrides the Node.js Version project setting. Vercel does
      not read `.prototools`. Keep `engines.node` equal to `node` in `.prototools`.
      Vercel offers 26.x, 24.x and 22.x; 26.x is also its default.
-   - **Bun**: Vercel's `bunVersion` only selects the *Functions* runtime, not the
-     build, so it is not used. Instead `vercel.json` runs install and build via
-     `bunx bun@1.4.4`, the pattern Vercel's own guide gives for pinning Bun
-     in the Install Command. Keep it equal to `bun` in `.prototools`; a test
+   - **Bun, install only**: Vercel's `bunVersion` selects the *Functions*
+     runtime, not the build, so it is not used. The install command is pinned
+     with `bunx bun@1.4.4 install --frozen-lockfile`, the pattern Vercel's own
+     guide gives for pinning Bun in the Install Command. Install is where Bun
+     matters: lockfile format, resolution and the root `zod` override. Keep the
+     version equal to `bun` in `.prototools`; a test
      (`tools/tests/test_vercel_config.py`) fails if they differ.
+   - **Build**: needs no Bun pin. `bun run` only launches the `build` script, and
+     `next build` runs under Node (its entry point starts `#!/usr/bin/env node`),
+     which `engines.node` pins.
    - Left to project settings: nothing is required. If you change the Node.js
      Version setting, `engines.node` still wins.
 
@@ -55,6 +60,7 @@ After the first production deploy, these should all return 200:
 ```
 curl -sI https://heph.neoforgelabs.tech/errors/HEPH-MONEY-422
 curl -sI https://heph.neoforgelabs.tech/errors
+curl -sI https://heph.neoforgelabs.tech/adrs
 curl -sI https://heph.neoforgelabs.tech/
 ```
 

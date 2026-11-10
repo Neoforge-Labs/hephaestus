@@ -16,8 +16,9 @@ def _prototools(name: str) -> str:
 def test_vercel_bun_pin_matches_prototools() -> None:
     cfg = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
     bun = _prototools("bun")
-    for key in ("installCommand", "buildCommand"):
-        assert f"bunx bun@{bun} " in cfg[key], f"{key} must run bun@{bun}"
+    assert cfg["installCommand"] == f"bunx bun@{bun} install --frozen-lockfile"
+    # Build needs no pin: `next build` runs under Node, pinned by engines.node.
+    assert cfg["buildCommand"] == "bun run --cwd docs/site build"
 
 
 def test_engines_node_matches_prototools_major() -> None:
