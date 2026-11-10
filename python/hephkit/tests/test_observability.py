@@ -812,8 +812,11 @@ def test_non_json_dict_keys_do_not_raise(capsys: pytest.CaptureFixture[str]) -> 
 
 
 def test_redacted_bytes_key_is_still_redacted(capsys: pytest.CaptureFixture[str]) -> None:
-    out = _rendered(capsys, d={b"password": "BYTESLEAK", b"access_token": "T2"})
-    assert "BYTESLEAK" not in out and "T2" not in out
+    # Sentinels must be long and distinctive. A short one matches the rendered
+    # line's own timestamp: "T2" appeared inside "2026-11-05T20:11:15", so this
+    # test failed for the four hours a day when the UTC hour starts with a 2.
+    out = _rendered(capsys, d={b"password": "BYTESLEAK", b"access_token": "TOKENBYTESLEAK"})
+    assert "BYTESLEAK" not in out and "TOKENBYTESLEAK" not in out
     assert json.loads(out)["d"] == {"password": "[REDACTED]", "access_token": "[REDACTED]"}
 
 
@@ -831,8 +834,8 @@ class _BadClass:
 
 
 def test_object_and_tuple_keys_never_leak_through_repr(capsys: pytest.CaptureFixture[str]) -> None:
-    out = _rendered(capsys, a={_RG(): "VALLEAK"}, b={("password", "TUPLEAK"): "V2"})
-    assert "RGLEAK" not in out and "TUPLEAK" not in out and "VALLEAK" not in out and "V2" not in out
+    out = _rendered(capsys, a={_RG(): "VALLEAK"}, b={("password", "TUPLEAK"): "TUPVALLEAK"})
+    assert "RGLEAK" not in out and "TUPLEAK" not in out and "VALLEAK" not in out and "TUPVALLEAK" not in out
     assert json.loads(out)["a"] == {"<_RG>": "[REDACTED]"}
     assert json.loads(out)["b"] == {"<tuple>": "[REDACTED]"}
 
@@ -844,7 +847,11 @@ def test_huge_int_keys_do_not_raise(capsys: pytest.CaptureFixture[str]) -> None:
 def test_memoryview_is_opaque(capsys: pytest.CaptureFixture[str]) -> None:
     out = _rendered(capsys, mv=memoryview(b"MVLEAK"))
     assert json.loads(out)["mv"] == "<memoryview>"
-    assert "77" not in out.split('"event"')[0]
+    # 77 is ord('M'), so this catches a memoryview rendered as byte values. It is
+    # short by necessity, so exclude the timestamp by NAME rather than by relying
+    # on "event" preceding "timestamp" in the rendered key order.
+    body = {k: v for k, v in json.loads(out).items() if k != "timestamp"}
+    assert "77" not in json.dumps(body)
 
 
 def test_object_whose_class_raises_does_not_drop_the_line(capsys: pytest.CaptureFixture[str]) -> None:

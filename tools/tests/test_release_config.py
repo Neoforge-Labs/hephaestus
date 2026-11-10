@@ -185,6 +185,45 @@ def test_wheels_cover_the_required_targets() -> None:
         assert needle in text, needle
 
 
+def test_release_please_does_not_use_the_actions_token() -> None:
+    """The first release run failed with "GitHub Actions is not permitted to
+    create or approve pull requests" -- the Actions identity cannot open the
+    release PR. And even where it is allowed, a PR authored by GITHUB_TOKEN
+    does not trigger workflows, so the release PR arrives with no checks
+    reported, which is the state that invites merging past it unexamined.
+
+    So the step must pass an explicit token that is not GITHUB_TOKEN, and a
+    preflight must fail loudly when that secret is absent rather than letting
+    the action fail opaquely."""
+    doc = load_workflow("release.yml")
+    steps = doc["jobs"]["release-please"]["steps"]
+    rp = next(s for s in steps if s.get("id") == "rp")
+    token = rp["with"]["token"]
+    assert "secrets.RELEASE_PLEASE_TOKEN" in token, token
+    assert "GITHUB_TOKEN" not in token, token
+    assert any("RELEASE_PLEASE_TOKEN is not set" in str(s.get("run", "")) for s in steps)
+    # Presence is not enough: the third release attempt failed with "Resource
+    # not accessible by personal access token" from a token that WAS set. The
+    # preflight must prove the token can write refs before release-please
+    # spends a minute discovering it cannot.
+    assert any("permissions.push" in str(s.get("run", "")) for s in steps)
+
+
+def test_breaking_changes_stay_in_zero_x() -> None:
+    """Release-please's default for a 0.x version is to bump a breaking change
+    to 1.0.0. Phase 1 carries two `feat(money)!:` commits, so without this the
+    first published version is 1.0.0 -- and the first release run computed
+    exactly that before it was blocked.
+
+    1.0.0 is the semver claim that the API is committed. ADR 0015 says the
+    opposite: "Everything in Phase 1 ships labelled `experimental`", and
+    `stable` requires "use by two ingots in production, and passing ecosystem
+    CI" -- there are no production ingots and every ecosystem row is disabled.
+    So the version must stay in 0.x until the maturity labels say otherwise."""
+    cfg = json.loads((ROOT / "release-please-config.json").read_text())
+    assert cfg["bump-minor-pre-major"] is True
+
+
 def test_ecosystem_enables_no_row_yet() -> None:
     """No row is enabled: examples/hello is the only candidate and Task 15 has
     not landed its tutorial script. This assertion used to read
@@ -195,6 +234,22 @@ def test_ecosystem_enables_no_row_yet() -> None:
     include = doc["jobs"]["matrix"]["strategy"]["matrix"]["include"]
     assert {e["name"] for e in include if e["enabled"]} == set()
     assert {e["name"] for e in include} >= {"examples/hello", "Collie", "Domus", "SAWA", "NeoRx"}
+
+
+def test_ecosystem_has_no_default_branch_privileged_trigger() -> None:
+    """The job checks out a third-party repository at `matrix.ref` and runs its
+    command. `schedule` and `workflow_dispatch` run in the default branch's
+    context, where the job can write the Actions cache, so that combination is
+    cache poisoning -- CodeQL alert 1,
+    actions/cache-poisoning/poisonable-step, high. `workflow_call` leaves the
+    context to the caller.
+
+    Re-adding a trigger to restore the weekly run must fail here rather than
+    quietly re-arm the alert. Running consumers on a timer needs them executed
+    outside this repository's default-branch context, which is a design change
+    and not a trigger."""
+    on = load_workflow("ecosystem.yml")["on"]
+    assert set(on) == {"workflow_call"}, on
 
 
 def test_release_publishes_with_trusted_publishing_and_no_token() -> None:

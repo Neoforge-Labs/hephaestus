@@ -37,9 +37,43 @@ jobs:
       version: ${{ steps.rp.outputs.version }}
       tag: ${{ steps.rp.outputs.tag_name }}
     steps:
+      # Fail with a sentence someone can act on, rather than letting the action
+      # fail opaquely on an empty token.
+      # Checked here rather than discovered inside the action. release-please
+      # does a lot of work before it writes anything, so a token that cannot
+      # write surfaces as "Resource not accessible by personal access token"
+      # at the very end, pointing at a REST endpoint rather than at the cause.
+      - name: Require a release token that can actually write
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error title=RELEASE_PLEASE_TOKEN is not set::Add a PAT or App token as the repository secret RELEASE_PLEASE_TOKEN. The default GITHUB_TOKEN cannot be used; the comment below says why."
+            exit 1
+          fi
+          # `push` is false unless the token can write refs, which is what
+          # release-please needs to create its release branch.
+          push=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.permissions.push' 2>&1) || {
+            echo "::error title=RELEASE_PLEASE_TOKEN cannot read this repository::gh api said: ${push}. The token is set but cannot see ${GITHUB_REPOSITORY}. For an organisation-owned repository a fine-grained PAT also needs the organisation to allow it: check Settings -> Personal access tokens for a pending or denied request. A GitHub App installation token avoids that policy entirely and does not expire."
+            exit 1
+          }
+          if [ "$push" != "true" ]; then
+            echo "::error title=RELEASE_PLEASE_TOKEN cannot write to this repository::permissions.push is '${push}'. release-please must create a branch, so the token needs Contents: Read and write (ref creation) as well as Pull requests: Read and write. If both are already granted and this still fails, the organisation has not approved the token: check Settings -> Personal access tokens."
+            exit 1
+          fi
+          echo "token can write to ${GITHUB_REPOSITORY}"
       - id: rp
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
+          # NOT the default GITHUB_TOKEN, for two independent reasons. First,
+          # the first release run failed with "GitHub Actions is not permitted
+          # to create or approve pull requests" — a repository setting that
+          # blocks the Actions identity from opening the release PR at all.
+          # Second, even where that is allowed, a pull request authored by
+          # GITHUB_TOKEN does not trigger workflows, so the release PR would
+          # arrive with no checks reported — which is the state that invites
+          # merging past it unexamined. A PAT or App token fixes both.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 

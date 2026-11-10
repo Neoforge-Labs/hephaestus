@@ -2,6 +2,10 @@
 # Boot test for the compose fragments. Needs docker, psql, aws, curl.
 #  1. each fragment alone: up --wait (120 s), then down -v
 #  2. every fragment except stripe together, with per-service assertions
+# The merged stack gets a larger budget than a single fragment because it is
+# strictly more work: five services starting at once, where `objects` alone
+# takes ~43 s. Sharing one 120 s timeout made this marginal, and it failed on a
+# runner while every fragment passed alone.
 # stripe is excluded from the live run because it needs a real STRIPE_API_KEY;
 # its contract (fails without a key, parses with one) is checked via `config`.
 set -uo pipefail
@@ -9,6 +13,7 @@ set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 P=heph-boot
 WAIT=(--wait --wait-timeout 120)
+MERGED_WAIT=(--wait --wait-timeout 300)
 fails=0
 
 dc() { docker compose -p "$P" "$@"; }
@@ -40,7 +45,15 @@ check "stripe config valid with a key" \
 MERGED=()
 for f in postgres objects telemetry mail redis; do MERGED+=(-f "$DIR/$f.yaml"); done
 start=$SECONDS
-check "merged stack: up --wait" dc "${MERGED[@]}" up -d "${WAIT[@]}"
+# On failure, say WHICH service is unhealthy. `up --wait` only reports that the
+# wait expired, which is why a runner failure here was previously undiagnosable.
+merged_up() {
+  dc "${MERGED[@]}" up -d "${MERGED_WAIT[@]}" && return 0
+  echo "---- merged stack state ----" >&2
+  dc "${MERGED[@]}" ps >&2 || true
+  return 1
+}
+check "merged stack: up --wait" merged_up
 echo "TIME  merged stack healthy in $((SECONDS - start))s"
 
 check "postgres: select 1 on 54320" \
