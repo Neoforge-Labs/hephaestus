@@ -91,13 +91,18 @@ jobs:
                 echo "::warning title=Probe branch was not deleted::Could not delete refs/heads/${probe} from ${GITHUB_REPOSITORY}: ${gone}. It is harmless but should be removed by hand."
               fi
             fi
+            rm -f "${errfile:-}"
             exit "$status"
           }
           trap cleanup EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
           attempted=1
-          got=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" -f "ref=refs/heads/${probe}" -f "sha=${GITHUB_SHA}" --jq '.object.sha' 2>&1) || {
+          # stdout (the sha we compare) and stderr (diagnostics) are kept apart
+          # so log noise on a successful call cannot read as a wrong sha.
+          errfile=$(mktemp)
+          got=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" -f "ref=refs/heads/${probe}" -f "sha=${GITHUB_SHA}" --jq '.object.sha' 2>"$errfile") || {
+            got="$(cat "$errfile")"
             echo "::error title=RELEASE_PLEASE_TOKEN cannot create a git ref::Creating refs/heads/${probe} in ${GITHUB_REPOSITORY} failed: ${got}. release-please must create a branch, so the token needs Contents: Read and write (ref creation), and it also needs Pull requests: Read and write to open the release PR. If both are already granted and this still fails, the organisation has not approved the token: check Settings -> Personal access tokens for a pending or denied request. A GitHub App installation token avoids the organisation-approval path and does not expire."
             exit 1
           }
@@ -106,7 +111,9 @@ jobs:
             echo "::error title=RELEASE_PLEASE_TOKEN created a ref that points elsewhere::Asked for refs/heads/${probe} at ${GITHUB_SHA} but the API reported '${got}'. The preflight will not vouch for a token whose result is not what release-please relies on."
             exit 1
           fi
-          echo "token can write to ${GITHUB_REPOSITORY}"
+          # Says only what was proven. Pull requests: Read and write cannot be
+          # probed without opening a PR, so it is not claimed here.
+          echo "token can create refs in ${GITHUB_REPOSITORY}"
       - id: rp
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:

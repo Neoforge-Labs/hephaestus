@@ -18,7 +18,7 @@ ref with the same token -- and removes it again. What has to be pinned is:
 
 These tests execute the step's REAL `run:` block, extracted from the YAML, with
 `gh` stubbed on PATH (the same idiom as test_currency_source_workflow.py), under
-`bash -eo pipefail` because that is the shell Actions uses.
+`bash -e`, which is what Actions runs for a step with no explicit `shell:`.
 """
 
 from __future__ import annotations
@@ -71,6 +71,7 @@ case "$method" in
   POST)
     case "$CREATE_STATE" in
       ok)        echo "$GITHUB_SHA" ;;
+      noisy)     echo "gh: a new release is available" >&2; echo "$GITHUB_SHA" ;;
       wrong_sha) echo "$OTHER_SHA" ;;
       refused)   refused ;;
     esac ;;
@@ -125,7 +126,7 @@ def run_step(
         DELETE_STATE=delete,
     )
     done = subprocess.run(
-        ["bash", "-eo", "pipefail", "-c", preflight_step()],
+        ["bash", "-e", "-c", preflight_step()],
         cwd=ROOT,
         env=env,
         capture_output=True,
@@ -164,10 +165,17 @@ def test_the_refusal_explains_org_approval_and_the_app_alternative(tmp_path: Pat
 def test_a_token_that_can_create_a_ref_passes_and_deletes_it(tmp_path: Path) -> None:
     code, output, calls = run_step(tmp_path)
     assert code == 0, output
-    assert f"token can write to {REPO}" in output
+    assert f"token can create refs in {REPO}" in output
+    assert "can write" not in output, "the line must not claim more than the probe proved"
     assert CREATE_CALL in calls, calls
     assert DELETE_CALL in calls, calls
     assert calls.index(CREATE_CALL) < calls.index(DELETE_CALL), "delete must follow create"
+
+
+def test_stderr_noise_on_a_successful_create_is_not_a_wrong_sha(tmp_path: Path) -> None:
+    code, output, calls = run_step(tmp_path, create="noisy")
+    assert code == 0, output
+    assert DELETE_CALL in calls
 
 
 def test_the_probe_is_made_with_the_release_token(tmp_path: Path) -> None:
