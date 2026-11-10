@@ -1,11 +1,16 @@
 {
-  "ink": "#0C0A09",
-  "bronze": "#C2884A",
-  "bronze-deep": "#8A5A24",
-  "paper": "#F5F0E8",
+  "colors": {
+    "ink": "#0C0A09",
+    "bronze": "#C2884A",
+    "bronze-deep": "#8A5A24",
+    "paper": "#F5F0E8"
+  },
   "light-background-swap": {
     "note": "There is no light-background file. On paper or white, edit the fill attributes in mark.svg and lockup.svg as listed. bronze (#C2884A) is only 3.0:1 on white and 2.7:1 on paper, so it is never used on a light background.",
-    "files": ["mark.svg", "lockup.svg"],
+    "files": [
+      "mark.svg",
+      "lockup.svg"
+    ],
     "replace": {
       "#C2884A": "#8A5A24",
       "#F5F0E8": "#0C0A09"

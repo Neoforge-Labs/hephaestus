@@ -3,14 +3,21 @@
        but the waist is 11 from the centre instead of 7: at 16px the primary's arms are about
        one pixel wide and blur into a grey plus; at 11 the hole stays a clean four-point star.
        Past 13 it stops reading as a spark and becomes a diamond. The hole shows whatever the
-       tab colour is, so on a light tab this is bronze on white at about 3.04:1: adequate for a graphic,
-       and it leans on the 3.0 floor in palette.json. A favicon cannot be swapped by the page. -->
+       tab colour is, so the plate has to hold up on both. #C2884A is the default, for a dark
+       tab. The media rule in <style> repaints the plate #8A5A24 (bronze-deep, 5.88:1 on white)
+       when the browser reports prefers-color-scheme: light, because #C2884A is only about 3.04:1
+       on white and must never be the colour on a light background. Chrome and Firefox apply
+       the rule to tab icons; where a browser ignores it the icon stays #C2884A. -->
   <title>hephkit</title>
+  <style>
+    .plate { fill: #C2884A; }
+    @media (prefers-color-scheme: light) { .plate { fill: #8A5A24; } }
+  </style>
   <defs>
     <mask id="heph-favicon" maskUnits="userSpaceOnUse" x="0" y="0" width="96" height="96">
       <rect width="96" height="96" fill="#fff"/>
       <path d="M48 18 L59 37 L78 48 L59 59 L48 78 L37 59 L18 48 L37 37 Z" fill="#000"/>
     </mask>
   </defs>
-  <rect x="10" y="10" width="76" height="76" rx="18" fill="#C2884A" mask="url(#heph-favicon)"/>
+  <rect x="10" y="10" width="76" height="76" rx="18" class="plate" fill="#C2884A" mask="url(#heph-favicon)"/>
 </svg>

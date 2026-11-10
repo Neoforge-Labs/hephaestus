@@ -70,8 +70,10 @@ summarise them away. Done means green.
 - Python: `cd python/hephkit && uv run maturin develop --uv && uv run pytest --cov=hephkit && uv run mypy --strict src`
 - Go: `cd go && go test ./... && go vet ./... && staticcheck ./...`
 - Generators: `python tools/gen_errors.py --check && python tools/gen_conventions.py --check && uv run tools/gen_brand_raster.py --check`
-  (The brand-raster `--check` compares bytes rendered by this machine's Pillow, so it
-  is a local gate: PNGs generated on another platform may legitimately differ.)
+  (The brand-raster `--check` is the enforced gate and runs in `tools/tests`: it hashes
+  the brand SVGs, `palette.json` and the two PNGs against `tools/brand-provenance.txt`.
+  It is platform-independent because text rasterisation is not. `--check-render`
+  re-renders and compares bytes; it is a local convenience that can differ across platforms.)
 - Repo checks: `python tools/check_adrs.py && python tools/check_registry.py && python tools/check_vectors.py`
 - Local stack: `bash compose/test/boot_test.sh`
 - Five-minute path: `bash examples/hello/tutorial_test.sh`
@@ -85,7 +87,9 @@ summarise them away. Done means green.
 - Error codes match `^HEPH-[A-Z]{2,6}-\d{3}$` and live only in `spec/errors.yaml`.
 - Generated files (`_codes.py`, `conventions.py`, synced Compose fragments, and
   the brand PNGs `apple-touch-icon.png` and `og-card.png`) are never edited by
-  hand. Edit the brand SVGs and run `uv run tools/gen_brand_raster.py`.
+  hand. After editing a brand SVG or `palette.json`, run
+  `uv run tools/gen_brand_raster.py` and commit the PNGs with the updated
+  `tools/brand-provenance.txt`.
 - Every new module ships with: spec section, vectors or contract tests, a docs
   page with a runnable example, a maturity label, and an entry in ecosystem CI
   once an ingot uses it.

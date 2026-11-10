@@ -5,6 +5,7 @@ and nothing else, so the SVGs are read with ElementTree and the contrast is
 plain arithmetic.
 """
 
+import hashlib
 import json
 import re
 import shutil
@@ -29,8 +30,13 @@ def _root(name: str) -> ET.Element:
     return ET.parse(BRAND / name).getroot()
 
 
-def _palette() -> dict:
+def _palette_file() -> dict:
     return json.loads((BRAND / "palette.json").read_text())
+
+
+def _palette() -> dict:
+    """The colour tokens only: ink, bronze, bronze-deep, paper."""
+    return _palette_file()["colors"]
 
 
 def _points(d: str) -> list[tuple[float, float]]:
@@ -127,7 +133,7 @@ def _fills(name: str) -> set[str]:
 
 def test_light_background_assets_never_use_the_light_bronze() -> None:
     palette = _palette()
-    swap = palette["light-background-swap"]
+    swap = _palette_file()["light-background-swap"]
     assert swap["files"] == ["mark.svg", "lockup.svg"]
     assert swap["replace"][BRONZE] == palette["bronze-deep"]
     replace = {k.upper(): v.upper() for k, v in swap["replace"].items()}
@@ -146,11 +152,36 @@ def test_light_background_assets_never_use_the_light_bronze() -> None:
     swapped = {replace.get(f, f) for f in lockup_fills}
     assert paper not in swapped, "the wordmark would stay paper on a light background"
     assert ink in swapped
+    # favicon.svg, the third light-exposed asset, cannot be swapped by hand: a tab is light
+    # under a light theme and the knockout shows it through, so it carries its own
+    # prefers-color-scheme rule. Non-vacuity first: its default drawing paints the light
+    # bronze, otherwise "never on light" would be trivially true.
+    plate = next(r for r in _root("favicon.svg").iter(f"{SVG_NS}rect") if r.get("rx"))
+    assert plate.get("fill", "").upper() == BRONZE, "the favicon's default (dark tab) plate is the light bronze"
+    style = " ".join("".join("".join(el.itertext()) for el in _root("favicon.svg").iter(f"{SVG_NS}style")).split())
+    match = re.search(r"@media\s*\(\s*prefers-color-scheme\s*:\s*light\s*\)\s*\{(.*)\}\s*$", style)
+    assert match, "favicon.svg needs a prefers-color-scheme: light rule"
+    light_rules = match[1]
+    assert palette["bronze-deep"].upper() in light_rules.upper(), "the light rule must paint bronze-deep"
+    assert BRONZE not in light_rules.upper(), "the light rule must not paint the light bronze"
+    # The rule must actually reach the plate, not a class nothing carries.
+    selector = re.match(r"\s*([^{]+)\{", light_rules)
+    assert selector, light_rules
+    target = selector[1].strip()
+    assert target.startswith(".") and plate.get("class") == target[1:], "the rule must select the plate"
+    assert _contrast(palette["bronze-deep"], "#FFFFFF") >= 4.5
+    # Documented where a designer will find it, and the false premise is gone.
+    raw = (BRAND / "favicon.svg").read_text().lower()
+    assert "prefers-color-scheme" in raw and "cannot be swapped" not in raw
+
+
 
 
 def test_palette_contrast_meets_the_measured_floors() -> None:
     p = _palette()
-    assert {"ink", "bronze", "bronze-deep", "paper"} <= set(p)
+    assert set(p) == {"ink", "bronze", "bronze-deep", "paper"}
+    assert all(re.fullmatch(r"#[0-9A-Fa-f]{6}", v) for v in p.values()), "every colours entry is a hex colour"
+    assert set(_palette_file()) == {"colors", "light-background-swap"}
     assert _contrast(p["bronze-deep"], p["paper"]) >= 4.5
     assert _contrast(p["bronze"], p["ink"]) >= 3.0
     # Pins why bronze-deep exists: plain bronze is not enough on a light page.
@@ -208,7 +239,8 @@ def _png_size(path: Path) -> tuple[int, int]:
 def test_raster_generator_is_deterministic_and_check_detects_staleness(tmp_path: Path) -> None:
     # Everything here compares output from the same machine. Byte equality with the
     # PNGs committed from another platform is deliberately not asserted: FreeType and
-    # Pillow's resampling can differ across platforms, so that would be untrue.
+    # Pillow's resampling can differ across platforms, so that would be untrue. What
+    # --check asserts is provenance by hash, which is platform-independent.
     root = _scratch_root(tmp_path)
     out = root / "docs" / "site" / "public" / "brand"
 
@@ -236,6 +268,66 @@ def test_raster_generator_is_deterministic_and_check_detects_staleness(tmp_path:
         assert name in result.stderr
         assert (out / name).read_bytes() == bytes(stale), "--check must not write"
         (out / name).write_bytes(first[name])
+
+
+MANIFEST = REPO_ROOT / "tools" / "brand-provenance.txt"
+
+
+def _manifest(path: Path) -> dict[tuple[str, str], str]:
+    entries = {}
+    for line in path.read_text().splitlines():
+        if line.strip() and not line.startswith("#"):
+            kind, digest, name = line.split()
+            entries[(kind, name)] = digest
+    return entries
+
+
+def test_committed_brand_tree_matches_its_provenance_manifest() -> None:
+    # The enforced gate. It hashes, so it holds on any platform CI runs on, and it fails
+    # when an SVG is edited without regenerating or when a PNG is edited by hand.
+    result = _generate(REPO_ROOT, "--check")
+    assert result.returncode == 0, result.stderr
+
+
+def test_manifest_pins_every_source_and_output_by_sha256() -> None:
+    recorded = _manifest(MANIFEST)
+    expected = {("source", n) for n in SVG_SOURCES} | {("output", n) for n in RASTERS}
+    assert set(recorded) == expected
+    for (_, name), digest in recorded.items():
+        assert digest == hashlib.sha256((BRAND / name).read_bytes()).hexdigest(), name
+    header = " ".join(w for w in MANIFEST.read_text().split() if w != "#").lower()
+    assert "not reproducible across platforms" in header, "the manifest must say why it is a hash file"
+
+
+def test_check_fails_on_an_unregenerated_svg_edit_and_never_writes(tmp_path: Path) -> None:
+    root = _scratch_root(tmp_path)
+    brand = root / "docs" / "site" / "public" / "brand"
+    assert _generate(root).returncode == 0
+    assert _generate(root, "--check").returncode == 0
+    for name in SVG_SOURCES:
+        original = (brand / name).read_bytes()
+        (brand / name).write_bytes(original + b"\n")
+        before = {n: (brand / n).read_bytes() for n in (*RASTERS, name)}
+        result = _generate(root, "--check")
+        assert result.returncode == 1, f"--check missed an edit to {name}"
+        assert name in result.stderr
+        assert {n: (brand / n).read_bytes() for n in before} == before, "--check must not write"
+        (brand / name).write_bytes(original)
+    assert _generate(root, "--check").returncode == 0
+    (root / "tools" / "brand-provenance.txt").unlink()
+    assert _generate(root, "--check").returncode == 1, "a missing manifest must fail"
+
+
+def test_check_render_is_the_local_byte_comparison(tmp_path: Path) -> None:
+    root = _scratch_root(tmp_path)
+    out = root / "docs" / "site" / "public" / "brand"
+    assert _generate(root, "--check-render").returncode == 1, "no PNGs yet"
+    assert _generate(root).returncode == 0
+    assert _generate(root, "--check-render").returncode == 0
+    stale = bytearray((out / RASTERS[0]).read_bytes())
+    stale[-20] ^= 0xFF
+    (out / RASTERS[0]).write_bytes(bytes(stale))
+    assert _generate(root, "--check-render").returncode == 1
 
 
 def test_raster_follows_an_svg_edit(tmp_path: Path) -> None:
@@ -276,3 +368,14 @@ def test_raster_sizes_are_exactly_what_the_platforms_require() -> None:
     # A wrong og-card ratio is cropped by every social preview, silently.
     assert _png_size(BRAND / "apple-touch-icon.png") == (180, 180)
     assert _png_size(BRAND / "og-card.png") == (1200, 630)
+
+
+def test_touch_icon_refuses_a_non_square_plate(tmp_path: Path) -> None:
+    root = _scratch_root(tmp_path)
+    avatar = root / "docs" / "site" / "public" / "brand" / "avatar.svg"
+    source = avatar.read_text()
+    assert 'width="76" height="76"' in source
+    avatar.write_text(source.replace('width="76" height="76"', 'width="76" height="60"', 1))
+    result = _generate(root)
+    assert result.returncode != 0
+    assert "square" in result.stderr

@@ -4,10 +4,23 @@
 # ///
 """Generate the brand rasters in docs/site/public/brand/ from the brand SVGs.
 
-Run with ``uv run tools/gen_brand_raster.py`` to write the files, or with
-``--check`` to exit 1 if a committed PNG differs from what the SVGs would
-generate. Pillow is declared inline (PEP 723) and pinned exactly: the PNG bytes
-are a function of the Pillow version, so a floor would let two machines disagree.
+Run with ``uv run tools/gen_brand_raster.py`` to write the PNGs and the provenance
+manifest ``tools/brand-provenance.txt``. Pillow is declared inline (PEP 723) and pinned
+exactly: the PNG bytes are a function of the Pillow version, so a floor would let two
+machines disagree.
+
+``--check`` is the enforced gate, and it is platform-independent: it hashes the five
+sources (the four SVGs and palette.json) and the two PNGs and compares them with the
+sha256 values recorded in the manifest. An SVG edited without regenerating fails the
+source side; a hand-edited PNG fails the output side. It renders nothing and writes
+nothing. This is the same shape as ``spec/currencies.source.yaml`` and
+``gen_currencies.py --verify-source``: a derived artifact that cannot be reproduced
+byte-for-byte everywhere is pinned by hash. ``tools/tests`` runs it against the
+committed tree.
+
+``--check-render`` is a local convenience only: it re-renders and compares against the
+PNGs byte for byte. FreeType and resampling differ across platforms, so it can
+legitimately fail off the machine that generated the PNGs. Nothing in CI uses it.
 
     apple-touch-icon.png  180x180, avatar.svg's plate full-bleed (no margin, no rounding)
     og-card.png           1200x630, lockup.svg centred on ink
@@ -16,8 +29,7 @@ There are no timestamps and no metadata, and the wordmark uses only the font bun
 inside Pillow (``ImageFont.load_default``), never a system font. The output is a
 function of the SVGs, palette.json and the Pillow build on the running machine:
 two runs on one machine give identical bytes, but FreeType and resampling can differ
-across platforms. ``--check`` therefore compares against bytes rendered by this
-machine's Pillow; it is a local gate and can legitimately disagree across platforms.
+across platforms, which is why provenance is pinned by hash rather than by re-rendering.
 The wordmark is Regular only, so the SVG's weight 700 is approximated with a thin
 stroke in the same colour.
 
@@ -40,6 +52,7 @@ it has no kerning.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
@@ -52,6 +65,30 @@ from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 BRAND_RELPATH = Path("docs/site/public/brand")
 OUTPUTS = ("apple-touch-icon.png", "og-card.png")
+SOURCES = ("mark.svg", "favicon.svg", "avatar.svg", "lockup.svg", "palette.json")
+MANIFEST_RELPATH = Path("tools/brand-provenance.txt")
+MANIFEST_HEADER = """\
+# Provenance of the brand rasters in docs/site/public/brand/ (apple-touch-icon.png and
+# og-card.png). Written by tools/gen_brand_raster.py; never edit by hand.
+#
+# WHY THIS IS A HASH FILE AND NOT A RE-RENDER. The PNGs are drawn from the SVGs with
+# Pillow, and text rasterisation (FreeType, resampling) is not reproducible across
+# platforms: the same SVGs give different bytes on macOS and on Linux. A check that
+# re-rendered and compared bytes would fail for whoever is not on the machine that
+# generated the files, and regenerating there would flip the bytes back for the next
+# person. So, as spec/currencies.source.yaml does for the SIX list, provenance is pinned
+# by sha256 instead:
+#
+#   source  sha256 of an input the PNGs are derived from
+#   output  sha256 of a committed PNG
+#
+#   uv run tools/gen_brand_raster.py --check
+#
+# fails if a source no longer hashes to what is recorded (an SVG was edited and the
+# rasters were not regenerated) or if a PNG no longer hashes to what is recorded (a PNG
+# was edited by hand). After editing an SVG, run `uv run tools/gen_brand_raster.py`
+# and commit the PNGs together with this file.
+"""
 
 TOUCH_SIZE = (180, 180)
 CARD_SIZE = (1200, 630)
@@ -209,6 +246,8 @@ def touch_icon(brand: Path) -> bytes:
     plate = next((s for s in avatar.shapes if isinstance(s, Rect)), None)
     if plate is None:
         raise ValueError("avatar.svg has no plate <rect>")
+    if plate.width != plate.height:
+        raise ValueError(f"avatar.svg's plate must be square, got {plate.width} x {plate.height}")
     size = TOUCH_SIZE[0] * SUPERSAMPLE
     scale = size / plate.width
     image = Image.new("RGB", (size, size), plate.fill)
@@ -240,31 +279,89 @@ def og_card(brand: Path, ink: str) -> bytes:
 
 def render(brand: Path) -> dict[str, bytes]:
     """Every generated file's bytes, keyed by file name."""
-    ink = json.loads((brand / "palette.json").read_text(encoding="utf-8"))["ink"]
+    ink = json.loads((brand / "palette.json").read_text(encoding="utf-8"))["colors"]["ink"]
     return {"apple-touch-icon.png": touch_icon(brand), "og-card.png": og_card(brand, ink)}
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def manifest_text(brand: Path) -> str:
+    """The manifest as written: header, then one ``kind sha256 name`` line per file."""
+    lines = [f"source {_sha256(brand / n)} {n}" for n in SOURCES]
+    lines += [f"output {_sha256(brand / n)} {n}" for n in OUTPUTS]
+    return MANIFEST_HEADER + "\n".join(lines) + "\n"
+
+
+def read_manifest(path: Path) -> dict[tuple[str, str], str]:
+    """``(kind, name) -> sha256`` from the manifest; comments and blank lines are skipped."""
+    entries: dict[tuple[str, str], str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        kind, digest, name = line.split()
+        entries[(kind, name)] = digest
+    return entries
+
+
+def verify(brand: Path, manifest: Path) -> list[str]:
+    """Problems found comparing the tree with the manifest; empty means it is in step."""
+    if not manifest.is_file():
+        return [f"{manifest.name} is missing; run: uv run tools/gen_brand_raster.py"]
+    recorded = read_manifest(manifest)
+    problems: list[str] = []
+    for kind, names, hint in (
+        ("source", SOURCES, "edited since the PNGs were generated; run: uv run tools/gen_brand_raster.py"),
+        ("output", OUTPUTS, "does not match the recorded hash (edited by hand, or stale); run: uv run tools/gen_brand_raster.py"),
+    ):
+        for name in names:
+            path = brand / name
+            if not path.is_file():
+                problems.append(f"{BRAND_RELPATH / name} is missing; run: uv run tools/gen_brand_raster.py")
+            elif recorded.get((kind, name)) != _sha256(path):
+                problems.append(f"{BRAND_RELPATH / name} {hint}")
+    return problems
+
+
+USAGE = "usage: gen_brand_raster.py [--check | --check-render] [--root DIR]"
 
 
 def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    check = "--check" in args
-    args = [a for a in args if a != "--check"]
+    if args[:1] == ["--root"] and len(args) >= 2:
+        root = Path(args[1])
+        args = args[2:]
+    mode = args[0] if args and args[0] in ("--check", "--check-render") else None
+    if mode:
+        args = args[1:]
     if args[:1] == ["--root"] and len(args) >= 2:
         root = Path(args[1])
         args = args[2:]
     if args:
-        print(f"usage: gen_brand_raster.py [--check] [--root DIR] (unknown: {' '.join(args)})", file=sys.stderr)
+        print(f"{USAGE} (unknown: {' '.join(args)})", file=sys.stderr)
         return 2
     root = root or Path(__file__).resolve().parents[1]
     brand = root / BRAND_RELPATH
-    files = render(brand)
+    manifest = root / MANIFEST_RELPATH
 
-    if check:
+    if mode == "--check":
+        problems = verify(brand, manifest)
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        return 1 if problems else 0
+
+    files = render(brand)
+    if mode == "--check-render":
         stale = [n for n, data in files.items() if not (brand / n).is_file() or (brand / n).read_bytes() != data]
         for name in stale:
-            print(f"{BRAND_RELPATH / name} is stale or missing; run: uv run tools/gen_brand_raster.py", file=sys.stderr)
+            print(f"{BRAND_RELPATH / name} differs from this machine's render; run: uv run tools/gen_brand_raster.py", file=sys.stderr)
         return 1 if stale else 0
     for name, data in files.items():
         (brand / name).write_bytes(data)
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(manifest_text(brand), encoding="utf-8")
     return 0
 
 
