@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Boot test for the compose fragments. Needs docker, psql, aws, curl.
+# Boot test for the compose fragments. Needs docker, aws, curl.
 #  1. each fragment alone: up --wait (120 s), then down -v
 #  2. every fragment except stripe together, with per-service assertions
 # The merged stack gets a larger budget than a single fragment because it is
@@ -56,8 +56,21 @@ merged_up() {
 check "merged stack: up --wait" merged_up
 echo "TIME  merged stack healthy in $((SECONDS - start))s"
 
-check "postgres: select 1 on 54320" \
-  env PGPASSWORD=heph psql -h localhost -p 54320 -U heph -d heph -tAc 'select 1'
+# Two separate properties, neither needing a Postgres client on the host: the
+# database answers (asked inside the container, which already ships psql), and
+# the 54xxx host port is published (a bare TCP connect). The old single check
+# used a host psql, which meant installing postgresql-client from the Ubuntu
+# mirrors on every CI run — a network dependency that took the job down when
+# the runner could not resolve them. redis has always been checked this way.
+pg_answers() { [ "$(dc "${MERGED[@]}" exec -T postgres psql -U heph -d heph -tAc 'select 1')" = 1 ]; }
+check "postgres: select 1 answers 1" pg_answers
+# curl is already required here, and unlike bash's /dev/tcp it works on macOS,
+# whose /bin/bash is built without net redirections. Postgres does not speak
+# HTTP, so an accepted connection ends in a protocol error (52, empty reply)
+# while nothing listening gives 7, "couldn't connect". Only 7 means the port
+# mapping is missing, which is the property this asserts.
+pg_port_published() { curl -s --connect-timeout 5 http://127.0.0.1:54320 >/dev/null 2>&1; [ $? -ne 7 ]; }
+check "postgres: host port 54320 accepts a connection" pg_port_published
 
 s3() { AWS_ACCESS_KEY_ID=heph AWS_SECRET_ACCESS_KEY=heph-dev-secret AWS_DEFAULT_REGION=us-east-1 \
   aws --endpoint-url http://localhost:54333 s3 ls 2>&1; }

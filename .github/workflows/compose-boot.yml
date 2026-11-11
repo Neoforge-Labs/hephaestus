@@ -24,8 +24,11 @@ jobs:
       - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
         with:
           moon-version: '2.6.5'
-      - name: Install psql
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+      # No apt step. The boot test asks Postgres from inside its own container,
+      # which already ships psql, and checks the published host port with a
+      # bare TCP connect. Installing postgresql-client from the Ubuntu mirrors
+      # put a DNS lookup of azure.archive.ubuntu.com on the critical path of
+      # every run, and took the job down when a runner could not resolve it.
       # curl and the aws CLI v2 are preinstalled on ubuntu-latest.
       - name: Boot every fragment
         run: moon run compose:test
