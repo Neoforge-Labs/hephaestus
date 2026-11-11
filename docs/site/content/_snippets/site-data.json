@@ -80,6 +80,11 @@
       "maturity": "experimental"
     },
     {
+      "name": "idempotency",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
       "name": "money",
       "home": "python",
       "maturity": "experimental"
@@ -113,11 +118,6 @@
   "planned": [
     {
       "name": "auth",
-      "home": "python",
-      "phase": 2
-    },
-    {
-      "name": "idempotency",
       "home": "python",
       "phase": 2
     },
