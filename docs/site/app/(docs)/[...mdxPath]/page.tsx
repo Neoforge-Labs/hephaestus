@@ -1,9 +1,19 @@
 import { generateStaticParamsFor, importPage } from 'nextra/pages'
-import { useMDXComponents as getMDXComponents } from '../../mdx-components'
+import { useMDXComponents as getMDXComponents } from '../../../mdx-components'
 
-export const generateStaticParams = generateStaticParamsFor('mdxPath')
+/** Every MDX page under content/, rendered in the docs shell.
+ *
+ * The catch-all is required (`[...mdxPath]`, not `[[...mdxPath]]`) so that `/`
+ * belongs to the landing page alone; an optional catch-all also matches `/` and
+ * Next.js rejects the duplicate route. Any root-level param the page map still
+ * reports is dropped for the same reason.
+ */
+export async function generateStaticParams() {
+  const params = await generateStaticParamsFor('mdxPath')()
+  return params.filter((p: { mdxPath?: string[] }) => (p.mdxPath?.length ?? 0) > 0)
+}
 
-type Props = { params: Promise<{ mdxPath?: string[] }> }
+type Props = { params: Promise<{ mdxPath: string[] }> }
 
 export async function generateMetadata(props: Props) {
   const params = await props.params
