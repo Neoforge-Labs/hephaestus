@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/Neoforge-Labs/hephaestus/compare/v0.2.0...v0.2.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **deploy:** drop the bunx wrapper that broke the Vercel install ([dc37f76](https://github.com/Neoforge-Labs/hephaestus/commit/dc37f760f1f5d6ab337d42dd973a76139ea0c2ef))
+* **deploy:** drop the bunx wrapper that broke the Vercel install ([9f5d331](https://github.com/Neoforge-Labs/hephaestus/commit/9f5d331db225e0796b2f54d74ddf92dc53405dc3))
+
 ## [0.2.0](https://github.com/Neoforge-Labs/hephaestus/compare/v0.1.0...v0.2.0) (2026-11-11)
 
 
