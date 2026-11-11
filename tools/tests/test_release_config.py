@@ -199,21 +199,9 @@ def test_release_please_does_not_use_the_actions_token() -> None:
     steps = doc["jobs"]["release-please"]["steps"]
     rp = next(s for s in steps if s.get("id") == "rp")
     token = rp["with"]["token"]
-    # The token is minted from a GitHub App installation rather than held as a
-    # PAT: an app token is not subject to the organisation's fine-grained-PAT
-    # approval policy and does not expire, which is what kept breaking the PAT.
-    assert "steps.app-token.outputs.token" in token, token
+    assert "secrets.RELEASE_PLEASE_TOKEN" in token, token
     assert "GITHUB_TOKEN" not in token, token
-    assert "RELEASE_PLEASE_TOKEN" not in (WORKFLOWS / "release.yml").read_text(), (
-        "the PAT secret must be gone from the workflow, not merely unused"
-    )
-    app = next(s for s in steps if s.get("id") == "app-token")
-    assert app["uses"].startswith("actions/create-github-app-token@"), app
-    assert "secrets.RELEASE_APP_ID" in app["with"]["app-id"], app
-    assert "secrets.RELEASE_APP_PRIVATE_KEY" in app["with"]["private-key"], app
-    assert steps.index(app) < steps.index(rp), "the token must be minted before it is used"
-    # An absent secret must still be named in words, not discovered inside the action.
-    assert any("release app is not configured" in str(s.get("run", "")) for s in steps)
+    assert any("RELEASE_PLEASE_TOKEN is not set" in str(s.get("run", "")) for s in steps)
     # Presence is not enough: the third release attempt failed with "Resource
     # not accessible by personal access token" from a token that WAS set. The
     # preflight must prove the token can write refs before release-please

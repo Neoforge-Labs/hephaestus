@@ -37,45 +37,18 @@ jobs:
       version: ${{ steps.rp.outputs.version }}
       tag: ${{ steps.rp.outputs.tag_name }}
     steps:
-      # Fail with a sentence someone can act on, rather than letting
-      # create-github-app-token fail on an empty input. Only the secret NAMES
-      # are ever echoed; the private key is not printed anywhere.
-      - name: Require the release app's credentials
-        env:
-          APP_ID: ${{ secrets.RELEASE_APP_ID }}
-          PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-        run: |
-          missing=""
-          [ -n "$APP_ID" ] || missing="$missing RELEASE_APP_ID"
-          [ -n "$PRIVATE_KEY" ] || missing="$missing RELEASE_APP_PRIVATE_KEY"
-          if [ -n "$missing" ]; then
-            echo "::error title=The release app is not configured::Missing repository secret(s):${missing}. Create a GitHub App owned by the organisation with Contents: Read and write and Pull requests: Read and write, install it on ${GITHUB_REPOSITORY}, then add its app id as RELEASE_APP_ID and its private key as RELEASE_APP_PRIVATE_KEY."
-            exit 1
-          fi
-      # An app INSTALLATION token, not a PAT. A fine-grained PAT on an
-      # organisation-owned repository needs the organisation to approve it and
-      # expires on a schedule; both broke this release repeatedly. An app token
-      # is scoped to this repository, needs no approval step, and is minted
-      # fresh each run, so there is nothing to lapse.
-      - name: Mint a release token from the GitHub App
-        id: app-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      # Fail with a sentence someone can act on, rather than letting the action
+      # fail opaquely on an empty token.
       # Checked here rather than discovered inside the action. release-please
       # does a lot of work before it writes anything, so a token that cannot
-      # write surfaces as "Resource not accessible by ..." at the very end,
-      # pointing at a REST endpoint rather than at the cause. An app token is
-      # no more self-evidently correct than a PAT was: the app's permissions
-      # can be too narrow, the installation may not cover this repository, and
-      # updated permissions sit pending until the installation accepts them.
+      # write surfaces as "Resource not accessible by personal access token"
+      # at the very end, pointing at a REST endpoint rather than at the cause.
       - name: Require a release token that can actually write
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::error title=The release app is not configured::The minted token is empty, so create-github-app-token produced nothing usable. Check the repository secrets RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY, and that the app is installed on ${GITHUB_REPOSITORY}."
+            echo "::error title=RELEASE_PLEASE_TOKEN is not set::Add a PAT or App token as the repository secret RELEASE_PLEASE_TOKEN. The default GITHUB_TOKEN cannot be used; the comment below says why."
             exit 1
           fi
           if [ -z "${GITHUB_RUN_ID:-}" ] || [ -z "${GITHUB_RUN_ATTEMPT:-}" ] || [ -z "${GITHUB_SHA:-}" ]; then
@@ -90,7 +63,7 @@ jobs:
           # Contents: write. Release run 42117513449 failed twice behind
           # exactly that false assurance.
           seen=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.full_name' 2>&1) || {
-            echo "::error title=The release app cannot read this repository::gh api said: ${seen}. The token was minted but cannot see ${GITHUB_REPOSITORY}, so the app is not installed here, or its installation is scoped to a set of repositories that excludes this one. Check the app's installation and the repositories it is granted."
+            echo "::error title=RELEASE_PLEASE_TOKEN cannot read this repository::gh api said: ${seen}. The token is set but cannot see ${GITHUB_REPOSITORY}. For an organisation-owned repository a fine-grained PAT also needs the organisation to allow it: check Settings -> Personal access tokens for a pending or denied request. A GitHub App installation token avoids that policy entirely and does not expire."
             exit 1
           }
           # Prove the capability by performing it: create a git ref with this
@@ -130,12 +103,12 @@ jobs:
           errfile=$(mktemp)
           got=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" -f "ref=refs/heads/${probe}" -f "sha=${GITHUB_SHA}" --jq '.object.sha' 2>"$errfile") || {
             got="$(cat "$errfile")"
-            echo "::error title=The release app cannot create a git ref::Creating refs/heads/${probe} in ${GITHUB_REPOSITORY} failed: ${got}. release-please must create a branch, so the app needs Contents: Read and write (ref creation), and it also needs Pull requests: Read and write to open the release PR. If both are already granted and this still fails, the installation has not accepted them: changing an app's permissions leaves every existing installation on the old, narrower grant until it accepts the new one, so the app's settings page can look correct while the token still cannot write."
+            echo "::error title=RELEASE_PLEASE_TOKEN cannot create a git ref::Creating refs/heads/${probe} in ${GITHUB_REPOSITORY} failed: ${got}. release-please must create a branch, so the token needs Contents: Read and write (ref creation), and it also needs Pull requests: Read and write to open the release PR. If both are already granted and this still fails, the organisation has not approved the token: check Settings -> Personal access tokens for a pending or denied request. A GitHub App installation token avoids the organisation-approval path and does not expire."
             exit 1
           }
           created=1
           if [ "$got" != "$GITHUB_SHA" ]; then
-            echo "::error title=The release app created a ref that points elsewhere::Asked for refs/heads/${probe} at ${GITHUB_SHA} but the API reported '${got}'. The preflight will not vouch for a token whose result is not what release-please relies on."
+            echo "::error title=RELEASE_PLEASE_TOKEN created a ref that points elsewhere::Asked for refs/heads/${probe} at ${GITHUB_SHA} but the API reported '${got}'. The preflight will not vouch for a token whose result is not what release-please relies on."
             exit 1
           fi
           # Says only what was proven. Pull requests: Read and write cannot be
@@ -151,9 +124,8 @@ jobs:
           # Second, even where that is allowed, a pull request authored by
           # GITHUB_TOKEN does not trigger workflows, so the release PR would
           # arrive with no checks reported — which is the state that invites
-          # merging past it unexamined. An app installation token fixes both,
-          # and the release PR is authored by the app rather than by a person.
-          token: ${{ steps.app-token.outputs.token }}
+          # merging past it unexamined. A PAT or App token fixes both.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
