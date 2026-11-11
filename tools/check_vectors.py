@@ -36,6 +36,11 @@ MIN_CASES = {
     "hashing.content": 6,
     "signatures.sign": 4,
     "signatures.verify": 10,
+    # Section 2. The fingerprint minimum covers the four steps of 2.2 plus the
+    # non-normalisation rules, which are the part an implementation is most
+    # likely to "helpfully" get wrong.
+    "idempotency.key": 12,
+    "idempotency.fingerprint": 16,
 }
 
 

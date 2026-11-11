@@ -25,6 +25,8 @@ MINIMUM_CASES = {
     "hashing.content": 6,
     "signatures.sign": 4,
     "signatures.verify": 10,
+    "idempotency.key": 12,
+    "idempotency.fingerprint": 16,
 }
 
 
@@ -37,7 +39,10 @@ def _count(suite: str) -> int:
 def test_all_vector_files_match_schema() -> None:
     assert check_vectors(CONFORMANCE, ERRORS) == []
     files = sorted(p.relative_to(CONFORMANCE).as_posix() for p in CONFORMANCE.glob("*/*.json"))
-    assert len(files) == 11  # ten suites plus the schema
+    # A literal, not len(MINIMUM_CASES) + 1: this is meant to fail when a suite
+    # is added, so that adding one is a decision somebody records here rather
+    # than something a derived count absorbs silently.
+    assert len(files) == 13, files  # twelve suites plus the schema
 
 
 def test_minimum_case_counts() -> None:

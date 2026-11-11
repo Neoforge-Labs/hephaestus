@@ -1,0 +1,248 @@
+{
+  "suite": "idempotency.fingerprint",
+  "spec": "0.3.0",
+  "description": "Request fingerprints (heph-spec 2.2). Each case carries the JCS string as well as the fingerprint, so a failure says which of the four steps went wrong rather than only that a digest differed. A body is the parsed JSON value for a JSON media type, \"sha256:<hex of the raw bytes>\" for any other, and null when there is no body.",
+  "source": "RFC 8785 (JCS) by way of the rfc8785 reference package, SHA-256 from the Python standard library, and heph-spec 2.2 including its worked example. No Hephaestus implementation was run; see tools/gen_idempotency_vectors.py.",
+  "cases": [
+    {
+      "name": "post-json-object-sorts-member-names",
+      "input": {
+        "method": "POST",
+        "path": "/v1/charges",
+        "media_type": "application/json",
+        "body": "{\"b\":1,\"a\":2}"
+      },
+      "expect": {
+        "jcs": "{\"body\":{\"a\":2,\"b\":1},\"method\":\"POST\",\"path\":\"/v1/charges\"}",
+        "fingerprint": "sha256:9d7a9f8a22e4d35d3efc80eafe7f0026713f6ad9ba4a3abd5c025e92036fd6eb"
+      }
+    },
+    {
+      "name": "get-with-no-body-is-null",
+      "input": {
+        "method": "GET",
+        "path": "/v1/charges"
+      },
+      "expect": {
+        "jcs": "{\"body\":null,\"method\":\"GET\",\"path\":\"/v1/charges\"}",
+        "fingerprint": "sha256:8eb36cc7740a219405f20b27a3abace50f59891b2fa8d18da413eb209bc24d03"
+      }
+    },
+    {
+      "name": "zero-length-body-is-null",
+      "input": {
+        "method": "POST",
+        "path": "/v1/charges",
+        "media_type": "application/json",
+        "body": ""
+      },
+      "expect": {
+        "jcs": "{\"body\":null,\"method\":\"POST\",\"path\":\"/v1/charges\"}",
+        "fingerprint": "sha256:a25fcceb20682a8fe9be600a93b0a73d59b25aa2b430844d31521af27f1da8e1"
+      }
+    },
+    {
+      "name": "non-json-media-type-hashes-the-raw-bytes",
+      "input": {
+        "method": "POST",
+        "path": "/v1/upload",
+        "media_type": "text/plain",
+        "body": "hello"
+      },
+      "expect": {
+        "jcs": "{\"body\":\"sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\",\"method\":\"POST\",\"path\":\"/v1/upload\"}",
+        "fingerprint": "sha256:c6ccd92fa0227f5e2150873e7270eaaae4cea71487994632eb4949d18a6f9617"
+      }
+    },
+    {
+      "name": "media-type-parameters-are-ignored",
+      "input": {
+        "method": "POST",
+        "path": "/v1/charges",
+        "media_type": "application/json; charset=utf-8",
+        "body": "{\"a\":2,\"b\":1}"
+      },
+      "expect": {
+        "jcs": "{\"body\":{\"a\":2,\"b\":1},\"method\":\"POST\",\"path\":\"/v1/charges\"}",
+        "fingerprint": "sha256:9d7a9f8a22e4d35d3efc80eafe7f0026713f6ad9ba4a3abd5c025e92036fd6eb"
+      }
+    },
+    {
+      "name": "json-subtype-suffix-is-json",
+      "input": {
+        "method": "POST",
+        "path": "/v1/charges",
+        "media_type": "application/vnd.api+json",
+        "body": "{\"a\":2,\"b\":1}"
+      },
+      "expect": {
+        "jcs": "{\"body\":{\"a\":2,\"b\":1},\"method\":\"POST\",\"path\":\"/v1/charges\"}",
+        "fingerprint": "sha256:9d7a9f8a22e4d35d3efc80eafe7f0026713f6ad9ba4a3abd5c025e92036fd6eb"
+      }
+    },
+    {
+      "name": "media-type-case-is-ignored",
+      "input": {
+        "method": "POST",
+        "path": "/v1/charges",
+        "media_type": "APPLICATION/JSON",
+        "body": "{\"a\":2,\"b\":1}"
+      },
+      "expect": {
+        "jcs": "{\"body\":{\"a\":2,\"b\":1},\"method\":\"POST\",\"path\":\"/v1/charges\"}",
+        "fingerprint": "sha256:9d7a9f8a22e4d35d3efc80eafe7f0026713f6ad9ba4a3abd5c025e92036fd6eb"
+      }
+    },
+    {
+      "name": "query-string-is-part-of-the-path",
+      "input": {
+        "method": "POST",
+        "path": "/v1/charges?a=1&b=2",
+        "media_type": "application/json",
+        "body": "{\"a\":2,\"b\":1}"
+      },
+      "expect": {
+        "jcs": "{\"body\":{\"a\":2,\"b\":1},\"method\":\"POST\",\"path\":\"/v1/charges?a=1&b=2\"}",
+        "fingerprint": "sha256:a772b11d38cbf30ba504114b5ed5de7cf459f32dde90e92335f7ab641611c207"
+      }
+    },
+    {
+      "name": "query-order-is-not-normalised",
+      "input": {
+        "method": "POST",
+        "path": "/v1/charges?b=2&a=1",
+        "media_type": "application/json",
+        "body": "{\"a\":2,\"b\":1}"
+      },
+      "expect": {
+        "jcs": "{\"body\":{\"a\":2,\"b\":1},\"method\":\"POST\",\"path\":\"/v1/charges?b=2&a=1\"}",
+        "fingerprint": "sha256:97dd606ba5a9b114f3e90ca39e61d8506658d53ecc2b899521a5d4cee945c034"
+      }
+    },
+    {
+      "name": "empty-query-is-kept-as-received",
+      "input": {
+        "method": "POST",
+        "path": "/v1/charges?",
+        "media_type": "application/json",
+        "body": "{\"a\":2,\"b\":1}"
+      },
+      "expect": {
+        "jcs": "{\"body\":{\"a\":2,\"b\":1},\"method\":\"POST\",\"path\":\"/v1/charges?\"}",
+        "fingerprint": "sha256:35469b2b94477e4b1b16504346499603b2bfb94d1fb03512d52ccb4876d7435b"
+      }
+    },
+    {
+      "name": "percent-encoding-is-not-decoded",
+      "input": {
+        "method": "POST",
+        "path": "/v1/charges%2Fx",
+        "media_type": "application/json",
+        "body": "{\"a\":2,\"b\":1}"
+      },
+      "expect": {
+        "jcs": "{\"body\":{\"a\":2,\"b\":1},\"method\":\"POST\",\"path\":\"/v1/charges%2Fx\"}",
+        "fingerprint": "sha256:b4314bc12a17f8a37b6c7134e84924458f27ba3037baef37752513ec366056c6"
+      }
+    },
+    {
+      "name": "trailing-slash-is-not-collapsed",
+      "input": {
+        "method": "POST",
+        "path": "/v1/charges/",
+        "media_type": "application/json",
+        "body": "{\"a\":2,\"b\":1}"
+      },
+      "expect": {
+        "jcs": "{\"body\":{\"a\":2,\"b\":1},\"method\":\"POST\",\"path\":\"/v1/charges/\"}",
+        "fingerprint": "sha256:f449b2e9ae0775e27c2626c235552ea923066666970adaee933c7f6fd074feed"
+      }
+    },
+    {
+      "name": "method-is-uppercase-ascii",
+      "input": {
+        "method": "DELETE",
+        "path": "/v1/charges/ch_1"
+      },
+      "expect": {
+        "jcs": "{\"body\":null,\"method\":\"DELETE\",\"path\":\"/v1/charges/ch_1\"}",
+        "fingerprint": "sha256:b24c55d71d668c4449255002c7bed0b47873c492f695e8cffe63e0b46761a729"
+      }
+    },
+    {
+      "name": "json-string-body-is-a-json-value",
+      "input": {
+        "method": "POST",
+        "path": "/v1/notes",
+        "media_type": "application/json",
+        "body": "\"hi\""
+      },
+      "expect": {
+        "jcs": "{\"body\":\"hi\",\"method\":\"POST\",\"path\":\"/v1/notes\"}",
+        "fingerprint": "sha256:556c166d1d2b50c8773f057cdcfe49869c91243159f6376aea7f79863ad13c37"
+      }
+    },
+    {
+      "name": "json-array-body-keeps-its-order",
+      "input": {
+        "method": "POST",
+        "path": "/v1/batch",
+        "media_type": "application/json",
+        "body": "[2,1]"
+      },
+      "expect": {
+        "jcs": "{\"body\":[2,1],\"method\":\"POST\",\"path\":\"/v1/batch\"}",
+        "fingerprint": "sha256:1c976c8c35080c70ce59ce17b7e0a7f579f448fa7f2e47aed8049e448933bb94"
+      }
+    },
+    {
+      "name": "nested-objects-sort-at-every-level",
+      "input": {
+        "method": "POST",
+        "path": "/v1/charges",
+        "media_type": "application/json",
+        "body": "{\"b\":{\"d\":1,\"c\":2},\"a\":3}"
+      },
+      "expect": {
+        "jcs": "{\"body\":{\"a\":3,\"b\":{\"c\":2,\"d\":1}},\"method\":\"POST\",\"path\":\"/v1/charges\"}",
+        "fingerprint": "sha256:dd1c95157a0ea8e221343d2d03e79bbc21c042f4cf1d3486dc6e1e6cebb5aa63"
+      }
+    },
+    {
+      "name": "json-media-type-with-unparseable-body",
+      "input": {
+        "method": "POST",
+        "path": "/v1/charges",
+        "media_type": "application/json",
+        "body": "{"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "json-media-type-with-empty-object-missing-brace",
+      "input": {
+        "method": "POST",
+        "path": "/v1/charges",
+        "media_type": "application/json",
+        "body": "{\"a\":"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    },
+    {
+      "name": "json-subtype-with-unparseable-body",
+      "input": {
+        "method": "POST",
+        "path": "/v1/charges",
+        "media_type": "application/merge-patch+json",
+        "body": "nope"
+      },
+      "expect": {
+        "error": "HEPH-VAL-422"
+      }
+    }
+  ]
+}
