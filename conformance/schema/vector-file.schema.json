@@ -22,7 +22,9 @@
         "hashing.jcs",
         "hashing.content",
         "signatures.sign",
-        "signatures.verify"
+        "signatures.verify",
+        "idempotency.key",
+        "idempotency.fingerprint"
       ]
     },
     "spec": {
@@ -868,6 +870,168 @@
                       "properties": {
                         "ok": {
                           "const": true
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "pattern": "^HEPH-[A-Z]{2,6}-[0-9]{3}$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "suite": {
+            "const": "idempotency.key"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "required"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "key": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "required": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "ok"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "ok": {
+                          "const": true
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "ignored"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "ignored": {
+                          "const": true
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "pattern": "^HEPH-[A-Z]{2,6}-[0-9]{3}$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "suite": {
+            "const": "idempotency.fingerprint"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "required": [
+                    "method",
+                    "path"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "method": {
+                      "type": "string",
+                      "pattern": "^[A-Z]+$"
+                    },
+                    "path": {
+                      "type": "string",
+                      "pattern": "^/"
+                    },
+                    "media_type": {
+                      "type": "string"
+                    },
+                    "body": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "jcs",
+                        "fingerprint"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "jcs": {
+                          "type": "string"
+                        },
+                        "fingerprint": {
+                          "type": "string",
+                          "pattern": "^sha256:[0-9a-f]{64}$"
                         }
                       }
                     },

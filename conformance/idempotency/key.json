@@ -1,0 +1,178 @@
+{
+  "suite": "idempotency.key",
+  "spec": "0.3.0",
+  "description": "Idempotency-Key syntax (heph-spec 2.1): 1 to 255 characters of printable ASCII (VCHAR, 0x21-0x7E) with no whitespace. `required` is whether the endpoint requires a key: when it does not, a malformed key is ignored rather than failing the request.",
+  "source": "heph-spec 2.1, applied case by case. No implementation was run.",
+  "cases": [
+    {
+      "name": "uuid-is-accepted",
+      "input": {
+        "key": "8e03978e-40d5-43e8-bc93-6894a57f9324",
+        "required": true
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "single-vchar-is-the-minimum-length",
+      "input": {
+        "key": "a",
+        "required": true
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "lowest-vchar-0x21-is-accepted",
+      "input": {
+        "key": "!",
+        "required": true
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "highest-vchar-0x7e-is-accepted",
+      "input": {
+        "key": "~",
+        "required": true
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "255-characters-is-accepted",
+      "input": {
+        "key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+        "required": true
+      },
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "256-characters-is-rejected",
+      "input": {
+        "key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+        "required": true
+      },
+      "expect": {
+        "error": "HEPH-IDEMP-400"
+      }
+    },
+    {
+      "name": "empty-key-is-rejected",
+      "input": {
+        "key": "",
+        "required": true
+      },
+      "expect": {
+        "error": "HEPH-IDEMP-400"
+      }
+    },
+    {
+      "name": "missing-key-is-rejected",
+      "input": {
+        "key": null,
+        "required": true
+      },
+      "expect": {
+        "error": "HEPH-IDEMP-400"
+      }
+    },
+    {
+      "name": "space-is-rejected",
+      "input": {
+        "key": "ab cd",
+        "required": true
+      },
+      "expect": {
+        "error": "HEPH-IDEMP-400"
+      }
+    },
+    {
+      "name": "tab-is-rejected",
+      "input": {
+        "key": "ab\tcd",
+        "required": true
+      },
+      "expect": {
+        "error": "HEPH-IDEMP-400"
+      }
+    },
+    {
+      "name": "newline-is-rejected",
+      "input": {
+        "key": "ab\ncd",
+        "required": true
+      },
+      "expect": {
+        "error": "HEPH-IDEMP-400"
+      }
+    },
+    {
+      "name": "del-0x7f-is-rejected",
+      "input": {
+        "key": "ab\u007fcd",
+        "required": true
+      },
+      "expect": {
+        "error": "HEPH-IDEMP-400"
+      }
+    },
+    {
+      "name": "control-0x1f-is-rejected",
+      "input": {
+        "key": "ab\u001fcd",
+        "required": true
+      },
+      "expect": {
+        "error": "HEPH-IDEMP-400"
+      }
+    },
+    {
+      "name": "non-ascii-is-rejected",
+      "input": {
+        "key": "abcd\u00e9",
+        "required": true
+      },
+      "expect": {
+        "error": "HEPH-IDEMP-400"
+      }
+    },
+    {
+      "name": "optional-endpoint-ignores-a-malformed-key",
+      "input": {
+        "key": "ab cd",
+        "required": false
+      },
+      "expect": {
+        "ignored": true
+      }
+    },
+    {
+      "name": "optional-endpoint-ignores-a-missing-key",
+      "input": {
+        "key": null,
+        "required": false
+      },
+      "expect": {
+        "ignored": true
+      }
+    },
+    {
+      "name": "optional-endpoint-still-uses-a-valid-key",
+      "input": {
+        "key": "8e03978e-40d5",
+        "required": false
+      },
+      "expect": {
+        "ok": true
+      }
+    }
+  ]
+}

@@ -397,3 +397,21 @@ def test_the_go_alias_prefix_matches_the_release_config() -> None:
 def test_ci_never_cancels_runs_on_main() -> None:
     cancel = load_workflow("ci.yml")["concurrency"]["cancel-in-progress"]
     assert "refs/heads/main" in cancel
+
+
+def test_tooling_test_step_pins_rfc8785_to_the_generators_own_header() -> None:
+    """The reference canonicaliser is pinned in two places; keep them equal.
+
+    tools/gen_idempotency_vectors.py declares it in a PEP 723 header, and
+    python-ci installs it for the tooling tests that import that generator. A
+    drift between them means CI validates the vectors with a different
+    canonicaliser than the one that produced them, which is the one thing the
+    provenance rule exists to prevent.
+    """
+    header = (ROOT / "tools" / "gen_idempotency_vectors.py").read_text()
+    pinned = re.search(r'"(rfc8785==[0-9.]+)"', header)
+    assert pinned, "gen_idempotency_vectors.py no longer pins rfc8785 in its PEP 723 header"
+    workflow = (WORKFLOWS / "python-ci.yml").read_text()
+    assert f"--with {pinned.group(1)}" in workflow, (
+        f"python-ci.yml must install {pinned.group(1)} for the tooling tests"
+    )

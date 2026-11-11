@@ -18,11 +18,13 @@ from typing import Any
 import pytest
 
 from hephkit import _core
+from hephkit.errors import HephError
 from hephkit.hashing import (
     HashingError,
     canonical_json,
     content_hash,
 )
+from hephkit.idempotency import fingerprint, fingerprint_document, validate_key
 from hephkit.money import Money, MoneyError
 from hephkit.signatures import SignatureError, sign, verify
 
@@ -221,7 +223,42 @@ def run_verify(case: Case) -> None:
     assert compute() is None
 
 
+def run_idempotency_key(case: Case) -> None:
+    i = case["input"]
+
+    def compute() -> str | None:
+        return validate_key(i["key"], required=i["required"])
+
+    if expect_error(case, HephError, compute):
+        return
+    result = compute()
+    if case["expect"].get("ignored"):
+        # 2.1: an endpoint that does not require a key ignores a bad one.
+        assert result is None
+    else:
+        assert result == i["key"]
+
+
+def run_idempotency_fingerprint(case: Case) -> None:
+    i = case["input"]
+    body = i["body"].encode("utf-8") if "body" in i else None
+    media_type = i.get("media_type")
+
+    def document() -> dict[str, Any]:
+        return fingerprint_document(i["method"], i["path"], body, media_type)
+
+    if expect_error(case, HephError, document):
+        return
+    # The vector carries the canonical string as well as the digest, so check
+    # both: a mismatch then names which of 2.2's four steps went wrong instead
+    # of only reporting two different hashes.
+    assert canonical_json(document()) == case["expect"]["jcs"]
+    assert fingerprint(i["method"], i["path"], body, media_type) == case["expect"]["fingerprint"]
+
+
 RUNNERS: dict[str, Callable[[Case], None]] = {
+    "idempotency.key": run_idempotency_key,
+    "idempotency.fingerprint": run_idempotency_fingerprint,
     "money.currency": run_currency,
     "money.parse": run_parse,
     "money.format": run_format,

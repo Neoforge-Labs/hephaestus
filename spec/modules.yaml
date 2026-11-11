@@ -22,6 +22,7 @@
 - {name: hashing, home: python, status: shipped, maturity: experimental, spec_section: "4"}
 - {name: signatures, home: python, status: shipped, maturity: experimental, spec_section: "5"}
 - {name: errors, home: python, status: shipped, maturity: experimental, spec_section: "1"}
+- {name: idempotency, home: python, status: shipped, maturity: experimental, spec_section: "2"}
 - {name: settings, home: python, status: shipped, maturity: experimental, spec_section: null}
 - {name: observability, home: python, status: shipped, maturity: experimental, spec_section: null}
 
@@ -49,7 +50,6 @@
 - {name: python, home: docker, status: shipped, maturity: experimental, spec_section: null}
 
 # Planned
-- {name: idempotency, home: python, status: planned, phase: 2, spec_section: "2"}
 - {name: auth, home: python, status: planned, phase: 2, spec_section: null}
 - {name: ledger, home: python, status: planned, phase: 4, spec_section: null}
 - {name: outbox, home: python, status: planned, phase: 4, spec_section: null}
