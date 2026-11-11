@@ -303,7 +303,12 @@ def test_the_runnable_guard_would_catch_a_missing_script() -> None:
     assert _command_paths("bash examples/hello/tutorial_test.sh") == ["examples/hello/tutorial_test.sh"]
     assert _command_paths("pytest -q") == []
     assert _command_paths("uv run --with pyyaml tools/check_registry.py") == ["tools/check_registry.py"]
-    assert not (ROOT / "examples/hello/tutorial_test.sh").exists()
+    # A path that is absent by construction, not one that merely happened to be
+    # absent when this was written: an earlier revision used
+    # `examples/hello/tutorial_test.sh`, and the test broke the day that script
+    # was added, because it was asserting the state of the tree rather than the
+    # behaviour of the guard.
+    assert not (ROOT / "tools/this-script-does-not-exist.sh").exists()
     assert (ROOT / "tools/check_registry.py").exists()
 
 

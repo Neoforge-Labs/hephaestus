@@ -620,3 +620,136 @@
     grid-column: 2;
   }
 }
+
+/* --- Proof block -------------------------------------------------------- */
+
+.proof-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+  counter-reset: step;
+}
+
+.proof-steps li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.proof-steps code {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.7rem 1rem;
+  font-size: 0.9375rem;
+  background: var(--struck);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  color: var(--fg);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.proof-prompt {
+  color: var(--accent);
+  user-select: none;
+  flex: none;
+}
+
+.proof-note {
+  margin: 1.75rem 0 0;
+  max-width: var(--measure);
+  color: var(--fg-dim);
+  line-height: 1.65;
+}
+
+.proof-note code {
+  font-size: 0.85em;
+  color: var(--accent);
+}
+
+.proof-note a {
+  color: var(--fg);
+  text-decoration-color: var(--accent);
+}
+
+/* --- Budget ------------------------------------------------------------- */
+
+.budget {
+  margin: 2.5rem 0 0;
+  display: grid;
+  gap: 0;
+}
+
+.budget-row {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
+  gap: 0.5rem 3rem;
+  padding: 1.5rem 0;
+  border-top: 1px solid var(--hairline);
+  align-items: baseline;
+}
+
+.budget-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.budget-row dt {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+}
+
+.budget-cap {
+  font-size: 0.8125rem;
+  color: var(--fg-faint);
+}
+
+.budget-figure {
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--accent);
+}
+
+.budget-row dd {
+  margin: 0;
+  display: grid;
+  gap: 0.3rem;
+  max-width: var(--measure);
+}
+
+.budget-row dd strong {
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.budget-row dd span {
+  color: var(--fg-dim);
+  line-height: 1.6;
+}
+
+.budget-rule {
+  margin: 0;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--hairline);
+  max-width: var(--measure);
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  color: var(--fg-dim);
+}
+
+.budget-rule code {
+  font-size: 0.9em;
+  color: var(--accent);
+}
+
+@media (max-width: 52rem) {
+  .budget-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+}

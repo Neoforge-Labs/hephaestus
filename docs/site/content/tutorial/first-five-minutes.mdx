@@ -1,0 +1,80 @@
+---
+# GENERATED FILE - do not edit by hand. Source: examples/hello/tutorial_test.sh.
+# Regenerate with `uv run tools/gen_quickstart.py`; CI runs --check.
+title: "The five-minute path"
+---
+
+# The five-minute path
+
+Every command below is run by `examples/hello/tutorial_test.sh` in CI, on this exact example.
+If one of them stops working, the build goes red before this page can lie to
+you.
+
+You need [uv](https://docs.astral.sh/uv/), a Go toolchain for the CLI, and
+Docker running for the local stack.
+
+```bash
+go install github.com/Neoforge-Labs/hephaestus/go/cmd/heph@latest
+uv add "hephkit[fastapi,observability,settings]"
+heph dev up
+uv run fastapi dev app.py --port 54080
+curl -s "http://localhost:54080/price?amount=10.2&currency=KES"
+```
+
+That last request answers with money in minor units, as a string:
+
+```json
+{"price": {"amount": "1020", "currency": "KES"}}
+```
+
+## What just happened
+
+`heph dev up` read [`examples/hello/heph.toml`](https://github.com/Neoforge-Labs/hephaestus/blob/main/examples/hello/heph.toml),
+saw `fragments = ["telemetry"]`, and brought up the OpenTelemetry collector,
+Tempo and Grafana. The app itself has no tracing code: `setup_observability`
+instruments FastAPI, so the request you just made is already a trace.
+
+Open Grafana at [localhost:54300](http://localhost:54300), go to **Explore**, pick **Tempo** and
+search for `service.name=hello`. The script does the same thing over Tempo's
+API and prints the trace id it found, which is how CI proves this paragraph.
+
+## Errors are addresses, not stack traces
+
+Ask for a grouped amount, which the kit refuses rather than guesses:
+
+```bash
+curl -s "http://localhost:54080/price?amount=1,000&currency=KES"
+```
+
+```json
+{
+  "type": "https://hephkit.dev/errors/HEPH-MONEY-422",
+  "title": "Invalid money amount",
+  "status": 422,
+  "code": "HEPH-MONEY-422"
+}
+```
+
+That `type` resolves: it is [the page for HEPH-MONEY-422](/errors/HEPH-MONEY-422),
+generated from the same registry the code comes from.
+
+## Splitting without losing a cent
+
+```bash
+curl -s "http://localhost:54080/split?amount=1.00&currency=KES&ways=3"
+```
+
+```json
+{"parts": [{"amount": "34", "currency": "KES"}, {"amount": "33", "currency": "KES"}, {"amount": "33", "currency": "KES"}]}
+```
+
+Largest remainder, ties to the lower index, so the parts always add back up to
+the total. The rule is [specification section 3](/spec), and the same vectors
+pin it in every language the kit binds.
+
+## The whole app
+
+It is one file, and the wiring is two calls. Read
+[`examples/hello/app.py`](https://github.com/Neoforge-Labs/hephaestus/blob/main/examples/hello/app.py):
+neither handler contains a `try`/`except`, because `install_error_handlers`
+turns `MoneyError` into the problem+json above.

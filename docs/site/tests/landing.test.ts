@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { NAV_LINKS, REPO_URL } from '../components/nav'
 import { STRIKE_PATH } from '../components/Mark'
 import data from '../content/_snippets/site-data.json'
+import quickstart from '../content/_snippets/quickstart.json'
 
 const site = join(import.meta.dir, '..')
 const out = join(site, 'out')
@@ -18,7 +19,16 @@ const raw = readFileSync(join(out, 'index.html'), 'utf8')
  * them` is really `12<!-- --> of them` in the markup. Both are stripped; what
  * is left is what the browser shows.
  */
-const landing = raw.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<!--[\s\S]*?-->/g, '')
+const landing = raw
+  .replace(/<script[\s\S]*?<\/script>/g, '')
+  .replace(/<!--[\s\S]*?-->/g, '')
+  // Entities, so a published shell command with quotes in it can be compared
+  // against the command as the script actually spells it.
+  .replace(/&quot;/g, '"')
+  .replace(/&#x27;/g, "'")
+  .replace(/&lt;/g, '<')
+  .replace(/&gt;/g, '>')
+  .replace(/&amp;/g, '&')
 
 /** The landing page's claims are generated, so the tests compare it against the
  *  generated source rather than against hard-coded expectations. A page that
@@ -94,4 +104,34 @@ test('test_inline_mark_matches_the_drawn_svg', () => {
   // stale logo. Compare the one part that carries the identity.
   const drawn = readFileSync(join(site, 'public/brand/mark.svg'), 'utf8')
   expect(drawn).toContain(STRIKE_PATH)
+})
+
+test('test_proof_block_matches_the_tutorial_script', () => {
+  // Every command the page prints is one the script runs. Not "a command like
+  // it" -- the same bytes, so the front page cannot drift from CI.
+  expect(quickstart.commands.length).toBeGreaterThan(0)
+  for (const command of quickstart.commands) {
+    expect(landing).toContain(command)
+  }
+})
+
+test('test_budget_tiles_match_dx_budget_json', () => {
+  expect(landing).toContain(`${quickstart.budget.bootSeconds}s`)
+  expect(landing).toContain(`${quickstart.budget.wheelMb} MB`)
+  expect(landing).toContain(quickstart.budget.wheelTarget)
+})
+
+test('test_budget_numbers_are_not_literals_in_the_component', () => {
+  // The point of the generated snippet is that raising a budget moves the page.
+  // A number typed into the component would survive a budget change silently.
+  const source = readFileSync(join(site, 'components/BudgetTiles.tsx'), 'utf8')
+  expect(source).not.toContain(String(quickstart.budget.bootSeconds))
+  expect(source).not.toContain(String(quickstart.budget.wheelMb))
+})
+
+test('test_proof_commands_are_not_literals_in_the_component', () => {
+  const source = readFileSync(join(site, 'components/ProofBlock.tsx'), 'utf8')
+  for (const command of quickstart.commands) {
+    expect(source).not.toContain(command)
+  }
 })

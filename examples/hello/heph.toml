@@ -1,0 +1,11 @@
+# The ingot's identity and the local stack it wants.
+#
+# `heph dev up` reads this: `name` doubles as the Compose project name, and
+# `fragments` picks which of compose/ comes up. The tutorial needs only
+# telemetry -- the app stores nothing -- so that is all it asks for, and the
+# five-minute budget in tools/dx_budget.json is measured against exactly this.
+[ingot]
+name = "hello"
+
+[dev]
+fragments = ["telemetry"]

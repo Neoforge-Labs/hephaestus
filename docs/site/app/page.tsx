@@ -1,10 +1,13 @@
 import Link from 'next/link'
+import { BudgetTiles } from '../components/BudgetTiles'
 import { CopyCommand } from '../components/CopyCommand'
 import { Mark } from '../components/Mark'
 import { ModuleLedger } from '../components/ModuleLedger'
+import { ProofBlock } from '../components/ProofBlock'
 import { RoadmapStrip } from '../components/RoadmapStrip'
 import { NAV_LINKS, REPO_URL } from '../components/nav'
 import data from '../content/_snippets/site-data.json'
+import quickstart from '../content/_snippets/quickstart.json'
 import './landing.css'
 
 export const metadata = {
@@ -58,6 +61,20 @@ export default function Landing() {
             <Link href="/spec">v{data.specVersion}</Link> · MIT ·{' '}
             <span className="hero-maturity">every module experimental</span>
           </p>
+        </section>
+
+        <section className="band band-proof">
+          <h2 className="band-h">From nothing to a traced request</h2>
+          <p className="band-sub">
+            Five commands. CI runs them on every change and fails the build if any of them stops
+            working, which is why they are printed here rather than described.
+          </p>
+          <ProofBlock commands={quickstart.commands} />
+        </section>
+
+        <section className="band">
+          <h2 className="band-h">What it costs you</h2>
+          <BudgetTiles budget={quickstart.budget} />
         </section>
 
         <section className="band">

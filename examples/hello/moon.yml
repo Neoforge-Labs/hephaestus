@@ -1,0 +1,19 @@
+language: 'python'
+layer: 'application'
+
+tasks:
+  test:
+    script: 'uv sync && uv run pytest -q'
+    inputs:
+      - 'app.py'
+      - 'tests/**/*'
+      - 'pyproject.toml'
+  tutorial:
+    # The tutorial the docs publish, run as written. Needs Docker: it brings the
+    # telemetry fragment up and reads the trace back out of Tempo.
+    script: 'bash tutorial_test.sh'
+    inputs:
+      - 'app.py'
+      - 'heph.toml'
+      - 'tutorial_test.sh'
+      - '/compose/**/*'
