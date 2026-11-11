@@ -37,18 +37,20 @@ jobs:
       version: ${{ steps.rp.outputs.version }}
       tag: ${{ steps.rp.outputs.tag_name }}
     steps:
-      # Fail with a sentence someone can act on, rather than letting the action
-      # fail opaquely on an empty token.
       # Checked here rather than discovered inside the action. release-please
       # does a lot of work before it writes anything, so a token that cannot
-      # write surfaces as "Resource not accessible by personal access token"
-      # at the very end, pointing at a REST endpoint rather than at the cause.
+      # write surfaces as "Resource not accessible by integration" at the very
+      # end, pointing at a REST endpoint rather than at the cause. What this
+      # now proves is the SETTING, not a secret: GITHUB_TOKEN's permissions
+      # come from the permissions: block above, but only up to the ceiling set
+      # by the repository, the organisation and the enterprise, any of which
+      # can pin workflows to read-only and silently take the write back.
       - name: Require a release token that can actually write
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::error title=RELEASE_PLEASE_TOKEN is not set::Add a PAT or App token as the repository secret RELEASE_PLEASE_TOKEN. The default GITHUB_TOKEN cannot be used; the comment below says why."
+            echo "::error title=The workflow token is empty::GITHUB_TOKEN was not provided to this step, which should not happen in a normal Actions run."
             exit 1
           fi
           if [ -z "${GITHUB_RUN_ID:-}" ] || [ -z "${GITHUB_RUN_ATTEMPT:-}" ] || [ -z "${GITHUB_SHA:-}" ]; then
@@ -63,7 +65,7 @@ jobs:
           # Contents: write. Release run 42117513449 failed twice behind
           # exactly that false assurance.
           seen=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.full_name' 2>&1) || {
-            echo "::error title=RELEASE_PLEASE_TOKEN cannot read this repository::gh api said: ${seen}. The token is set but cannot see ${GITHUB_REPOSITORY}. For an organisation-owned repository a fine-grained PAT also needs the organisation to allow it: check Settings -> Personal access tokens for a pending or denied request. A GitHub App installation token avoids that policy entirely and does not expire."
+            echo "::error title=The workflow token cannot read this repository::gh api said: ${seen}. This is not a permissions ceiling, which affects writes rather than reads, so treat it as an Actions or API fault rather than a setting."
             exit 1
           }
           # Prove the capability by performing it: create a git ref with this
@@ -103,12 +105,12 @@ jobs:
           errfile=$(mktemp)
           got=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" -f "ref=refs/heads/${probe}" -f "sha=${GITHUB_SHA}" --jq '.object.sha' 2>"$errfile") || {
             got="$(cat "$errfile")"
-            echo "::error title=RELEASE_PLEASE_TOKEN cannot create a git ref::Creating refs/heads/${probe} in ${GITHUB_REPOSITORY} failed: ${got}. release-please must create a branch, so the token needs Contents: Read and write (ref creation), and it also needs Pull requests: Read and write to open the release PR. If both are already granted and this still fails, the organisation has not approved the token: check Settings -> Personal access tokens for a pending or denied request. A GitHub App installation token avoids the organisation-approval path and does not expire."
+            echo "::error title=Workflow write permissions are disabled::Creating refs/heads/${probe} in ${GITHUB_REPOSITORY} failed: ${got}. release-please must create a branch and open a pull request, so workflows need write permissions AND permission to create pull requests. That is three settings, and the lowest one wins: check the repository, then the organisation, then the enterprise, at Settings -> Actions -> General -> Workflow permissions. Read them with: gh api repos/${GITHUB_REPOSITORY}/actions/permissions/workflow"
             exit 1
           }
           created=1
           if [ "$got" != "$GITHUB_SHA" ]; then
-            echo "::error title=RELEASE_PLEASE_TOKEN created a ref that points elsewhere::Asked for refs/heads/${probe} at ${GITHUB_SHA} but the API reported '${got}'. The preflight will not vouch for a token whose result is not what release-please relies on."
+            echo "::error title=The workflow token created a ref that points elsewhere::Asked for refs/heads/${probe} at ${GITHUB_SHA} but the API reported '${got}'. The preflight will not vouch for a token whose result is not what release-please relies on."
             exit 1
           fi
           # Says only what was proven. Pull requests: Read and write cannot be
@@ -117,15 +119,22 @@ jobs:
       - id: rp
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
-          # NOT the default GITHUB_TOKEN, for two independent reasons. First,
-          # the first release run failed with "GitHub Actions is not permitted
-          # to create or approve pull requests" — a repository setting that
-          # blocks the Actions identity from opening the release PR at all.
-          # Second, even where that is allowed, a pull request authored by
-          # GITHUB_TOKEN does not trigger workflows, so the release PR would
-          # arrive with no checks reported — which is the state that invites
-          # merging past it unexamined. A PAT or App token fixes both.
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          # The Actions token, now that it is allowed to open pull requests.
+          # The first release run failed with "GitHub Actions is not permitted
+          # to create or approve pull requests", and the workaround was a PAT —
+          # which then failed three more times on organisation policy and token
+          # permissions. The real cause was a setting: workflow permissions were
+          # pinned read-only and PR creation disabled, at the enterprise, the
+          # organisation and the repository. With those raised, GITHUB_TOKEN
+          # does the job with nothing to approve, expire or rotate.
+          #
+          # The known cost: a pull request authored by GITHUB_TOKEN does not
+          # trigger workflows, so the release PR arrives with no checks
+          # reported. That is accepted here — it is a version-bump and
+          # changelog PR whose contents are generated from the commits CI
+          # already ran on, and a release that never opens is worse than one
+          # that opens unchecked.
+          token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 

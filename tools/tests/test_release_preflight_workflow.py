@@ -147,18 +147,21 @@ def test_a_token_that_cannot_create_a_ref_fails_the_preflight(tmp_path: Path) ->
     PAT in run 42117513449); only the ref create is refused."""
     code, output, calls = run_step(tmp_path, create="refused")
     assert code != 0, f"preflight passed a token that cannot create a ref\n{output}"
-    assert "Contents" in output, output
-    assert "Pull requests" in output, output
+    assert "write permissions" in output, output
+    assert "create pull requests" in output, output
     assert "Resource not accessible by personal access token" in output, "the refusal itself must be shown"
     assert CREATE_CALL in calls, calls
 
 
-def test_the_refusal_explains_org_approval_and_the_app_alternative(tmp_path: Path) -> None:
+def test_the_refusal_names_all_three_permission_levels_and_how_to_read_them(tmp_path: Path) -> None:
+    """A refusal here is a SETTING, and the setting exists in three places --
+    repository, organisation, enterprise -- where the lowest wins. Naming only
+    one sends the reader to a page that already looks correct, which is exactly
+    how this cost four failed releases."""
     _, output, _ = run_step(tmp_path, create="refused")
-    assert "Contents: Read and write" in output
-    assert "Pull requests: Read and write" in output
-    assert "Settings -> Personal access tokens" in output, "org approval is the live cause here"
-    assert "GitHub App" in output and "does not expire" in output
+    assert "repository" in output and "organisation" in output and "enterprise" in output
+    assert "Workflow permissions" in output, "name the setting, not just the symptom"
+    assert "actions/permissions/workflow" in output, "give a command that reads the real value"
     assert REPO in output
 
 
@@ -202,7 +205,7 @@ def test_a_failed_delete_does_not_fail_a_token_that_proved_it_can_write(tmp_path
 def test_a_failed_delete_does_not_mask_a_refused_create(tmp_path: Path) -> None:
     code, output, _ = run_step(tmp_path, create="refused", delete="fail")
     assert code != 0, output
-    assert "Contents" in output and "Pull requests" in output, output
+    assert "write permissions" in output and "create pull requests" in output, output
     assert "::warning" not in output, "nothing was created, so there is nothing to warn about"
 
 
@@ -235,14 +238,14 @@ def test_a_missing_run_identity_fails_rather_than_probing_a_shared_name(tmp_path
 def test_an_unset_token_still_fails_with_its_own_message_and_never_calls_gh(tmp_path: Path) -> None:
     code, output, calls = run_step(tmp_path, token="")
     assert code == 1, output
-    assert "RELEASE_PLEASE_TOKEN is not set" in output
+    assert "workflow token is empty" in output
     assert calls == [], calls
 
 
 def test_a_token_that_cannot_read_the_repo_still_fails_with_its_own_message(tmp_path: Path) -> None:
     code, output, calls = run_step(tmp_path, read="dead")
     assert code == 1, output
-    assert "RELEASE_PLEASE_TOKEN cannot read this repository" in output
+    assert "cannot read this repository" in output
     assert "Not Found" in output, "gh's own words must be shown"
     assert not any(c.startswith(("POST", "DELETE")) for c in calls), "nothing to probe or clean up"
 

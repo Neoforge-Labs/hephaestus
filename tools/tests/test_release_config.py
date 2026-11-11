@@ -185,23 +185,33 @@ def test_wheels_cover_the_required_targets() -> None:
         assert needle in text, needle
 
 
-def test_release_please_does_not_use_the_actions_token() -> None:
+def test_release_please_uses_the_actions_token_with_the_permissions_it_needs() -> None:
     """The first release run failed with "GitHub Actions is not permitted to
-    create or approve pull requests" -- the Actions identity cannot open the
-    release PR. And even where it is allowed, a PR authored by GITHUB_TOKEN
-    does not trigger workflows, so the release PR arrives with no checks
-    reported, which is the state that invites merging past it unexamined.
+    create or approve pull requests", and the workaround was a PAT -- which
+    then failed three more times, on organisation policy and on token
+    permissions. The cause was never the token: workflow permissions were
+    pinned read-only and PR creation disabled at the enterprise, the
+    organisation AND the repository, and the lowest setting wins.
 
-    So the step must pass an explicit token that is not GITHUB_TOKEN, and a
-    preflight must fail loudly when that secret is absent rather than letting
-    the action fail opaquely."""
+    With those raised, GITHUB_TOKEN does the job and there is no secret to
+    approve, expire or rotate. What must hold is that the job asks for the two
+    permissions release-please needs, and that a preflight proves the setting
+    still allows them -- because any of the three levels can take the write
+    back without this repository changing at all."""
     doc = load_workflow("release.yml")
-    steps = doc["jobs"]["release-please"]["steps"]
+    job = doc["jobs"]["release-please"]
+    steps = job["steps"]
     rp = next(s for s in steps if s.get("id") == "rp")
     token = rp["with"]["token"]
-    assert "secrets.RELEASE_PLEASE_TOKEN" in token, token
-    assert "GITHUB_TOKEN" not in token, token
-    assert any("RELEASE_PLEASE_TOKEN is not set" in str(s.get("run", "")) for s in steps)
+    assert "secrets.GITHUB_TOKEN" in token, token
+    assert "RELEASE_PLEASE_TOKEN" not in (WORKFLOWS / "release.yml").read_text(), (
+        "the PAT secret must be gone from the workflow, not merely unused"
+    )
+    # The permissions block is what grants GITHUB_TOKEN its scopes, so it is
+    # now load-bearing rather than incidental.
+    assert job["permissions"]["contents"] == "write", job["permissions"]
+    assert job["permissions"]["pull-requests"] == "write", job["permissions"]
+    assert any("Workflow write permissions are disabled" in str(s.get("run", "")) for s in steps)
     # Presence is not enough: the third release attempt failed with "Resource
     # not accessible by personal access token" from a token that WAS set. The
     # preflight must prove the token can write refs before release-please
