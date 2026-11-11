@@ -1,0 +1,153 @@
+/* Brand tokens and site chrome.
+ *
+ * The palette is not invented here: ink, bronze, bronze-deep and paper are the
+ * four colours in docs/site/public/brand/palette.json, which the mark, favicon
+ * and social card are drawn from. palette.json also records the constraint that
+ * shapes every light-mode rule below: bronze is 3.0:1 on white and 2.7:1 on
+ * paper, so it is never a text or icon colour on a light background --
+ * bronze-deep is. On ink, bronze measures 6.5:1 and is safe for body text.
+ *
+ * Loaded after nextra-theme-docs/style.css so these win.
+ */
+
+:root {
+  --ink: #0c0a09;
+  --bronze: #c2884a;
+  --bronze-deep: #8a5a24;
+  --paper: #f5f0e8;
+
+  /* Surfaces, lifted from the ground by small steps rather than by shadow. */
+  --ground: var(--ink);
+  --raised: #16120f;
+  --struck: #1e1813;
+  --hairline: #2a211a;
+  --hairline-strong: #3d2f23;
+
+  /* Text. Secondary is tinted from the palette's own warmth, never grey. */
+  --fg: var(--paper);
+  --fg-dim: #bfb4a6;
+  --fg-faint: #8a7f72;
+  --accent: var(--bronze);
+  --accent-ink: var(--ink);
+
+  /* Nextra's docs theme derives its link, focus and accent colours from these.
+     Bronze is hsl(31 50% 52%). */
+  --nextra-primary-hue: 31deg;
+  --nextra-primary-saturation: 50%;
+  --nextra-primary-lightness: 52%;
+
+  --measure: 68ch;
+  --step: 0.5rem;
+  --radius: 10px;
+  --radius-lg: 18px;
+
+  /* One easing for the whole site: exponential ease-out. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  color-scheme: dark;
+}
+
+:root.light,
+:root[data-theme='light'] {
+  --ground: var(--paper);
+  --raised: #ffffff;
+  --struck: #eae2d6;
+  --hairline: #ded3c2;
+  --hairline-strong: #c8b9a3;
+  --fg: var(--ink);
+  --fg-dim: #4a423a;
+  --fg-faint: #6f6557;
+  /* bronze fails on paper; bronze-deep is 4.9:1 on it. */
+  --accent: var(--bronze-deep);
+  --accent-ink: var(--paper);
+
+  color-scheme: light;
+}
+
+html {
+  background: var(--ground);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--ground);
+  color: var(--fg);
+  font-synthesis-weight: none;
+  text-rendering: optimizeLegibility;
+}
+
+/* --- Browser surfaces: the parts we did not draw still carry the design. --- */
+
+::selection {
+  background: color-mix(in oklab, var(--accent) 32%, transparent);
+  color: var(--fg);
+}
+
+:root {
+  caret-color: var(--accent);
+  accent-color: var(--accent);
+  scrollbar-color: var(--hairline-strong) transparent;
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--hairline-strong);
+  border: 2px solid var(--ground);
+  border-radius: 99px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+:where(a, button, [tabindex], input, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+a {
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: from-font;
+}
+
+/* Figures in a table of numbers should line up. */
+table :where(td, th) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Docs chrome: make Nextra's shell read as the same site as the root. --- */
+
+.nextra-navbar,
+.nextra-navbar-blur {
+  background: color-mix(in oklab, var(--ground) 86%, transparent);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.nextra-sidebar,
+.nextra-toc {
+  font-size: 0.875rem;
+}
+
+article code {
+  font-variant-ligatures: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

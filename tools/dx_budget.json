@@ -1,0 +1,7 @@
+{
+  "_comment": "The two numbers the five-minute promise rests on. tools/dx_budget.sh measures both and, with --enforce, fails when one is breached. The landing page reads this file rather than repeating the figures, so a budget change moves the page.",
+  "boot_seconds": 60,
+  "boot_what": "heph dev up in examples/hello, images already pulled",
+  "wheel_mb": 5,
+  "wheel_target": "manylinux x86_64"
+}

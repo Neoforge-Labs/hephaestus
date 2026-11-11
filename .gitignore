@@ -43,3 +43,8 @@ docs/site/AGENTS.md
 # repo state: the Git integration does not need it and it must not be committed.
 .vercel/
 .vercel
+
+# The tutorial runs `uv add`, which rewrites this lock on every run. Committing
+# it would leave CI with a dirty tree after the five-minute path, and resolving
+# fresh is the more honest test: it proves what PyPI serves today.
+examples/hello/uv.lock

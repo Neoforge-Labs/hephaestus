@@ -1,0 +1,59 @@
+# Reusable check for the docs site: every generator is current, the static
+# export builds, its tests pass, and no internal link dangles.
+#   uses: Neoforge-Labs/hephaestus/.github/workflows/docs-ci.yml@v0
+#
+# The generator --check steps come first and are the point of this workflow.
+# Every page on the site is generated from spec/, conventions/ or the tutorial
+# script, so a committed page that no longer matches its source is the failure
+# mode this repository is most exposed to -- and the one a human reviewer is
+# least likely to notice, because a stale page still renders.
+name: docs-ci
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.6'
+          python-version: '3.12'
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: '1.4.4'
+
+      # Generated pages must match their sources. Each --check names the file
+      # and the command that regenerates it.
+      - name: The error pages match spec/errors.yaml
+        run: uv run tools/gen_error_pages.py --check
+      - name: The reference, spec and ADR pages match their sources
+        run: uv run tools/gen_site_pages.py --check
+      - name: The tutorial and proof block match the script CI runs
+        run: uv run tools/gen_quickstart.py --check
+
+      - name: Install the workspace
+        run: bun install --frozen-lockfile
+      - name: Build the static export
+        run: bun run --cwd docs/site build
+      - name: Site tests
+        run: bun test --cwd docs/site
+
+      # The export is a filesystem, so "does this link resolve?" has an exact
+      # answer without a browser or the network. External links are not checked.
+      - name: No internal link dangles
+        run: uv run tools/check_site_links.py
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-site
+          path: docs/site/out
+          retention-days: 7

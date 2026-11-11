@@ -1,8 +1,29 @@
 import type { ReactNode } from 'react'
-import { Footer, Layout, Navbar } from 'nextra-theme-docs'
+import { IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google'
 import { Head } from 'nextra/components'
-import { getPageMap } from 'nextra/page-map'
+// Order matters and is the reason both stylesheets are imported here rather
+// than in the docs layout: Next.js emits CSS in import order, and the root
+// layout's imports precede a child layout's. Nextra's base first, our tokens
+// second, so ours win.
 import 'nextra-theme-docs/style.css'
+import './global.css'
+
+// Self-hosted at build time by next/font, so no runtime request to Google and
+// no layout shift. Plex is the industrial lineage the mark belongs to, and its
+// mono is the voice for the thing this site is mostly about: commands.
+const sans = IBM_Plex_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-sans',
+  display: 'swap'
+})
+
+const mono = IBM_Plex_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500'],
+  variable: '--font-mono',
+  display: 'swap'
+})
 
 // The brand files are generated and committed under public/brand (the logo
 // design; tools/gen_brand_raster.py). Nothing references them unless the head
@@ -26,30 +47,16 @@ export const metadata = {
   twitter: { card: 'summary_large_image', images: ['/brand/og-card.png'] }
 }
 
-export default async function RootLayout({ children }: { children: ReactNode }) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" dir="ltr" suppressHydrationWarning>
-      <Head />
-      <body>
-        <Layout
-          navbar={
-            <Navbar
-              logo={<strong>heph</strong>}
-              projectLink="https://github.com/Neoforge-Labs/hephaestus"
-            >
-              <a href="/">Docs</a>
-              <a href="/spec">Spec</a>
-              <a href="/adrs">ADRs</a>
-              <a href="https://github.com/Neoforge-Labs/hephaestus">GitHub</a>
-            </Navbar>
-          }
-          pageMap={await getPageMap()}
-          docsRepositoryBase="https://github.com/Neoforge-Labs/hephaestus/tree/main/docs/site"
-          footer={<Footer>MIT © NeoForge Labs</Footer>}
-        >
-          {children}
-        </Layout>
-      </body>
+    <html
+      lang="en"
+      dir="ltr"
+      className={`${sans.variable} ${mono.variable}`}
+      suppressHydrationWarning
+    >
+      <Head color={{ hue: 31, saturation: 50, lightness: 52 }} backgroundColor={{ dark: '#0c0a09', light: '#f5f0e8' }} />
+      <body>{children}</body>
     </html>
   )
 }

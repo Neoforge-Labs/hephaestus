@@ -1,0 +1,16 @@
+{
+  "_generated": "GENERATED FILE - do not edit by hand. Source: examples/hello/tutorial_test.sh and tools/dx_budget.json. Regenerate with `uv run tools/gen_quickstart.py`.",
+  "commands": [
+    "go install github.com/Neoforge-Labs/hephaestus/go/cmd/heph@latest",
+    "uv add \"hephkit[fastapi,observability,settings]\"",
+    "heph dev up",
+    "uv run fastapi dev app.py --port 54080",
+    "curl -s \"http://localhost:54080/price?amount=10.2&currency=KES\""
+  ],
+  "budget": {
+    "bootSeconds": 60,
+    "bootWhat": "heph dev up in examples/hello, images already pulled",
+    "wheelMb": 5,
+    "wheelTarget": "manylinux x86_64"
+  }
+}

@@ -1,0 +1,190 @@
+{
+  "_generated": "GENERATED FILE - do not edit by hand. Source: spec/modules.yaml, spec/errors.yaml, spec/heph-spec.md and the design's Rollout. Regenerate with `uv run tools/gen_site_pages.py`.",
+  "specVersion": "0.3.0",
+  "currentPhase": 1,
+  "errorCodeCount": 12,
+  "shipped": [
+    {
+      "name": "mail",
+      "home": "compose",
+      "maturity": "experimental"
+    },
+    {
+      "name": "objects",
+      "home": "compose",
+      "maturity": "experimental"
+    },
+    {
+      "name": "postgres",
+      "home": "compose",
+      "maturity": "experimental"
+    },
+    {
+      "name": "redis",
+      "home": "compose",
+      "maturity": "experimental"
+    },
+    {
+      "name": "stripe",
+      "home": "compose",
+      "maturity": "experimental"
+    },
+    {
+      "name": "telemetry",
+      "home": "compose",
+      "maturity": "experimental"
+    },
+    {
+      "name": "node",
+      "home": "docker",
+      "maturity": "experimental"
+    },
+    {
+      "name": "python",
+      "home": "docker",
+      "maturity": "experimental"
+    },
+    {
+      "name": "cli",
+      "home": "go",
+      "maturity": "experimental"
+    },
+    {
+      "name": "compose",
+      "home": "go",
+      "maturity": "experimental"
+    },
+    {
+      "name": "fragments",
+      "home": "go",
+      "maturity": "experimental"
+    },
+    {
+      "name": "heph",
+      "home": "go",
+      "maturity": "experimental"
+    },
+    {
+      "name": "ingot",
+      "home": "go",
+      "maturity": "experimental"
+    },
+    {
+      "name": "errors",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
+      "name": "hashing",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
+      "name": "money",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
+      "name": "observability",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
+      "name": "settings",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
+      "name": "signatures",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
+      "name": "hephkit-core",
+      "home": "rust",
+      "maturity": "experimental"
+    },
+    {
+      "name": "hephkit-py",
+      "home": "rust",
+      "maturity": "experimental"
+    }
+  ],
+  "planned": [
+    {
+      "name": "auth",
+      "home": "python",
+      "phase": 2
+    },
+    {
+      "name": "idempotency",
+      "home": "python",
+      "phase": 2
+    },
+    {
+      "name": "lab.repro",
+      "home": "python",
+      "phase": 3
+    },
+    {
+      "name": "billing",
+      "home": "python",
+      "phase": 4
+    },
+    {
+      "name": "ledger",
+      "home": "python",
+      "phase": 4
+    },
+    {
+      "name": "outbox",
+      "home": "python",
+      "phase": 4
+    },
+    {
+      "name": "registry",
+      "home": "ts",
+      "phase": 4
+    },
+    {
+      "name": "webhooks",
+      "home": "python",
+      "phase": 4
+    },
+    {
+      "name": "heph new",
+      "home": "go",
+      "phase": 5
+    }
+  ],
+  "phases": [
+    {
+      "phase": 1,
+      "title": "Core and local stack"
+    },
+    {
+      "phase": 2,
+      "title": "Product core"
+    },
+    {
+      "phase": 3,
+      "title": "Research core"
+    },
+    {
+      "phase": 4,
+      "title": "Money movement, UI and product AI"
+    },
+    {
+      "phase": 5,
+      "title": "Infrastructure, the CLI and ML infra"
+    },
+    {
+      "phase": 6,
+      "title": "Adapters"
+    },
+    {
+      "phase": 7,
+      "title": "Second consumers"
+    }
+  ]
+}

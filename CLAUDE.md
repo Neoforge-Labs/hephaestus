@@ -74,9 +74,15 @@ summarise them away. Done means green.
   the brand SVGs, `palette.json` and the two PNGs against `tools/brand-provenance.txt`.
   It is platform-independent because text rasterisation is not. `--check-render`
   re-renders and compares bytes; it is a local convenience that can differ across platforms.)
-- Repo checks: `python tools/check_adrs.py && python tools/check_registry.py && python tools/check_vectors.py`
+- Repo checks: `python tools/check_adrs.py && python tools/check_registry.py && python tools/check_vectors.py && python tools/check_modules.py`
+- Docs site: `uv run tools/gen_error_pages.py --check && uv run tools/gen_site_pages.py --check && uv run tools/gen_quickstart.py --check`,
+  then `bun install --frozen-lockfile && bun run --cwd docs/site build && bun test --cwd docs/site && uv run tools/check_site_links.py`
+  (every page is generated from `spec/`, `conventions/` or the tutorial script, and a stale page still renders, so `--check` is the only thing that catches one)
 - Local stack: `bash compose/test/boot_test.sh`
-- Five-minute path: `bash examples/hello/tutorial_test.sh`
+- Five-minute path: `bash examples/hello/tutorial_test.sh` (needs Docker and Go; it runs the
+  commands the tutorial page prints, so it is also what keeps that page honest)
+- DX budget: `bash tools/dx_budget.sh` to report, `--enforce` to fail on a breach
+  (boot is measured with images already pulled; a cold run measures the pull, not the boot)
 
 ## Conventions
 

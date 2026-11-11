@@ -1,0 +1,53 @@
+# The five-minute path, run as the docs print it, plus the DX budget it rests on.
+#   uses: Neoforge-Labs/hephaestus/.github/workflows/five-minute.yml@v0
+#
+# examples/hello/tutorial_test.sh does not list the published commands, it
+# executes them, so this job is what keeps the tutorial page and the landing
+# page's proof block from becoming fiction. It needs Docker (the telemetry
+# fragment), Go (the CLI the tutorial installs) and uv.
+#
+# This runs our OWN checkout at our own SHA, not a third-party repository, which
+# is why it lives here and not in ecosystem.yml -- see the cache-poisoning note
+# at the top of that file for why untrusted rows may not run in this context.
+name: five-minute
+
+on:
+  workflow_call:
+    inputs:
+      enforce-budget:
+        description: >-
+          Fail when tools/dx_budget.json is breached. Off by default: boot time
+          on a shared runner is noisy enough that asserting it on every pull
+          request would make a real gate look flaky and get it muted. The
+          scheduled run turns it on.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  tutorial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.6'
+          python-version: '3.12'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          # From go/go.mod, the way go-ci.yml does it, so the version is not
+          # copied into a second place that can drift from .prototools.
+          go-version-file: go/go.mod
+
+      - name: The five-minute path
+        run: bash examples/hello/tutorial_test.sh
+
+      # Reported on every run so the numbers are visible in the log, and
+      # enforced only where the measurement is trustworthy.
+      - name: DX budget
+        run: bash tools/dx_budget.sh ${{ inputs.enforce-budget && '--enforce' || '' }}

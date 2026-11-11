@@ -44,6 +44,7 @@ CONTENT = Path("docs/site/content")
 ADR_SRC = Path("docs/adr")
 ATTRIBUTES_SRC = Path("conventions/attributes.yaml")
 MODULES_SRC = Path("spec/modules.yaml")
+ERRORS_SRC = Path("spec/errors.yaml")
 SPEC_SRC = Path("spec/heph-spec.md")
 DESIGN_SRC = Path("docs/superpowers/specs/2026-11-04-hephaestus-design.md")
 
@@ -159,6 +160,58 @@ See the [roadmap](/roadmap) for the full picture.
 {planned_rows}
 """
     )
+
+
+def current_phase(mods: list[dict[str, Any]]) -> int:
+    """The phase being built now, derived rather than declared.
+
+    Everything `shipped` is the work of a completed-or-current phase, and every
+    `planned` row carries the phase that will bring it. So the phase in progress
+    is one below the earliest planned phase. When phase 2's modules ship and
+    their rows move to `shipped`, this follows on its own -- there is no "current
+    phase" constant anywhere to go stale.
+    """
+    planned = [int(m["phase"]) for m in mods if m.get("status") == "planned" and m.get("phase")]
+    if not planned:
+        raise ValueError(f"{MODULES_SRC}: no planned rows, so the current phase cannot be derived")
+    return min(planned) - 1
+
+
+def render_site_data(mods: list[dict[str, Any]], design: str, spec: str, errors: list[dict[str, Any]]) -> str:
+    """Build-time data for the landing page, as JSON.
+
+    The landing page states what runs today, what is coming and which phase we
+    are in. Every one of those is a claim, so none of them is typed into a
+    component: this file is the single generated source they all read, and
+    `--check` fails if it drifts from the registries.
+    """
+    shipped = [m for m in mods if m.get("status") == "shipped"]
+    planned = [m for m in mods if m.get("status") == "planned"]
+    phases = []
+    for i, title in enumerate(parse_rollout(design), start=1):
+        title = _CAPABILITY_TITLES.get(title, title)
+        for name in PRIVATE_NAMES:
+            if name in title:
+                raise ValueError(f"rollout phase {i} names {name}; add a capability title for it")
+        # "Weeks 3-4: Product core" -> the part after the week estimate.
+        phases.append({"phase": i, "title": title.split(": ", 1)[-1].strip()})
+    data = {
+        "_generated": "GENERATED FILE - do not edit by hand. Source: spec/modules.yaml, spec/errors.yaml, "
+        "spec/heph-spec.md and the design's Rollout. Regenerate with `uv run tools/gen_site_pages.py`.",
+        "specVersion": parse_spec_version(spec),
+        "currentPhase": current_phase(mods),
+        "errorCodeCount": len(errors),
+        "shipped": [
+            {"name": m["name"], "home": m["home"], "maturity": m["maturity"]}
+            for m in sorted(shipped, key=lambda m: (m["home"], m["name"]))
+        ],
+        "planned": [
+            {"name": m["name"], "home": m["home"], "phase": int(m["phase"])}
+            for m in sorted(planned, key=lambda m: (int(m["phase"]), m["name"]))
+        ],
+        "phases": phases,
+    }
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
 def parse_rollout(design: str) -> list[str]:
@@ -296,6 +349,12 @@ def generate(repo_root: Path) -> dict[Path, str]:
     }
 
     spec = (repo_root / SPEC_SRC).read_text(encoding="utf-8")
+    out[content / "_snippets/site-data.json"] = render_site_data(
+        mods,
+        (repo_root / DESIGN_SRC).read_text(encoding="utf-8"),
+        spec,
+        yaml.safe_load((repo_root / ERRORS_SRC).read_text(encoding="utf-8")),
+    )
     note = render_spec_note(parse_spec_version(spec))
     out[content / "spec/index.md"] = _synced("spec/heph-spec.md", _title(spec, "heph-spec"), note + spec)
 

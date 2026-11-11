@@ -1,11 +1,14 @@
 # Ecosystem CI: does a change here still work for what is built from it?
-# Runs each consumer at a pinned ref. NO row is enabled yet: examples/hello
-# (this repo's own five-minute path) is the first candidate and its tutorial
-# script does not exist in the tree, so the row stays `enabled: false` rather
-# than make the job permanently red. The product repos are listed so the matrix
-# is complete. An `enabled: false` entry is NOT run: each one emits a visible
-# "skipped" notice instead of passing quietly. Flip `enabled` and set a real
-# `ref` and `command` when a product adopts hephkit.
+# Runs each consumer at a pinned ref. NO row is enabled yet, and nothing calls
+# this workflow yet either: it is `workflow_call` only and ci.yml does not use
+# it, so the matrix is a declaration of intent rather than a running gate. That
+# is honest about where it stands -- the first row to enable is a product that
+# has adopted hephkit, and none has. The repo's own five-minute path is NOT
+# that row; it runs in five-minute.yml from ci.yml, because an example we ship
+# cannot tell us whether a change still works for someone else.
+# An `enabled: false` entry is NOT run: each one emits a visible "skipped"
+# notice instead of passing quietly. Flip `enabled`, set a real `ref` and
+# `command`, AND add a caller, when a product adopts hephkit.
 #
 # `workflow_call` ONLY, deliberately. It previously also ran on `schedule` and
 # `workflow_dispatch`, and CodeQL flagged that as cache poisoning
@@ -38,14 +41,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Disabled until examples/hello exists. The row was enabled while its
-          # command named a tutorial_test.sh that is not in the tree, so the job
-          # could only ever be red -- and a gate that is always red is a gate
-          # people learn to ignore. docs/superpowers/plans/2026-11-05-docs-site-and-landing-page.md,
-          # Task 7 adds the tutorial; flip this back to
-          # true in the same change, and
-          # test_enabled_ecosystem_rows_are_pinned_and_runnable will then check
-          # that the script it names is really there.
+          # The tutorial now exists, and it runs -- in five-minute.yml, called
+          # from ci.yml, on every push and pull request. This row stays
+          # disabled, and deliberately so: nothing calls ecosystem.yml (it is
+          # `workflow_call` only and has no caller), so flipping this to true
+          # would change no behaviour while looking like it had. More to the
+          # point, examples/hello is this repository's own example at its own
+          # SHA, not a consumer: the question this matrix exists to ask is
+          # whether a change here still works for something built from it, and
+          # our own example cannot answer that. The first real row is a product
+          # adopting hephkit. Keeping the five-minute path here as well would
+          # only run it twice.
           - name: examples/hello
             enabled: false
             repo: Neoforge-Labs/hephaestus
