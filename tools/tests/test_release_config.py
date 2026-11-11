@@ -33,6 +33,8 @@ EXPECTED_WORKFLOWS = [
     "docker-publish.yml",
     "compose-boot.yml",
     "ecosystem.yml",
+    "docs-ci.yml",
+    "five-minute.yml",
     "release.yml",
 ]
 REUSABLE = [w for w in EXPECTED_WORKFLOWS if w not in ("ci.yml", "release.yml")]
@@ -140,9 +142,55 @@ def test_third_party_actions_are_pinned_to_full_shas() -> None:
 def test_pr_ci_calls_every_gate() -> None:
     jobs = load_workflow("ci.yml")["jobs"]
     called = {j.get("uses", "") for j in jobs.values()}
-    for name in ("python-ci", "rust-ci", "go-ci", "compose-boot", "docker-publish"):
+    for name in ("python-ci", "rust-ci", "go-ci", "compose-boot", "docker-publish", "docs-ci", "five-minute"):
         assert f"./.github/workflows/{name}.yml" in called, name
     assert "pull_request" in load_workflow("ci.yml")["on"]
+
+
+def test_docs_job_runs_every_generator_check() -> None:
+    """A stale generated page still renders, so only --check catches it.
+
+    This is the failure this repository is most exposed to and the one a human
+    reviewer is least likely to see, which is why each generator is named here
+    rather than trusted to stay in the workflow.
+    """
+    text = (WORKFLOWS / "docs-ci.yml").read_text()
+    for generator in ("gen_error_pages.py", "gen_site_pages.py", "gen_quickstart.py"):
+        assert f"{generator} --check" in text, generator
+    assert "bun run --cwd docs/site build" in text
+    assert "bun test --cwd docs/site" in text
+    assert "check_site_links.py" in text
+
+
+def test_five_minute_runs_the_tutorial_and_enforces_only_on_schedule() -> None:
+    """The tutorial is the five-minute claim; the budget is the number under it.
+
+    `enforce-budget` must be off by default and on for the scheduled run: boot
+    time on a shared runner is noisy, and a flaky gate gets muted rather than
+    fixed.
+    """
+    workflow = load_workflow("five-minute.yml")
+    text = (WORKFLOWS / "five-minute.yml").read_text()
+    assert "bash examples/hello/tutorial_test.sh" in text
+    assert "tools/dx_budget.sh" in text
+
+    inputs = workflow["on"]["workflow_call"]["inputs"]
+    assert inputs["enforce-budget"]["default"] is False
+
+    ci = load_workflow("ci.yml")["jobs"]
+    caller = next(j for j in ci.values() if j.get("uses", "").endswith("five-minute.yml"))
+    assert caller["with"]["enforce-budget"] == "${{ github.event_name == 'schedule' }}"
+
+
+def test_the_scripts_ci_runs_are_in_the_tree() -> None:
+    """Every `bash <path>` a workflow runs names a file that exists.
+
+    A workflow step pointing at a missing script fails only when the job runs,
+    which for a scheduled gate can be a week after the mistake.
+    """
+    for path in WORKFLOWS.glob("*.yml"):
+        for script in re.findall(r"bash\s+((?:tools|examples)/\S+\.sh)", path.read_text()):
+            assert (ROOT / script).is_file(), f"{path.name} runs {script}, which is not in the tree"
 
 
 def test_python_ci_runs_fast_path_and_every_generator_check() -> None:

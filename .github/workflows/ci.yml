@@ -55,6 +55,17 @@ jobs:
   compose-boot:
     uses: ./.github/workflows/compose-boot.yml
 
+  docs:
+    uses: ./.github/workflows/docs-ci.yml
+
+  five-minute:
+    uses: ./.github/workflows/five-minute.yml
+    with:
+      # Measured on every run and reported in the log; failed on only where the
+      # measurement is trustworthy. A 60-second boot assertion on a shared
+      # runner would be flaky, and a flaky gate is one people learn to ignore.
+      enforce-budget: ${{ github.event_name == 'schedule' }}
+
   wheels:
     uses: ./.github/workflows/rust-wheels.yml
 
