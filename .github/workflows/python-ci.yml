@@ -49,7 +49,11 @@ jobs:
       - name: Conformance vectors are valid
         run: moon run conformance:check
       - name: Repo tooling tests
-        run: uv run --with pytest --with pyyaml --with jsonschema pytest tools/tests -q
+        # rfc8785 is here because test_gen_idempotency_vectors imports the
+        # generator to run its --check, and the generator uses the reference
+        # canonicaliser. The version is pinned equal to that script's PEP 723
+        # header, and tools/tests/test_release_config.py fails if the two drift.
+        run: uv run --with pytest --with pyyaml --with jsonschema --with rfc8785==0.1.4 pytest tools/tests -q
       - name: pip-audit
         working-directory: python/hephkit
         run: |
