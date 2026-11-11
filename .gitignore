@@ -38,3 +38,8 @@ docs/site/.next/
 docs/site/next-env.d.ts
 # next dev regenerates this agent-instructions file; instructions live in CLAUDE.md
 docs/site/AGENTS.md
+
+# `vercel link` writes the project and org ids here. Local deploy state, not
+# repo state: the Git integration does not need it and it must not be committed.
+.vercel/
+.vercel
