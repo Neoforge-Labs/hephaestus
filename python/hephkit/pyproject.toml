@@ -74,3 +74,8 @@ show_missing = true
 [tool.mypy]
 strict = true
 python_version = "3.12"
+
+# asyncpg ships no stubs and no py.typed marker.
+[[tool.mypy.overrides]]
+module = ["asyncpg", "asyncpg.*"]
+ignore_missing_imports = true
