@@ -31,6 +31,7 @@
 - No new hashing. Content hashes come from `hephkit.hashing.content_hash` (RFC 8785 JCS + SHA-256, spec §4.2).
 - Error codes match `^HEPH-[A-Z]{2,6}-\d{3}$` and live only in `spec/errors.yaml`.
 - Every module carries `Maturity: experimental.` in its module docstring and a matching row in `spec/modules.yaml`.
+- **Each module task adds its own `spec/modules.yaml` row, in the same commit as the module (Ruling 24).** An earlier draft of this plan gave all six rows to Task 14. That is wrong: `tools/check_modules.py` fails on a module that exists on disk with no row, so deferring the rows leaves the branch red from Task 7 through Task 13. Task 14 keeps the docs pages and the gate, not the rows.
 - Generated files are never hand-edited: `_codes.py`, `conventions.py`, `go/internal/fragments/files/`, docs-site pages, `_snippets/site-data.json`.
 - Conventional Commits. Branch `work/<topic>`. **No AI attribution** in commit messages, PR bodies or branch names.
 - Local host ports come from the 54xxx block. MLflow takes **54500**.
@@ -77,7 +78,7 @@ Input classes the spec implies that no task's happy path exercises, most likely 
 | `conformance/schema/vector-file.schema.json` | Three `lab.*` suites in the `suite` enum; `spec` const → 0.5.0 |
 | every `conformance/*/*.json` | `spec` field re-stamped to 0.5.0 in Task 10 |
 | `spec/errors.yaml` | Four `LAB` codes |
-| `spec/modules.yaml` | Replace the `lab.repro` planned row with six shipped rows |
+| `spec/modules.yaml` | Six shipped rows, each added by its own module task (Ruling 24); the `lab.repro` planned row is replaced by Task 8's |
 | `tools/check_vectors.py` | `MIN_CASES` for the three new suites |
 | `tools/check_modules.py` | Scan a second python tree; resolve dotted module names |
 | `python/hephkit/src/hephkit/__init__.py` | **Deleted** (PEP 420) |
@@ -736,7 +737,7 @@ git commit -m "feat(lab): mlflow tracking that no-ops when unconfigured"
 
 **Files:**
 - Create: `examples/lab-replay/` (`experiment.py`, `moon.yml`, `pyproject.toml`, `gate_test.sh`)
-- Modify: `spec/modules.yaml` (six shipped rows)
+- Verify: `spec/modules.yaml` (the six rows its module tasks added — this task adds none)
 - Modify: `.github/workflows/ci.yml` (call the gate)
 - Create: docs pages for the six modules
 - Modify: `.moon/workspace.yml`
@@ -759,7 +760,7 @@ A registered experiment with two cells over synthetic data, deterministic under 
 
 - [ ] **Step 4: Add the module rows and regenerate `reference/modules.mdx`**
 
-Six rows in `spec/modules.yaml`: `lab.config`, `lab.repro`, `lab.record`, `lab.replay`, `lab.gates`, `lab.track` — all `home: python`, `status: shipped`, `maturity: experimental`, with `spec_section` `null` except `lab.repro` (`"7"`), `lab.record` (`"8"`) and `lab.replay` (`"9"`). Replace the existing `{name: lab.repro, status: planned, phase: 3}` row.
+Per Ruling 24 each module task added its own row, so **verify rather than add**. All six must be present — `lab.config`, `lab.repro`, `lab.record`, `lab.replay`, `lab.gates`, `lab.track` — all `home: python`, `status: shipped`, `maturity: experimental`, with `spec_section` `null` except `lab.repro` (`"7"`), `lab.record` (`"8"`) and `lab.replay` (`"9"`), and the old `{name: lab.repro, status: planned, phase: 3}` row gone. If any is missing, add it here and say which task should have.
 
 Run: `uv run tools/gen_site_pages.py && uv run tools/gen_site_pages.py --check`
 Expected: `reference/modules.mdx` regenerated, then `--check` PASS. Never hand-edit it.
