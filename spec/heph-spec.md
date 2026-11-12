@@ -1,6 +1,6 @@
 # heph-spec
 
-- **Version:** 0.4.0
+- **Version:** 0.5.0
 - **Status:** Draft for implementation in Phase 1; every module implementing it is `experimental`.
 - **Registries:** `spec/errors.yaml` (error codes), `conventions/attributes.yaml` (telemetry attributes), `spec/currencies.yaml` (ISO 4217 minor units, with its publication pinned by `spec/currencies.source.yaml`).
 
@@ -21,6 +21,8 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 - Fractional digits beyond a currency's exponent are accepted when every one of them is zero, because the value is preserved exactly; a non-zero digit beyond the exponent still needs a rounding mode (3.6, ADR 0016).
 - Ordering two amounts of different currencies is `HEPH-MONEY-409`, never a boolean, so ordering is a fallible operation and is never offered through an interface that cannot fail; equality keeps answering every pair (3.8).
 - The accepted currency set is the whole of ISO 4217 List One, a code being accepted if and only if List One gives it a numeric minor-unit field, which includes the funds codes and excludes the `N.A.` codes (3.3, ADR 0017).
+- The provenance record (section 7) is normative, and its fields split by whether they decide re-execution or merely describe it: `config_hash`, `data_hash`, `deps_hash` and `code_sha` form the determinism contract, while `environment` is descriptive and is never compared (7.1, 7.2, ADR 0024).
+- A run is `provenance-only` unless the working tree is clean and a dependency lockfile exists, and `environment` never carries a hostname, a username or a filesystem path (7.3, 7.5, ADR 0024).
 
 ## 1. Errors
 
@@ -178,16 +180,48 @@ This matches the `rfc8785` reference package, which raises on integer literals o
 
 ## 7. Provenance record
 
-**Status: draft.** Not implemented in Phase 1; fields may change before it is promoted.
+7.1. A provenance record describes one research run. A record MUST carry every member of this table, with the type given, and MUST NOT carry a top-level member this specification does not define. The last column says whether the member belongs to the **determinism contract**: the set of members that decide whether a re-execution is the same run, as against the members that merely describe it.
 
-7.1. A provenance record describes one research run with these fields:
+| Field | Type | Meaning | In the determinism contract |
+| --- | --- | --- | --- |
+| `run_id` | string | Unique identifier of the run | no, an identifier |
+| `config_hash` | string | Content hash (4.2) of the canonical run configuration | yes |
+| `data_hash` | string | Content hash (4.2) of the input data | yes |
+| `deps_hash` | string or null | Content hash (4.2) of the dependency lockfile, or `null` when the run had no lockfile | yes |
+| `code_sha` | string | Git commit SHA of the code that ran, as lowercase hex | yes |
+| `class` | string | `deterministic` or `provenance-only` | no, a classification |
+| `environment` | object | Descriptive facts about the machine that ran it (7.4) | **no, and never compared (7.2)** |
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `run_id` | string | Unique identifier of the run |
-| `config_hash` | string | Content hash (4.2) of the canonical run configuration |
-| `data_hash` | string | Content hash (4.2) of the input data |
-| `code_sha` | string | Git commit SHA of the code that ran |
-| `class` | string | `deterministic` or `provenance-only` |
+`deps_hash` is a content hash over the bytes of the lockfile as committed, not over a parsed or re-serialised form, because the lockfile is not required to be JSON and 4.1 therefore does not apply to it. It is in the determinism contract because two different dependency sets genuinely give different answers, so a replay whose `deps_hash` differs from the record's has not reproduced the recorded run.
 
-7.2. `deterministic` runs re-execute from `config_hash` and `data_hash` to an identical result. `provenance-only` runs record how a result was produced but are not expected to reproduce it exactly.
+`run_id` is opaque: implementations MUST NOT derive meaning from its form. Two records that differ only in `run_id` describe the same re-execution.
+
+Where a record is hashed, the hash is a content hash (4.2) over the record's canonical JSON (4.1).
+
+7.2. `class` MUST be exactly `deterministic` or `provenance-only`. The hyphen in `provenance-only` is normative; `provenance_only` is not a value of this field.
+
+A `deterministic` run re-executes from the members of its determinism contract to an identical result. A `provenance-only` run records how a result was produced and makes no claim that re-executing it reproduces the result exactly. Both classes carry the same members: `provenance-only` is a weaker claim about a complete record, not an incomplete one.
+
+Whatever else a replay compares, it MUST NOT compare `environment`, and a record that differs from another only in `environment` MUST NOT be reported as a divergence. This is what makes `deterministic` a wearable label: the same configuration, data, dependencies and code re-executed on a second machine is the same run even though its platform, runtime version and accelerator differ, and a contract that said otherwise would be satisfiable by no two machines.
+
+7.3. A run MUST be classified `provenance-only`, never `deterministic`, unless **both** of these hold when the run starts:
+
+- **The working tree is clean.** Nothing tracked in the commit named by `code_sha` differs from it, and no untracked file is present other than those the repository's own ignore rules exclude. A tree for which `git status --porcelain` prints nothing satisfies this. Without the condition `code_sha` stops identifying the code that produced the result, which is the one thing it is in the record to do.
+- **A dependency lockfile exists.** Otherwise `deps_hash` is `null`, the dependency set is unpinned, and nothing in the record pins the versions that produced the result.
+
+A record whose `class` is `deterministic` therefore MUST carry a non-null `deps_hash`. An implementation MAY impose further conditions of its own before it classifies a run `deterministic`, and MUST NOT classify a run `deterministic` when either condition above fails. A run that fails either is still recorded in full: it carries `config_hash`, `data_hash`, `code_sha` and `environment`, and loses no traceability by being honest about its class.
+
+7.4. `environment` MUST be present and MUST be an object. It is descriptive: it records what the run met, so that a reader of a published result can see it, and it takes no part in any comparison (7.2). Its members:
+
+| Member | Type | Meaning | Example |
+| --- | --- | --- | --- |
+| `platform` | string | Operating system and architecture | `macOS-15.6-arm64` |
+| `python` | string | Version of the Python runtime the run executed under | `3.12.7` |
+| `frameworks` | object | Library name to version string, or `null` for a library that was looked for and not found | `{"numpy": "2.1.3", "torch": null}` |
+| `accelerator` | object or null | `{"model": string, "driver": string}`, or `null` when the run used no accelerator | `{"model": "NVIDIA RTX 4090", "driver": "550.54.14"}` |
+
+A `null` under `frameworks` means the library was looked for and was absent; a library the implementation never looked for is simply not a member. Absence is recorded, not assumed.
+
+These members are individually optional, because an implementation records only what it can observe, but their names and types are reserved: an implementation that records one of these facts MUST use the name and type given here and MUST NOT record the same fact under another name. An implementation whose runtime is not Python omits `python` and records its own runtime version under a member named for that runtime, such as `go`. Further members MAY be added, subject to 7.5.
+
+7.5. `environment` MUST NOT carry the hostname of the machine, the name of the user who ran it, or any filesystem path, under those or any other member names. A record is committed and published alongside the result it describes, and those three identify a person or a machine instead of describing an environment; 6.2 already requires `pii: true` attributes to be redacted from log output, and a record outlives a log line. A project that needs them keeps them in its own configuration, outside the record.

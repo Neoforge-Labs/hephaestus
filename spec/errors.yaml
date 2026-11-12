@@ -88,3 +88,27 @@
   area: DB
   detail_hint: The service could not get a database connection in time. Retry the request in a few moments.
   guidance: A pooled database connection could not be acquired before the acquire wait ran out, so the request was refused rather than left hanging. It is a capacity fault, not a client fault, and retrying it unchanged is correct once the pressure passes. The usual cause is an under-sized pool rather than a slow database. An idempotent request or delivery holds two connections, the claim one while it waits for the work one, so a single pool needs twice the peak concurrency of whatever uses it, or every request waits on another and none proceeds. Give the claim connections a pool of their own with claim_pool, or raise the pool's size. Lengthening the wait (acquire_timeout, or SQLAlchemy's pool_timeout) only moves the stall. If the pool is big enough, look for connections held open past the request that took them, such as a handler awaiting a slow external call inside its transaction.
+- code: HEPH-LAB-422
+  status: 422
+  title: Experiment config failed validation
+  area: LAB
+  detail_hint: The experiment configuration failed validation. Each offending field and the rule it broke is listed under errors.
+  guidance: A run was asked to start from a configuration that does not satisfy its schema, so the run was refused before any work happened and before any record was written. The response lists each field and the rule it broke; fix the offending key in the config layer that supplied it rather than at the point of use, because the layered config resolves once and a value patched after resolution is not the value that would be hashed into config_hash. Reach for this code for the configuration of a run. Input data that fails a manifest or a gate is HEPH-LAB-412, and a config file that is absent rather than wrong is HEPH-LAB-424.
+- code: HEPH-LAB-409
+  status: 409
+  title: Replay diverged from its record
+  area: LAB
+  detail_hint: The replay did not reproduce the recorded run. The difference report names every value that differs.
+  guidance: A replay compared its result against a provenance record and they differ. Read the difference report before anything else, because it names each differing value and that naming is the finding. Do not re-run hoping for a match, and do not call the run flaky until the report says a result value differs rather than an input hash. A differing config_hash, data_hash, deps_hash or code_sha means you replayed against different inputs, different dependencies or different code, so reconcile those first. The environment is descriptive and is never compared, so a different platform, runtime version or accelerator is not what caused this. A provenance-only run never promised a match, so check the record's class before treating a divergence as a defect.
+- code: HEPH-LAB-424
+  status: 424
+  title: Required record, manifest or frozen input is missing
+  area: LAB
+  detail_hint: A run record, dataset manifest or frozen input that this operation depends on is missing. Produce it, then retry.
+  guidance: The operation depends on an artefact that is not there, such as the record of the run being replayed, the manifest of a dataset being read, or a frozen input a recorded run referenced. Nothing was half-done; the dependency is absent rather than corrupt. Produce the artefact and retry, recording the run before replaying it, writing the dataset manifest before reading through it, and committing frozen inputs alongside the record rather than leaving them in a working directory. If the artefact exists but says the wrong thing, the code is HEPH-LAB-412, and if the experiment configuration is malformed rather than absent, it is HEPH-LAB-422.
+- code: HEPH-LAB-412
+  status: 412
+  title: Integrity gate failed
+  area: LAB
+  detail_hint: An integrity gate failed, so the operation did not proceed. The response names the gate and what it found.
+  guidance: A gate that guards research integrity refused the operation, which usually means the gate found what it exists to find rather than that the gate misfired. Read which gate failed and fix the thing it names, committing the run record if it is uncommitted, removing the hardcoded metric from the figure script, or giving the dataset the manifest dimensions it lacks. Do not disable the gate or route around it to get a run through, because a gate switched off for one run leaves a result nobody can cite. A gate cannot pass on an artefact that does not exist at all, which is HEPH-LAB-424.

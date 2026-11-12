@@ -27,7 +27,8 @@ const meta: MetaRecord = {
   "0020-idempotency-storage-boundaries": "0020. Idempotency storage boundaries",
   "0021-hephkit-is-a-namespace-package": "0021. hephkit is a namespace package",
   "0022-research-integrity-is-the-spine": "0022. Research integrity is the spine of hephkit.lab",
-  "0023-hephkit-lab-ships-separately": "0023. hephkit-lab ships separately and Ligase stays a leaf"
+  "0023-hephkit-lab-ships-separately": "0023. hephkit-lab ships separately and Ligase stays a leaf",
+  "0024-provenance-record-splits-hashes-from-environment": "0024. The provenance record splits normative hashes from a descriptive environment"
 }
 
 export default meta

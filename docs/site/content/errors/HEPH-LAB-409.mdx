@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-LAB-409 — Replay diverged from its record"
+---
+
+# HEPH-LAB-409
+
+**Replay diverged from its record**
+
+| | |
+| --- | --- |
+| HTTP status | `409` |
+| Area | `LAB` |
+| Problem `type` | `https://hephkit.dev/errors/HEPH-LAB-409` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+The replay did not reproduce the recorded run. The difference report names every value that differs.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+A replay compared its result against a provenance record and they differ. Read the difference report before anything else, because it names each differing value and that naming is the finding. Do not re-run hoping for a match, and do not call the run flaky until the report says a result value differs rather than an input hash. A differing config\_hash, data\_hash, deps\_hash or code\_sha means you replayed against different inputs, different dependencies or different code, so reconcile those first. The environment is descriptive and is never compared, so a different platform, runtime version or accelerator is not what caused this. A provenance-only run never promised a match, so check the record's class before treating a divergence as a defect.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error index](/errors).

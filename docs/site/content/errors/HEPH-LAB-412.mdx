@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-LAB-412 — Integrity gate failed"
+---
+
+# HEPH-LAB-412
+
+**Integrity gate failed**
+
+| | |
+| --- | --- |
+| HTTP status | `412` |
+| Area | `LAB` |
+| Problem `type` | `https://hephkit.dev/errors/HEPH-LAB-412` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+An integrity gate failed, so the operation did not proceed. The response names the gate and what it found.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+A gate that guards research integrity refused the operation, which usually means the gate found what it exists to find rather than that the gate misfired. Read which gate failed and fix the thing it names, committing the run record if it is uncommitted, removing the hardcoded metric from the figure script, or giving the dataset the manifest dimensions it lacks. Do not disable the gate or route around it to get a run through, because a gate switched off for one run leaves a result nobody can cite. A gate cannot pass on an artefact that does not exist at all, which is HEPH-LAB-424.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error index](/errors).

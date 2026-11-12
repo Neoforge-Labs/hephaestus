@@ -1,6 +1,6 @@
 {
   "suite": "hashing.content",
-  "spec": "0.4.0",
+  "spec": "0.5.0",
   "description": "Content hash (spec 4.2): sha256 over the UTF-8 bytes of the RFC 8785 output.",
   "source": "hashlib.sha256 over rfc8785 output (rfc8785 0.1.4, standardwebhooks 1.1.0); {}, null and the spec 2.2 fingerprint example cross-checked against independently stated digests.",
   "cases": [

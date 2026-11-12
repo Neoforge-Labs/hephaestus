@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-LAB-422 — Experiment config failed validation"
+---
+
+# HEPH-LAB-422
+
+**Experiment config failed validation**
+
+| | |
+| --- | --- |
+| HTTP status | `422` |
+| Area | `LAB` |
+| Problem `type` | `https://hephkit.dev/errors/HEPH-LAB-422` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+The experiment configuration failed validation. Each offending field and the rule it broke is listed under errors.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+A run was asked to start from a configuration that does not satisfy its schema, so the run was refused before any work happened and before any record was written. The response lists each field and the rule it broke; fix the offending key in the config layer that supplied it rather than at the point of use, because the layered config resolves once and a value patched after resolution is not the value that would be hashed into config\_hash. Reach for this code for the configuration of a run. Input data that fails a manifest or a gate is HEPH-LAB-412, and a config file that is absent rather than wrong is HEPH-LAB-424.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error index](/errors).

@@ -32,3 +32,4 @@ acceptance; a changed decision is superseded by a new record.
 - [0021. hephkit is a namespace package](/adrs/0021-hephkit-is-a-namespace-package)
 - [0022. Research integrity is the spine of hephkit.lab](/adrs/0022-research-integrity-is-the-spine)
 - [0023. hephkit-lab ships separately and Ligase stays a leaf](/adrs/0023-hephkit-lab-ships-separately)
+- [0024. The provenance record splits normative hashes from a descriptive environment](/adrs/0024-provenance-record-splits-hashes-from-environment)
