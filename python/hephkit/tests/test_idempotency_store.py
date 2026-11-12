@@ -784,6 +784,20 @@ async def test_a_renderer_supplies_the_body_stored_with_a_raised_4xx(claimer, ad
     )
 
 
+async def test_a_renderer_that_raises_releases_the_record_and_its_error_surfaces(claimer, adapter):
+    """Raised inside the except arm, it would otherwise skip the release and wedge the key."""
+
+    def render(exc: HephError) -> tuple[bytes, str | None]:
+        raise KeyError("unexpected extension")
+
+    with pytest.raises(KeyError) as raised:
+        async with _record(claimer, adapter, render_error=render):
+            raise HephError("HEPH-VAL-422", "bad field")
+    assert isinstance(raised.value.__context__, HephError)
+    assert await claimer.count_keys() == 0
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == a_proceed(taken_over=False)
+
+
 async def test_a_renderer_is_not_consulted_for_a_release(claimer, adapter):
     def render(exc: HephError) -> tuple[bytes, str | None]:
         raise AssertionError("a 5xx is released, not rendered")

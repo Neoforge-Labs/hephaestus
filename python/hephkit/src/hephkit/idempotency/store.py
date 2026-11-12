@@ -377,8 +377,17 @@ class IdempotencyStore:
         If writing the record fails, the record is released and that error
         propagates, replacing the 4xx being raised: an outcome that could not be
         recorded must not reach the client as a settled result, and the retry it
-        gets from the connection or state error is the honest answer. A raised :class:`IdempotencyStateError` there means this
-        attempt was superseded; its release is a no-op by the attempt guard.
+        gets from the connection or state error is the honest answer. A raised
+        :class:`IdempotencyStateError` there means this attempt was superseded;
+        its release is a no-op by the attempt guard.
+
+        If ``render_error`` raises, the record is released too, and the
+        renderer's exception is the one that propagates (the original
+        ``HephError`` stays chained as its ``__context__``). Left unguarded it
+        would escape this handler without a release and wedge the key in flight
+        until the lease lapsed. The renderer runs on ``claim_ex``, between the
+        claim and the store, so a renderer that does I/O does it on that
+        connection.
         """
         proceed = await self.claim(
             claim_ex, scope=scope, key=key, fingerprint=fingerprint, kind=kind
@@ -394,7 +403,14 @@ class IdempotencyStore:
             if exc.status >= 500:
                 await self.release(claim_ex, scope=scope, key=key, attempt_id=attempt)
                 raise
-            body, media_type = render_error(exc) if render_error is not None else (b"", None)
+            try:
+                body, media_type = (
+                    render_error(exc) if render_error is not None else (b"", None)
+                )
+            except BaseException:
+                # Raised inside this arm, so the arm below would not see it.
+                await self.release(claim_ex, scope=scope, key=key, attempt_id=attempt)
+                raise
             await self._store_or_release(
                 claim_ex, claim_ex, scope, key, attempt, (exc.status, body, media_type)
             )
