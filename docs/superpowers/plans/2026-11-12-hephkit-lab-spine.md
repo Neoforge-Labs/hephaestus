@@ -499,7 +499,13 @@ git add python/hephkit-lab conformance/lab/record.json tools/check_vectors.py
 git commit -m "feat(lab): seeding and provenance record capture"
 ```
 
-### Task 9: `lab.record`
+### Task 9: `lab.record` and spec §8
+
+**Ruling 31: spec §8 (run records) moves from Task 10 into this task.** §8 is the
+normative definition of the thing this task builds, and CLAUDE.md rule 1 is
+spec-first — writing the implementation here and its spec section in Task 10
+inverts that. Task 10 keeps §9 (replay and diff) and the reserved §10. The spec
+is already at 0.5.0 and must **not** be bumped again (Ruling 19).
 
 **Files:**
 - Create: `python/hephkit-lab/src/hephkit/lab/record.py`
@@ -508,6 +514,14 @@ git commit -m "feat(lab): seeding and provenance record capture"
 **Interfaces:**
 - Consumes: `lab.repro.ProvenanceRecord`.
 - Produces: `class RunRecord` with `append_row(cell: str, values: Mapping[str, float | str]) -> None`, `summary() -> dict`, `path: Path`; `open_record(dir: Path, provenance: ProvenanceRecord) -> RunRecord`; `read_record(path: Path) -> RunRecord`; `register(name: str) -> Callable` and `run(name: str, dir: Path) -> RunRecord`; `RecordError(RuntimeError)` with `.code == "HEPH-LAB-424"`.
+
+- [ ] **Step 0: Write spec §8, run records**
+
+Record structure, incremental write semantics, and the rule that a record which
+cannot be written is a failed run rather than a quiet one. Normative prose an
+implementer in another language could satisfy without reading our Python. §7.1
+closes the record to members "this specification does not define", so if §8 needs
+a member §7 does not name — a run timestamp, say — §8 is where it is defined.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -548,7 +562,7 @@ git commit -m "feat(lab): crash-safe run records and the experiment registry"
 **Files:**
 - Create: `python/hephkit-lab/src/hephkit/lab/replay.py`
 - Create: `conformance/lab/diff.json`
-- Modify: `spec/heph-spec.md` (add §8 run records, §9 replay and diff; bump to 0.5.0)
+- Modify: `spec/heph-spec.md` (add §9 replay and diff; §8 belongs to Task 9 per Ruling 31; no version bump)
 - Modify: `conformance/schema/vector-file.schema.json` (`spec` const -> 0.5.0)
 - Modify: every `conformance/*/*.json` (`spec` field -> 0.5.0)
 - Test: `python/hephkit-lab/tests/test_replay.py`
@@ -561,9 +575,9 @@ git commit -m "feat(lab): crash-safe run records and the experiment registry"
 
 §7.1 forward-references §10 for the digest scope of `data_hash`, and §10 belongs to a later wave with `lab.data` — so without this the shipped spec points at a section that does not exist. Add a short reserved §10 ("Dataset manifests"), stating that the section is not yet specified and that the digest scope of `data_hash` (§7.1) is settled there. This mirrors how §7 itself was carried as a draft before this wave, so it is consistent with repo practice rather than a new device.
 
-- [ ] **Step 1: Write spec §8 and §9**
+- [ ] **Step 1: Write spec §9**
 
-§8: record structure, incremental write semantics, and that an unwritable record is a failed run. §9: what a replay compares (the normative hashes of §7, never `environment`), what a difference report contains, that float comparison uses a stated tolerance, and that NaN compares equal to NaN for replay purposes.
+§8 moved to Task 9 (Ruling 31). §9: what a replay compares (the normative hashes of §7, never `environment`), what a difference report contains, that float comparison uses a stated tolerance, and that NaN compares equal to NaN for replay purposes.
 
 **Ruling 19 moved the version bump to Task 6**, which is the first task in the wave to touch the spec. By the time this task runs the spec already declares `0.5.0`, and §8–§10 land inside that same unreleased version, so **do not bump again**. Re-stamp only the `lab/` suite files if Tasks 7 and 8 created them before the bump landed.
 
