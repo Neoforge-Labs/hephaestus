@@ -17,8 +17,8 @@ needs SQL transactions and constraints (CLAUDE.md rule 6):
 
 ``store.IdempotencyStore`` also completes and releases a record, and
 ``store.idempotent_record`` wraps all three around a block. The FastAPI route
-integration is ``hephkit.idempotency.fastapi.idempotent_route``; the worker
-decorator is not here yet.
+integration is ``hephkit.idempotency.fastapi.idempotent_route``, and the worker
+decorator, keyed on an event id, is ``hephkit.idempotency.worker.idempotent``.
 
 The fingerprint is deliberately built from the kit's existing primitives:
 ``hephkit.hashing.content_hash`` canonicalises with RFC 8785 and hashes in one
