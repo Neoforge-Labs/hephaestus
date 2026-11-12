@@ -30,7 +30,7 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 - Ordering two amounts of different currencies is `HEPH-MONEY-409`, never a boolean, so ordering is a fallible operation and is never offered through an interface that cannot fail; equality keeps answering every pair (3.8).
 - The accepted currency set is the whole of ISO 4217 List One, a code being accepted if and only if List One gives it a numeric minor-unit field, which includes the funds codes and excludes the `N.A.` codes (3.3, ADR 0017).
 - The provenance record (section 7) is normative, and its fields split by whether they decide re-execution or merely describe it: `config_hash`, `data_hash`, `deps_hash` and `code_sha` form the determinism contract, while `environment` is descriptive and is never compared (7.1, 7.2, ADR 0024).
-- A run is `provenance-only` unless the code is identified by a git commit, the working tree is clean and a dependency lockfile exists; `code_sha` is `null` exactly when there is no such commit and `deps_hash` exactly when there is no lockfile, and `environment` never carries a hostname, a username or a filesystem path (7.1, 7.3, 7.5, ADR 0024).
+- A run is `provenance-only` unless a git commit names the code, the working tree is clean and a dependency lockfile exists; `code_sha` is `null` exactly when git `HEAD` resolves to no commit, never merely because the tree is dirty, and `deps_hash` exactly when there is no lockfile, and `environment` never carries a hostname, a username or a filesystem path (7.1, 7.3, 7.5, ADR 0024).
 
 ## 1. Errors
 
@@ -196,7 +196,7 @@ This matches the `rfc8785` reference package, which raises on integer literals o
 | `config_hash` | string | Content hash (4.2) of the canonical run configuration | yes |
 | `data_hash` | string | Content hash (4.2) of the input data, over the digest scope section 10 defines | yes |
 | `deps_hash` | string or null | Content hash (4.2) of the dependency lockfile, or `null` when the run had no lockfile | yes |
-| `code_sha` | string or null | Git commit SHA of the code that ran, as lowercase hex, or `null` when the run's code is not identified by a git commit | yes |
+| `code_sha` | string or null | Git commit SHA of the code that ran, as lowercase hex, or `null` when no git commit names it | yes |
 | `class` | string | `deterministic` or `provenance-only` | no, a classification |
 | `environment` | object | Descriptive facts about the machine that ran it (7.4) | **no, and never compared (7.2)** |
 
@@ -204,7 +204,7 @@ This matches the `rfc8785` reference package, which raises on integer literals o
 
 The **digest scope** of `data_hash` — whether the hash is taken over raw bytes or over canonical JSON (4.1), and how the inputs of a multi-file dataset combine into one value — is not settled in this section. It is settled with dataset manifests, in section 10, and an implementation follows that section rather than choosing for itself.
 
-This section identifies code by a **git commit**, and says so plainly rather than inventing an identifier no implementation would use. `code_sha` is therefore `null` exactly when the run's code is not identified by a git commit, which covers every case that yields no commit SHA: code under no version control at all, a git repository with no commit yet, and a tree held in another version-control system. A run whose code *is* identified by a git commit MUST carry that SHA; omitting the member is never an alternative to the `null`. A `null` means nothing in the record names the code that produced the result, so the run is `provenance-only` (7.3).
+This section names code by a **git commit**, and says so plainly rather than inventing an identifier no implementation would use. `code_sha` is the commit that git `HEAD` resolves to, and it is non-null whenever `HEAD` resolves to a commit **regardless of whether the working tree is clean**: a dirty tree does not make `code_sha` `null`, it costs the run the `deterministic` class instead (7.3). `code_sha` is therefore `null` exactly when `HEAD` resolves to no commit, which covers every case that yields no commit SHA: code under no version control at all, a git repository with no commit yet, and a tree held in another version-control system. Where `HEAD` resolves, the record MUST carry that SHA; omitting the member is never an alternative to the `null`. A `null` means nothing in the record names the code that produced the result, so the run is `provenance-only` (7.3).
 
 `run_id` is opaque: implementations MUST NOT derive meaning from its form. Two records that differ only in `run_id` describe the same re-execution.
 
@@ -218,11 +218,11 @@ Whatever else a replay compares, it MUST NOT compare `environment`, and a record
 
 7.3. A run MUST be classified `provenance-only`, never `deterministic`, unless **all** of these hold when the run starts:
 
-- **The code is identified by a git commit.** Otherwise `code_sha` is `null`, and a record that does not name the code that produced the result cannot claim that the code re-executes to it.
+- **A git commit names the code**, that is `HEAD` resolves and `code_sha` is non-null (7.1). Otherwise `code_sha` is `null`, and a record that does not name the code that produced the result cannot claim that the code re-executes to it.
 - **The working tree is clean.** Nothing tracked in the commit named by `code_sha` differs from it, and no untracked file is present other than those the repository's own ignore rules exclude. A tree for which `git status --porcelain` prints nothing satisfies this. Without the condition `code_sha` stops identifying the code that produced the result, which is the one thing it is in the record to do.
 - **A dependency lockfile exists.** Otherwise `deps_hash` is `null`, the dependency set is unpinned, and nothing in the record pins the versions that produced the result.
 
-A record whose `class` is `deterministic` therefore MUST carry a non-null `code_sha` and a non-null `deps_hash`. An implementation MAY impose further conditions of its own before it classifies a run `deterministic`, and MUST NOT classify a run `deterministic` when any condition above fails. A run that fails one is still recorded in full: it carries `config_hash`, `data_hash`, `environment` and whichever of `code_sha` and `deps_hash` it can, so a run whose code no git commit identifies is recorded and classified rather than refused, and loses no traceability by being honest about its class.
+A record whose `class` is `deterministic` therefore MUST carry a non-null `code_sha` and a non-null `deps_hash`. An implementation MAY impose further conditions of its own before it classifies a run `deterministic`, and MUST NOT classify a run `deterministic` when any condition above fails. A run that fails one is still recorded in full: it carries `config_hash`, `data_hash`, `environment` and whichever of `code_sha` and `deps_hash` it can, so a run whose code no git commit names is recorded and classified rather than refused, and loses no traceability by being honest about its class.
 
 7.4. `environment` MUST be present and MUST be an object. It is descriptive: it records what the run met, so that a reader of a published result can see it, and it takes no part in any comparison (7.2). Its members:
 
