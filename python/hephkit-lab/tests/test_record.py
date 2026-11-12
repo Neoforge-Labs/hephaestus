@@ -163,6 +163,22 @@ def test_a_record_is_a_directory_holding_the_three_documents(tmp_path: Path) -> 
     )
 
 
+def test_an_open_record_has_its_two_files_before_the_first_row(tmp_path: Path) -> None:
+    """8.3: `rows.jsonl` exists, possibly empty, from the moment a record is open.
+
+    Asserted directly rather than left to the `== []` assertions elsewhere:
+    `rows_on_disk` reports an absent file as no rows, so a record that deferred
+    creating the file would satisfy those and fail this one -- at the clause it
+    actually breaks.
+    """
+    record = open_record(tmp_path / "record", a_provenance())
+    assert (record.path / PROVENANCE_NAME).is_file()
+    assert (record.path / ROWS_NAME).is_file(), "8.3: the rows file exists from the start"
+    assert (record.path / ROWS_NAME).read_bytes() == b""
+    assert read_record(record.path).rows == ()
+    record.close()
+
+
 def test_the_provenance_document_is_the_section_7_record_unchanged(tmp_path: Path) -> None:
     """8.1: stored unchanged, so 7.1's closed member set stays closed."""
     provenance = a_provenance()
@@ -303,6 +319,9 @@ def crash(directory: Path, mode: str) -> None:
         check=False,
     )
     assert done.returncode == 1, f"the child did not reach its kill:\n{done.stderr}"
+    # An uncaught exception also exits 1, so the status alone does not say the
+    # child reached `os._exit`. A silent stderr does.
+    assert done.stderr == "", f"the child died of something else:\n{done.stderr}"
 
 
 def test_killing_the_process_mid_run_keeps_completed_rows(tmp_path: Path) -> None:
@@ -382,6 +401,14 @@ def test_a_summary_document_of_the_wrong_shape_is_refused(tmp_path: Path) -> Non
     summary.write_text(json.dumps({"run_id": "run-0001", "cells": ["only"]}), encoding="utf-8")
     with pytest.raises(ValidationError):
         read_record(record.path)
+    # 8.4's table gives `rows` as an integer, and a reader that accepted the
+    # string "1" would accept a record a conforming reader in another language
+    # refuses -- the laxness spec 3.2 already rules out for money amounts.
+    for wrong_type in ({"rows": "1"}, {"rows": 1.0}, {"cells": "only"}, {"run_id": 1}):
+        document = {"run_id": "run-0001", "cells": ["only"], "rows": 1, **wrong_type}
+        summary.write_text(json.dumps(document), encoding="utf-8")
+        with pytest.raises(ValidationError):
+            read_record(record.path)
 
 
 def test_an_unfinished_record_reads_its_rows_and_says_it_is_unfinished(tmp_path: Path) -> None:
@@ -527,6 +554,57 @@ def test_a_summary_that_cannot_be_written_raises_rather_than_warning(tmp_path: P
     assert not record.complete, "8.4: nothing was summarised, so nothing is finished"
 
 
+class FailingHandle:
+    """A rows file whose final flush fails, which is the one write `close` does."""
+
+    def close(self) -> None:
+        raise OSError(5, "Input/output error")
+
+
+def substitute_a_failing_handle(record: RunRecord) -> None:
+    """Close the record's real handle and leave one that cannot be closed.
+
+    The real handle is closed first rather than dropped, so no `ResourceWarning`
+    reaches a suite that turns warnings into errors.
+    """
+    real = record._handle
+    assert real is not None
+    real.close()
+    record._handle = FailingHandle()  # type: ignore[assignment]
+
+
+def test_a_rows_file_that_cannot_be_closed_raises_rather_than_warning(tmp_path: Path) -> None:
+    """8.5: closing flushes, so a failure to close is a failure to write."""
+    record = open_record(tmp_path / "record", a_provenance())
+    record.append_row("first", {"loss": 1.0})
+    substitute_a_failing_handle(record)
+    error = assert_raises_without_warning(RecordError, record.close)
+    assert getattr(error, "code", None) == LAB_424
+    assert not record.complete
+    assert not (record.path / SUMMARY_NAME).exists()
+
+
+def test_a_failure_to_close_a_failed_run_is_raised_and_keeps_the_original(
+    tmp_path: Path,
+) -> None:
+    """8.5 even while a run is already leaving by an exception.
+
+    The record failure replaces the experiment's error, and nothing is lost:
+    the chain is the `RecordError`, the `OSError` it was raised from, and under
+    that the `ZeroDivisionError` that was in flight when the record failed. A
+    record that could not be written must not be the quiet half of that pair.
+    """
+    record = open_record(tmp_path / "record", a_provenance())
+    record.append_row("first", {"loss": 1.0})
+    substitute_a_failing_handle(record)
+    with pytest.raises(RecordError) as exc, record:
+        raise ZeroDivisionError
+    cause = exc.value.__cause__
+    assert isinstance(cause, OSError), cause
+    assert isinstance(cause.__context__, ZeroDivisionError), cause.__context__
+    assert not (record.path / SUMMARY_NAME).exists()
+
+
 def test_a_write_failure_mid_run_raises_and_keeps_no_row(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -538,9 +616,10 @@ def test_a_write_failure_mid_run_raises_and_keeps_no_row(
             raise OSError(28, "No space left on device")
 
         monkeypatch.setattr(record_module, "_write_durably", fails)
-        assert_raises_without_warning(
+        error = assert_raises_without_warning(
             RecordError, lambda: record.append_row("second", {"loss": 0.5})
         )
+        assert getattr(error, "code", None) == LAB_424
         assert [row.cell for row in record.rows] == ["first"]
         monkeypatch.undo()
 
@@ -649,12 +728,23 @@ def test_a_duplicate_cell_is_refused(tmp_path: Path) -> None:
 
 
 def test_a_record_holding_a_duplicate_cell_is_not_read_back(tmp_path: Path) -> None:
+    """8.2 on the read side, which is a different branch from the append side.
+
+    Two details are what make this able to fail for its own reason, and it
+    could not before. The summary is removed, because otherwise the derived
+    summary of two rows disagrees with the stored one and `read_record` refuses
+    at the 8.4 check instead -- with a message that interpolates the stored
+    document and therefore matches `cell-a` anyway. And the match is on
+    `repeats`, the word only the duplicate-cell refusal uses, so an unrelated
+    refusal cannot satisfy it.
+    """
     with open_record(tmp_path / "record", a_provenance()) as record:
         record.append_row("cell-a", {"loss": 1.0})
     (record.path / ROWS_NAME).write_text(
         '{"cell":"cell-a","values":{}}\n{"cell":"cell-a","values":{}}\n', encoding="utf-8"
     )
-    with pytest.raises(ValueError, match="cell-a"):
+    (record.path / SUMMARY_NAME).unlink()
+    with pytest.raises(ValueError, match="repeats"):
         read_record(record.path)
 
 
@@ -791,11 +881,19 @@ def test_a_record_read_back_may_be_used_as_a_context_manager(tmp_path: Path) -> 
     with open_record(tmp_path / "record", a_provenance()) as record:
         record.append_row("only", {"loss": 1.0})
     read_back = read_record(record.path)
+    # A sentinel, appended after the read: an identical rewrite would drop it,
+    # so "wrote nothing" and "wrote the same bytes again" are told apart. Byte
+    # equality alone cannot do that.
+    summary = record.path / SUMMARY_NAME
+    sentinel = "\nnothing may rewrite this file"
+    summary.write_text(summary.read_text(encoding="utf-8") + sentinel, encoding="utf-8")
     with pytest.raises(ZeroDivisionError), read_back:
         raise ZeroDivisionError
     with read_back:
         pass
-    assert json.loads((record.path / SUMMARY_NAME).read_text(encoding="utf-8")) == {
+    text = summary.read_text(encoding="utf-8")
+    assert text.endswith(sentinel), "the summary was rewritten"
+    assert json.loads(text[: -len(sentinel)]) == {
         "run_id": "run-0001",
         "cells": ["only"],
         "rows": 1,
@@ -814,6 +912,12 @@ def test_registered_experiment_cannot_choose_its_output_path(
     record object the runner opened -- recorded by the experiment rather than
     inferred from the filesystem -- and its signature has one parameter, so
     there is no argument through which a destination could have reached it.
+
+    "Cannot choose" is the brief's name for the contract and is read in those
+    terms: no destination reaches the experiment through its signature. It is
+    not the stronger claim that an experiment cannot write a file at all --
+    `RunRecord.path` is public, and no library in this language could enforce
+    that. The test asserts the claim that is true.
     """
     received: list[RunRecord] = []
 

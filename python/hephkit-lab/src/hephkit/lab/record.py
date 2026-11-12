@@ -163,9 +163,18 @@ class Summary(BaseModel):
 
     Every member is derived from the rows, which is what lets a reader
     recompute it and refuse a stored summary that disagrees.
+
+    ``strict`` as well as closed: 8.4's table gives `rows` as an integer, and
+    pydantic's lax mode would validate the string ``"1"`` and the float
+    ``1.0`` into it, so a summary a conforming reader in another language
+    refuses would be accepted here and then re-serialised as ``1`` -- the
+    record would have been repaired on the way in rather than refused. Spec
+    3.2 rules out exactly that laxness for money amounts. ``run_id`` and
+    ``cells`` refuse a wrong type in lax mode already; strict costs nothing
+    and says which rule is in force.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     run_id: str
     cells: list[str]
@@ -345,8 +354,12 @@ class RunRecord:
 
     Built by :func:`open_record` (writable) or :func:`read_record` (read back,
     and closed: 8.3 forbids rewriting a record). An experiment is handed one of
-    these and nothing else, which is what leaves it no way to choose where its
-    results go (8.6).
+    these and nothing else, so no destination reaches it through its signature
+    (8.6). That is the claim, and it is narrower than the one this module was
+    harvested from: :attr:`path` is public, so an experiment *can* write a file
+    beside the record, and no library in a general-purpose language could stop
+    it. What 8.6 buys is that nothing hands it somewhere else to write, which
+    is what makes the record the obvious destination rather than one of two.
     """
 
     def __init__(
@@ -431,16 +444,40 @@ class RunRecord:
         if self._handle is None:
             return
         handle, self._handle = self._handle, None
-        handle.close()
+        self._close_handle(handle)
         _write_document(self._directory / SUMMARY_NAME, self.summary())
         self._complete = True
 
+    def _close_handle(self, handle: TextIO) -> None:
+        """Close the rows file, as a failure of the record rather than a bare OSError.
+
+        Closing flushes, and 8.5 says every failure to write a record is raised
+        and fails the run. Without this the one write this module does not
+        perform itself -- the final flush `close` does -- would escape as a
+        plain `OSError`, which is not what the class docstring promises.
+        """
+        try:
+            handle.close()
+        except OSError as exc:
+            raise RecordError(
+                f"could not close {ROWS_NAME} in the record at {self._directory}: "
+                f"{exc}; a record that cannot be written is a failed run (spec 8.5)"
+            ) from exc
+
     def _abandon(self) -> None:
-        """Stop writing without finishing: the run failed, so 8.4 leaves no summary."""
+        """Stop writing without finishing: the run failed, so 8.4 leaves no summary.
+
+        A failure to close is still raised (8.5), and raising here replaces the
+        exception the run was already leaving by -- which Python records as the
+        new one's ``__context__``, so neither is lost. Reporting a record that
+        could not be written is worth that: a run whose rows may be incomplete
+        and whose caller was told only about the experiment's own error is the
+        quiet failure 8.5 forbids.
+        """
         if self._handle is None:
             return
         handle, self._handle = self._handle, None
-        handle.close()
+        self._close_handle(handle)
 
     def __enter__(self) -> RunRecord:
         return self
