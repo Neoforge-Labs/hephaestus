@@ -12,7 +12,25 @@ license = { text = "MIT" }
 # with no scientific stack at all (ADR 0023). Everything heavy is an extra
 # below. `tests/test_package.py::test_spine_declares_no_heavy_dependencies`
 # fails if anything else is added here.
-dependencies = ["hephkit>=0.3", "pydantic>=2.9"]
+#
+# `hephkit>=0.2` is a LOCAL-DEVELOPMENT FLOOR ONLY, and it is loose on purpose.
+# Do not "tidy" it upwards without reading this.
+#
+# `hephkit.lab` needs a `hephkit` that is a PEP 420 namespace package (ADR 0021),
+# and the published 0.2.0 is not one: it still ships `src/hephkit/__init__.py`,
+# so it is the regular-package build and cannot host this portion at all. The
+# version that first contains the namespace package does not exist yet --
+# `release-please-config.json` binds five packages with a `linked-versions`
+# plugin and `tools/tests/test_release_config.py` asserts the manifest holds one
+# shared version, so the number is release-please's to assign and cannot be
+# hand-picked here. Until it does, the floor exists only to let
+# `[tool.uv.sources]` resolve the portion in this repository.
+#
+# Raising this floor to the first RELEASED `hephkit` containing the namespace
+# package is a hard precondition on ever publishing `hephkit-lab`: a wheel built
+# with `>=0.2` would install against a regular-package `hephkit` and fail at
+# import with no useful message.
+dependencies = ["hephkit>=0.2", "pydantic>=2.9"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",

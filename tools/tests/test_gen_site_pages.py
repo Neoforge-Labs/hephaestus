@@ -10,10 +10,22 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from gen_site_pages import CONTENT, PRIVATE_NAMES, generate, main, rewrite_adr_links  # noqa: E402
+from gen_site_pages import (  # noqa: E402
+    CONTENT,
+    PRIVATE_NAMES,
+    _ADR_LINK,
+    generate,
+    main,
+    rewrite_adr_links,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DESIGN = REPO_ROOT / "docs/superpowers/specs/2026-11-04-hephaestus-design.md"
+
+# What `rewrite_adr_links` turns an `_ADR_LINK` match into. Kept here rather
+# than in the generator: it exists only so a test can mask both sides of the
+# rewrite and compare the prose around them.
+_SITE_LINK = re.compile(r"\]\(/adrs/\d{4}-[a-z0-9-]+(?:#[^)\s]*)?\)")
 
 
 def _page(pages: dict[Path, str], rel: str) -> str:
@@ -77,13 +89,16 @@ def test_adr_pages_match_sources() -> None:
         original = src.read_text(encoding="utf-8")
         rewritten = rewrite_adr_links(original)
         assert _body(adr_pages[adr_dir / src.name]) == rewritten
-        # The only transformation is a cross-ADR link becoming a site path, so
-        # reversing it must give the source back byte for byte. ADR 0021 is the
-        # first in the corpus to link to another ADR; before it this assertion
-        # was written as `rewritten == original`, which the first such link
-        # falsified. Links are written in the bare `NNNN-slug.md` form, which is
-        # what makes the reversal exact.
-        assert re.sub(r"\]\(/adrs/(\d{4}-[a-z0-9-]+)(#[^)\s]*)?\)", r"](\1.md\2)", rewritten) == original
+        # Nothing but a cross-ADR link target may change. Masking every link on
+        # both sides says that without pinning a link style: `_ADR_LINK` accepts
+        # `./`, `../adr/`, `docs/adr/` and `/docs/adr/` prefixes as well as the
+        # bare form, so an ADR written `](../adr/0015-maturity-levels.md)` is
+        # legal and a reversal of the rewrite could not reconstruct it.
+        #
+        # ADR 0021 is the first in the corpus to link to another ADR; before it
+        # this assertion read `rewrite_adr_links(original) == original`, on the
+        # premise that the rewrite never fires, which that link falsified.
+        assert _ADR_LINK.sub("]<LINK>", original) == _SITE_LINK.sub("]<LINK>", rewritten)
     order = re.findall(r'"(\d{4}-[^"]+)":', _page(pages, "adrs/_meta.ts"))
     assert order == [s.stem for s in sources]
 

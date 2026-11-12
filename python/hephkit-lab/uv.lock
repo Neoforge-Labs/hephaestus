@@ -2246,7 +2246,7 @@ wheels = [
 
 [[package]]
 name = "hephkit"
-version = "0.3.0"
+version = "0.2.0"
 source = { editable = "../hephkit" }
 
 [package.metadata]

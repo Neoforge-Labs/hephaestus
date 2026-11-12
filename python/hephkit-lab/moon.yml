@@ -34,3 +34,7 @@ tasks:
       - 'src/**/*'
       - 'pyproject.toml'
       - '/python/hephkit/src/**/*'
+      # The sibling portion's own `[tool.mypy]` and its `py.typed` placement
+      # decide whether `hephkit.*` resolves typed from here, so a change to it
+      # must invalidate this cache as it does the test tasks'.
+      - '/python/hephkit/pyproject.toml'

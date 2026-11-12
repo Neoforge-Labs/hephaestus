@@ -14,7 +14,7 @@ There is a second, sharper question underneath. The parent design, `docs/superpo
 
 ## Decision
 
-**`hephkit-lab` is its own distribution**, at `python/hephkit-lab`, supplying the `hephkit.lab` portion of the namespace. It is built with plain `hatchling` — there is no Rust in it — and its wheel ships `hephkit/lab/` and nothing else. Its required dependencies are `hephkit>=0.3` and pydantic, and nothing more. Its PEP 561 marker is `hephkit/lab/py.typed`, inside the subpackage it alone owns; it must never ship `hephkit/py.typed`, which in a merged `pip install` layout would be one file owned by two distributions.
+**`hephkit-lab` is its own distribution**, at `python/hephkit-lab`, supplying the `hephkit.lab` portion of the namespace. It is built with plain `hatchling` — there is no Rust in it — and its wheel ships `hephkit/lab/` and nothing else. Its required dependencies are `hephkit` and pydantic, and nothing more. Its PEP 561 marker is `hephkit/lab/py.typed`, inside the subpackage it alone owns; it must never ship `hephkit/py.typed`, which in a merged `pip install` layout would be one file owned by two distributions.
 
 **Everything heavy is an extra.** The §4 anti-goal about non-bio ingots paying for a bio engine applies with equal force to non-ML projects paying for an ML stack, so the partition is:
 
@@ -41,7 +41,9 @@ The spine — config, repro, record, replay, gates — therefore installs with n
 
 ## Consequences
 
-Two distributions to version, release and audit instead of one, and a reader must know which one a module came from. `hephkit` is at `0.3.0` and `hephkit-lab` starts at `0.1.0`, which is the point: the lab stack can move fast and stay `experimental` while the money path walks towards `stable`, and rule 7 is not strained by shipping research code in the distribution a production money path installs.
+Two distributions to version, release and audit instead of one, and a reader must know which one a module came from. `hephkit-lab` starts at `0.1.0` and versions independently of `hephkit`, which is the point: the lab stack can move fast and stay `experimental` while the money path walks towards `stable`, and rule 7 is not strained by shipping research code in the distribution a production money path installs.
+
+Independent versioning is not free, and the first cost is already visible. `hephkit` is one of five packages `release-please-config.json` binds with a `linked-versions` plugin, so the version in which it first ships as a namespace package is release-please's to assign and does not exist yet; the published `0.2.0` is the regular-package build and cannot host `hephkit.lab` at all. `hephkit-lab`'s `hephkit>=0.2` floor is therefore a local-development floor only, kept loose so `[tool.uv.sources]` resolves the portion in this repository, and raising it to the first released namespace-capable version is a hard precondition on publishing `hephkit-lab`. `hephkit-lab` is deliberately absent from `release-please-config.json`: `tools/tests/test_release_config.py` asserts that the five lockstep packages share one version, which `hephkit-lab` does not and must not.
 
 The development loop is two editable installs in one environment, which is the layout §7.1.3's typing finding was established against and the reason the marker sits where it does. `python/hephkit-lab/tests/test_package.py::test_core_and_lab_coexist_in_one_namespace` is the first test in this repository where two portions of `hephkit` exist at once, so it is the first place [ADR 0021](0021-hephkit-is-a-namespace-package.md)'s actual property can be checked; it asserts that `hephkit.__path__` holds both trees, because an import test passes even when one portion shadows the other.
 
