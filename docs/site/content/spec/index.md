@@ -12,7 +12,7 @@ title: "heph-spec"
 - **Status:** Draft for implementation in Phase 1; every module implementing it is `experimental`.
 - **Registries:** `spec/errors.yaml` (error codes), `conventions/attributes.yaml` (telemetry attributes), `spec/currencies.yaml` (ISO 4217 minor units, with its publication pinned by `spec/currencies.source.yaml`).
 
-The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119 and RFC 8174. Where this document profiles a standard, the standard governs everything this document does not restate. Four parts are original: the error-code registry (section 1), idempotency storage and replay (section 2), money on the wire (section 3) and the provenance record (section 7).
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119 and RFC 8174. Where this document profiles a standard, the standard governs everything this document does not restate. Five parts are original: the error-code registry (section 1), idempotency storage and replay (section 2), money on the wire (section 3), the provenance record (section 7) and the run record (section 8).
 
 ## Decisions this version settles
 
@@ -31,6 +31,11 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 - The accepted currency set is the whole of ISO 4217 List One, a code being accepted if and only if List One gives it a numeric minor-unit field, which includes the funds codes and excludes the `N.A.` codes (3.3, ADR 0017).
 - The provenance record (section 7) is normative, and its fields split by whether they decide re-execution or merely describe it: `config_hash`, `data_hash`, `deps_hash` and `code_sha` form the determinism contract, while `environment` is descriptive and is never compared (7.1, 7.2, ADR 0024).
 - A run is `provenance-only` unless a git commit names the code, the working tree is clean and a dependency lockfile exists; `code_sha` is `null` exactly when git `HEAD` resolves to no commit, never merely because the tree is dirty, and `deps_hash` exactly when there is no lockfile, and `environment` never carries a hostname, a username or a filesystem path (7.1, 7.3, 7.5, ADR 0024).
+- A run record is a directory holding `provenance.json`, `rows.jsonl` and `summary.json`, every document canonical JSON; a row is durable before the call that appended it returns, so a crash costs the row in flight and no completed cell (8.1, 8.3).
+- A record that cannot be written is a failed run: every write failure is raised and fails the run, and an implementation never warns and continues, writes elsewhere, drops a row or reports a number the record does not hold (8.5).
+- The summary is an index derived from the rows, a reader recomputes it and refuses a record whose stored summary disagrees, and a record with no summary is unfinished rather than invalid (8.4).
+- A record carries no wall-clock time in any of its documents, because a clock reading in a compared position would make every replay diverge (8.1).
+- A non-finite value is recorded as `{"nonfinite": "NaN"}`, `{"nonfinite": "Infinity"}` or `{"nonfinite": "-Infinity"}`, never as a bare `NaN` or `Infinity` token, which 4.3 rejects and no conforming parser accepts (8.2).
 
 ## 1. Errors
 
@@ -238,3 +243,67 @@ A `null` under `frameworks` means the library was looked for and was absent; a l
 These members are individually optional, because an implementation records only what it can observe, but their names and types are reserved: an implementation that records one of these facts MUST use the name and type given here and MUST NOT record the same fact under another name. An implementation whose runtime is not Python omits `python` and records its own runtime version under a member named for that runtime, such as `go`. Further members MAY be added, subject to 7.5.
 
 7.5. `environment` MUST NOT carry the hostname of the machine, the name of the user who ran it, or any filesystem path, under those or any other member names. A record is committed and published alongside the result it describes, and those three identify a person or a machine instead of describing an environment; 6.2 already requires `pii: true` attributes to be redacted from log output, and a record outlives a log line. A project that needs them keeps them in its own configuration, outside the record.
+
+## 8. Run records
+
+8.1. A **run record** is the account of one research run: the provenance record of section 7, the rows the run produced, and a summary derived from those rows. A reported number MUST come from a row of a record. This section exists so that "a number cannot exist without a record" is a property of the artefact rather than a habit of whoever ran it.
+
+A record is a **directory**. The names of the three files in it are normative:
+
+| File | Holds | Written |
+| --- | --- | --- |
+| `provenance.json` | The section 7 provenance record of the run, as one JSON object | Once, before the first row (8.3) |
+| `rows.jsonl` | The rows, one per line, in completion order (8.2) | Appended as each cell completes (8.3) |
+| `summary.json` | The summary derived from the rows (8.4) | Once, when the run finishes (8.4) |
+
+Every document in a record is canonical JSON (4.1), so the record of one run is the same bytes wherever it is written and a hash over one of its files depends on what the file says rather than on how it was formatted. A file holding one document — `provenance.json`, `summary.json` — holds exactly that document's canonical JSON and nothing after it, not even a trailing newline, so that the hash of the file is the content hash of the document. `rows.jsonl` is JSON Lines: each line is one canonical JSON object followed by a single LF (U+000A) and holds nothing else, so a reader may read a record a line at a time and a writer may append to it without rewriting what is already there.
+
+`provenance.json` holds the section 7 record **unchanged**. 7.1 forbids a record to carry a top-level member that specification does not define, so what this section needs and section 7 does not name — the rows, the summary — lives in a document of its own and never as an eighth member of the provenance record.
+
+A record carries **no wall-clock time**, under any member name, in any of its three documents. Section 7 defines none and this section adds none, for a reason that outlives both: a replay (section 9) compares a record's rows against the rows of a re-execution, so a clock reading recorded in a compared position would make every replay of even a perfectly reproducible run diverge. A project that needs to know when a run happened reads it from the commit that carries the record, which is where the question is answered without putting the answer somewhere a comparison has to ignore.
+
+8.2. A **row** is the result of one **cell**: the smallest unit of work the run completes and can be reported on, such as one model against one dataset. A row document carries exactly these two members and MUST NOT carry another:
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `cell` | string | Name of the cell that completed. Non-empty, and unique within the record |
+| `values` | object | The values that cell produced, by name. MAY be empty |
+
+Each member of `values` is a JSON string, a finite JSON number, or the object `{"nonfinite": t}` where `t` is exactly one of `"NaN"`, `"Infinity"` and `"-Infinity"`. A reader MUST read that object back as the value it names, and MUST NOT treat it as an ordinary object. The wrapper exists because research results do contain non-finite values and JSON cannot carry one: 4.3 rejects them outright, and the bare tokens `NaN` and `Infinity` that some encoders emit are not JSON and are rejected by a conforming parser in another language. Recording a diverged loss as a thing every reader can parse is what the wrapper buys; writing those bare tokens into a record is forbidden, and so is dropping the value or substituting a finite one for it.
+
+A cell name MUST be unique within a record. A record that named one cell twice could not say which of the two values the run produced, so an implementation MUST refuse a second row for a cell it has already recorded rather than appending it, overwriting it or keeping the last.
+
+8.3. **Incremental write semantics.** A record is written as the run proceeds, never assembled at its end.
+
+- `provenance.json` MUST be written and MUST be durable before the first row is appended. A directory holding rows and no provenance record describes a run nothing identifies.
+- `rows.jsonl` MUST exist, possibly empty, from the moment the record is open, so that a run which died before its first cell is still the record of a run that started.
+- Each row MUST be appended as one line, and MUST be **durable before the call that appended it returns**. Durable means handed to storage rather than left in a buffer the writing process owns: the bytes MUST survive the death of that process without a further call. A write followed by a flush of the application buffer and a synchronisation of the file to its storage satisfies this; a write into a buffer flushed at some later convenient moment does not.
+- A record MUST NOT be rewritten. A row once written is never amended or removed, and `summary.json` is written once.
+
+A reader MUST treat a final line of `rows.jsonl` that is not terminated by LF as the row that was in flight when the writer died, and MUST discard it: a line without its LF was never a complete row, and that one row is what the paragraph below permits a crash to cost. Every LF-terminated line MUST be a row document (8.2), and a reader that meets one which is not MUST refuse the record rather than skip the line — such a file has been corrupted or edited, and reading past it would report a run whose rows nobody can account for. A reader MUST NOT apply the first rule to any line but the last.
+
+The cost of a crash is therefore at most the row in flight: every cell that completed before it is on disk and readable. That is the whole point of writing a record this way, and the reason it is a MUST rather than a quality of implementation — a run that buffers its rows and dies loses the work of every cell it had finished.
+
+8.4. The **summary** document carries exactly these three members and MUST NOT carry another:
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `run_id` | string | The `run_id` of this record's provenance record (7.1) |
+| `cells` | array of strings | Every cell name, in the order the rows give them |
+| `rows` | integer | The number of rows in `rows.jsonl` |
+
+Every member is derived from the record's other two documents. The summary is an **index**, not a second place where results live: a number exists in a row or it does not exist, and an implementation MUST NOT record in the summary a value no row holds.
+
+A reader MUST recompute the summary from the rows, and MUST refuse a record whose stored `summary.json` disagrees with what the rows say. Such a directory is not a run record: reporting from it would be reporting what the rows do not hold, which is the one thing a record exists to prevent.
+
+A run that ends by failing has not finished: an implementation MUST NOT write a summary for it, so a run whose experiment raised leaves its rows and no summary, exactly as a killed one does.
+
+A record holding no `summary.json` is **unfinished**: the run did not reach its end. A reader MUST still read its rows and MUST NOT refuse it for the missing summary, since the rows of an unfinished record are exactly what 8.3 was written to preserve. A reader MUST be able to tell an unfinished record from a finished one, and MUST NOT present an unfinished one as a complete run.
+
+8.5. **A record that cannot be written is a failed run, not a quiet one.** Every failure to create the record directory, to write or synchronise the provenance record, to append a row, or to write the summary MUST be raised to the caller and MUST fail the run.
+
+An implementation MUST NOT, on such a failure: warn and continue; log it and return a result; write the record to any location other than the one it was given; skip, buffer or drop a row; or report a number the record does not hold. A run whose record failed produced no citable number, whatever else it computed. An unwritable record is the failure mode this clause is aimed at, because it is the one an implementation is most tempted to be helpful about.
+
+8.6. An implementation MAY offer a **registry of experiments**, and one that does MUST shape it so that an experiment cannot choose where its results go. An experiment is a function of one argument, the open record. It MUST NOT be passed a directory, a path or any other destination, and an implementation MUST refuse at registration a function that takes one rather than discovering the problem when the function runs. Opening the record, choosing where it goes and closing it belong to the runner.
+
+This is what makes 8.1 structural rather than advisory: an experiment with no way to name a destination has nowhere to put a number except the record it was handed.
