@@ -67,6 +67,19 @@ otherwise a claim that passes against an implementation comparing nothing.
 against, so a diverged loss must compare equal to itself; ``==`` says otherwise
 and would make a replay report a difference between a run and that same run.
 
+**A ``null`` equals a ``null``** (9.3), at the two member positions 7.1 lets be
+one. That is the same shape as the NaN rule one position over, and it is the
+ordinary case rather than an exotic one: 7.3 makes a ``null`` ``deps_hash`` and
+a ``null`` ``code_sha`` exactly what a ``provenance-only`` run carries, so an
+implementation letting a ``null`` match nothing would call every replay of one
+diverged.
+
+**A re-execution whose experiment raises produces no report** (9.1). The
+exception reaches the caller and the partial record is left where it is,
+unfinished (8.4), because it says how far the re-execution got. Returning a
+report that called the missing cells a divergence is the one thing 9.1 forbids
+here.
+
 Maturity: experimental.
 """
 
@@ -91,6 +104,7 @@ __all__ = [
     "ReplayError",
     "Value",
     "compare",
+    "members_match",
     "replay",
     "values_match",
 ]
@@ -180,6 +194,14 @@ class Difference(BaseModel):
 class DiffReport(BaseModel):
     """What a replay produces (spec 9.2): whether it matched, and what moved.
 
+    `record_unfinished` is true when the record the replay compared holds no
+    summary, which 8.4 defines as unfinished. Such a record holds only the
+    cells its run reached, so every cell the run never reached is a position
+    only the re-execution holds and the report carries a difference for a
+    value that never moved. 9.2 keeps those differences -- they are true
+    statements about the two records -- and requires this member so that a
+    reader can tell a cell that never ran from a value that appeared.
+
     Frozen and closed to extras. `differences` is a tuple rather than a list
     so that the report a caller holds is the report this module built.
     """
@@ -187,6 +209,7 @@ class DiffReport(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     matched: bool
+    record_unfinished: bool
     differences: tuple[Difference, ...]
 
     @model_validator(mode="after")
@@ -204,6 +227,7 @@ class DiffReport(BaseModel):
         """This report as a JSON-ready document, in 9.2's order."""
         return {
             "matched": self.matched,
+            "record_unfinished": self.record_unfinished,
             "differences": [difference.as_document() for difference in self.differences],
         }
 
@@ -266,6 +290,29 @@ def values_match(recorded: float | str, replayed: float | str) -> bool:
     )
 
 
+def members_match(recorded: str | None, replayed: str | None) -> bool:
+    """Whether two determinism-contract members are equal under spec 9.3.
+
+    Exactly, and `None` equals `None`. 9.3 makes a `null` a fourth kind that
+    equals a `null` and nothing else, and 7.1 makes `deps_hash` and `code_sha`
+    the two members that may be one: two records that both had no lockfile, or
+    whose code no git commit names, do not differ there, because there is no
+    value either side ever had. 7.3 makes those nulls exactly what a
+    ``provenance-only`` run carries, so this is the ordinary case and not an
+    exotic one -- it is the same shape as 9.3's NaN rule, one member position
+    over, and an implementation that let a `null` match nothing would report
+    every replay of a `provenance-only` run as diverged at `deps_hash`.
+
+    Module-level for the reason :func:`values_match` is: a test replaces it
+    with the implementation 9.3 forbids and shows that the check which passes
+    against this module fails against that one.
+
+    9.3's tolerance has no part in this. A member is a content hash, a commit
+    SHA or a `null`, and the tolerance is about numbers a run produced.
+    """
+    return recorded == replayed
+
+
 def _compared(provenance: ProvenanceRecord) -> dict[str, Any]:
     """The members of `provenance` a replay compares, by name (spec 9.1).
 
@@ -283,12 +330,12 @@ def _member_differences(
 ) -> Iterator[Difference]:
     """9.1: the determinism contract, in the order of 7.1's table.
 
-    Compared exactly. Each is a content hash, a commit SHA or a `null`, and
-    9.3's tolerance is about numbers a run produced, not about identifiers.
+    :func:`members_match` is 9.3 at a member position, the `null` rule
+    included.
     """
     left, right = _compared(recorded), _compared(replayed)
     for member, value in left.items():
-        if value != right[member]:
+        if not members_match(value, right[member]):
             yield Difference(cell=None, key=member, recorded=value, replayed=right[member])
 
 
@@ -366,6 +413,12 @@ def compare(recorded: RunRecord, replayed: RunRecord) -> DiffReport:
     record whose stored summary disagrees with them, so comparing it would
     compare the rows a second time under another name.
 
+    `record_unfinished` comes from the **recorded** side: it is that record
+    whose unreached cells the report would otherwise present as values that
+    appeared (9.2). Whether the re-execution finished is not a fact about the
+    comparison -- a re-execution that did not finish is a failed run, which
+    9.1 says produces no report at all.
+
     Pure: nothing is written and neither record is touched, so a report may be
     recomputed from the same two records and read the same way.
     """
@@ -373,7 +426,11 @@ def compare(recorded: RunRecord, replayed: RunRecord) -> DiffReport:
         *_member_differences(recorded.provenance, replayed.provenance),
         *_row_differences(recorded, replayed),
     )
-    return DiffReport(matched=not differences, differences=differences)
+    return DiffReport(
+        matched=not differences,
+        record_unfinished=not recorded.complete,
+        differences=differences,
+    )
 
 
 def replay(

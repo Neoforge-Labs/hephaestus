@@ -53,6 +53,7 @@ from hephkit.lab.replay import (
     DiffReport,
     ReplayError,
     compare,
+    members_match,
     replay,
     values_match,
 )
@@ -131,6 +132,26 @@ def a_record(
     return read_record(directory)
 
 
+def an_unfinished_record(
+    directory: Path, rows: Mapping[str, Mapping[str, float | str]]
+) -> RunRecord:
+    """A record whose run did not reach its end (spec 8.4): rows, and no summary.
+
+    Built the way 8.4 says one comes about -- the run ends by failing, so the
+    context manager writes no summary -- rather than by deleting a file
+    afterwards, which would be a record somebody edited rather than a run that
+    died.
+    """
+    with pytest.raises(RuntimeError, match="the run died"):
+        with open_record(directory, a_provenance()) as record:
+            for cell, values in rows.items():
+                record.append_row(cell, values)
+            raise RuntimeError("the run died")
+    read_back = read_record(directory)
+    assert not read_back.complete, "8.4: a record with no summary is unfinished"
+    return read_back
+
+
 def naive_match(recorded: float | str, replayed: float | str) -> bool:
     """The comparison spec 9.3 forbids: the language's own equality.
 
@@ -139,6 +160,17 @@ def naive_match(recorded: float | str, replayed: float | str) -> bool:
     rather than an assertion about an implementation nobody wrote.
     """
     return recorded == replayed
+
+
+def null_matches_nothing(recorded: str | None, replayed: str | None) -> bool:
+    """The member comparison spec 9.3 forbids: a `null` matches nothing.
+
+    The mistake an implementation makes by reading 9.3's three value kinds as
+    exhaustive and treating an absent member as "no value, so no match". Used
+    by the `null` test below to show that the same input gets the opposite
+    answer from it.
+    """
+    return recorded is not None and recorded == replayed
 
 
 @pytest.fixture
@@ -182,6 +214,20 @@ def a_recorded_run(tmp_path: Path, experiment: str) -> Path:
     directory = tmp_path / "recorded"
     run(experiment, directory, provenance=a_provenance())
     return directory
+
+
+@pytest.fixture
+def raising_experiment(clean_registry: None) -> str:
+    """Register an experiment that records a cell and then fails."""
+
+    name = "replay-raising-fixture"
+
+    @register(name)
+    def experiment(record: RunRecord) -> None:
+        record.append_row("cell-a", {"loss": 0.5})
+        raise RuntimeError("the experiment failed")
+
+    return name
 
 
 @pytest.fixture
@@ -335,6 +381,31 @@ def test_the_re_execution_is_compared_as_it_was_written(
     ]
 
 
+def test_a_re_execution_whose_experiment_raises_produces_no_report(
+    tmp_path: Path, fixture_experiment: str, raising_experiment: str
+) -> None:
+    """9.1: the failure reaches the caller, and the partial record stays put.
+
+    The forbidden alternatives are a report that calls the cells the
+    re-execution never reached a divergence, and discarding the partial record
+    -- which is the thing that says how far it got (8.4, 8.5).
+    """
+    recorded = a_recorded_run(tmp_path, fixture_experiment)
+    into = tmp_path / "replayed"
+    with pytest.raises(RuntimeError, match="the experiment failed"):
+        replay(
+            recorded,
+            experiment=raising_experiment,
+            into=into,
+            provenance=a_provenance("run-0002"),
+        )
+    left_behind = read_record(into)
+    assert not left_behind.complete, "8.4: a run that ends by failing has not finished"
+    assert [row.cell for row in left_behind.rows] == ["cell-a"], (
+        "the rows the re-execution reached are still there (8.3)"
+    )
+
+
 def test_the_replays_provenance_is_the_callers_and_not_the_records(
     tmp_path: Path, fixture_experiment: str
 ) -> None:
@@ -427,6 +498,56 @@ def test_each_determinism_contract_member_is_compared(
     ]
 
 
+def test_a_null_member_equals_a_null_member(tmp_path: Path) -> None:
+    """9.3: a `null` is a fourth kind and equals a `null` and nothing else.
+
+    7.3 makes a `null` `deps_hash` and a `null` `code_sha` exactly what a
+    `provenance-only` run carries, so this is every replay of the ordinary
+    case rather than an exotic one.
+    """
+    rows = {"cell-a": {"loss": 0.5}}
+    unpinned = a_provenance(deps_hash=None, code_sha=None, run_class="provenance-only")
+    recorded = a_record(tmp_path / "recorded", rows, unpinned)
+    replayed = a_record(tmp_path / "replayed", rows, unpinned)
+    assert recorded.provenance.deps_hash is None
+    assert recorded.provenance.code_sha is None
+    report = compare(recorded, replayed)
+    assert report.matched, "two absences are not a difference"
+    assert members_match(None, None) is True
+
+
+def test_the_null_member_check_fails_against_an_implementation_that_matches_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The check above biting: the forbidden reading reports a run against itself.
+
+    `null_matches_nothing` is what an implementation writes by taking 9.3's
+    three value kinds as exhaustive. Against it the very same two records
+    report a difference at both null members -- which is the failure mode 9.3's
+    fourth kind exists to stop, and it would hit every `provenance-only` run.
+    """
+    rows = {"cell-a": {"loss": 0.5}}
+    unpinned = a_provenance(deps_hash=None, code_sha=None, run_class="provenance-only")
+    recorded = a_record(tmp_path / "recorded", rows, unpinned)
+    replayed = a_record(tmp_path / "replayed", rows, unpinned)
+    assert compare(recorded, replayed).matched
+    assert null_matches_nothing(None, None) is False
+    monkeypatch.setattr(replay_module, "members_match", null_matches_nothing)
+    report = compare(recorded, replayed)
+    assert [d.as_document() for d in report.differences] == [
+        {"cell": None, "key": "deps_hash", "recorded": None, "replayed": None},
+        {"cell": None, "key": "code_sha", "recorded": None, "replayed": None},
+    ]
+
+
+def test_a_null_member_differs_from_a_present_one() -> None:
+    """The other half of 9.3's `null` rule: it equals a `null` and nothing else."""
+    assert members_match(DEPS_HASH, DEPS_HASH) is True
+    assert members_match(None, DEPS_HASH) is False
+    assert members_match(DEPS_HASH, None) is False
+    assert members_match(DEPS_HASH, OTHER_HASH) is False
+
+
 def test_the_compared_members_are_the_determinism_contract_of_7_1() -> None:
     """9.1 names four members, in 7.1's table order, and no others."""
     assert COMPARED_MEMBERS == ("config_hash", "data_hash", "deps_hash", "code_sha")
@@ -444,7 +565,9 @@ def test_environment_run_id_and_class_are_not_compared(tmp_path: Path) -> None:
     assert recorded.provenance.run_id != replayed.provenance.run_id
     assert recorded.provenance.run_class != replayed.provenance.run_class
     assert recorded.provenance.environment != replayed.provenance.environment
-    assert compare(recorded, replayed) == DiffReport(matched=True, differences=())
+    assert compare(recorded, replayed) == DiffReport(
+        matched=True, record_unfinished=False, differences=()
+    )
 
 
 def test_adding_a_member_to_the_compared_set_does_produce_a_difference(
@@ -485,11 +608,48 @@ def test_a_report_matched_exactly_when_it_carries_no_difference() -> None:
     """9.2: neither a match alongside a difference nor a divergence with none."""
     moved = Difference(cell="cell-a", key="loss", recorded=0.5, replayed=0.25)
     with pytest.raises(ValidationError, match="matched"):
-        DiffReport(matched=True, differences=(moved,))
+        DiffReport(matched=True, record_unfinished=False, differences=(moved,))
     with pytest.raises(ValidationError, match="matched"):
-        DiffReport(matched=False, differences=())
-    assert DiffReport(matched=True, differences=()).matched
-    assert not DiffReport(matched=False, differences=(moved,)).matched
+        DiffReport(matched=False, record_unfinished=False, differences=())
+    assert DiffReport(matched=True, record_unfinished=False, differences=()).matched
+    assert not DiffReport(matched=False, record_unfinished=False, differences=(moved,)).matched
+
+
+def test_a_report_says_when_the_record_it_compared_was_unfinished(tmp_path: Path) -> None:
+    """9.2: an unfinished record's unreached cells are reported, and flagged as such.
+
+    `cell-b` is in the re-execution and not in the record because the recorded
+    run died before reaching it, not because a value appeared. The difference
+    stays in the report -- it is a true statement about the two records -- and
+    `record_unfinished` is what lets a reader tell the two apart.
+    """
+    recorded = an_unfinished_record(tmp_path / "recorded", {"cell-a": {"loss": 0.5}})
+    replayed = a_record(
+        tmp_path / "replayed", {"cell-a": {"loss": 0.5}, "cell-b": {"loss": 0.25}}
+    )
+    report = compare(recorded, replayed)
+    assert report.record_unfinished is True
+    assert [d.as_document() for d in report.differences] == [
+        {"cell": "cell-b", "key": "loss", "recorded": None, "replayed": 0.25}
+    ], "9.2: the unreached cell is reported rather than suppressed"
+    assert report.as_document()["record_unfinished"] is True
+
+
+def test_record_unfinished_is_about_the_recorded_side_only(tmp_path: Path) -> None:
+    """Both directions, because the member names one side and not the other.
+
+    Whether the re-execution finished is not a fact about the comparison: 9.1
+    says a re-execution that did not finish produces no report at all, so an
+    implementation reading `complete` off the replayed side would report
+    `false` for the case above and `true` for a case 9.1 never reaches.
+    """
+    rows: dict[str, dict[str, float | str]] = {"cell-a": {"loss": 0.5}}
+    finished = a_record(tmp_path / "finished", rows)
+    other_finished = a_record(tmp_path / "other-finished", rows)
+    unfinished = an_unfinished_record(tmp_path / "unfinished", rows)
+    assert compare(finished, other_finished).record_unfinished is False
+    assert compare(unfinished, finished).record_unfinished is True
+    assert compare(finished, unfinished).record_unfinished is False
 
 
 def test_a_cell_only_the_record_holds_names_each_of_its_values(tmp_path: Path) -> None:
@@ -511,12 +671,20 @@ def test_a_cell_only_the_record_holds_names_each_of_its_values(tmp_path: Path) -
 
 
 def test_a_cell_only_the_replay_holds_names_each_of_its_values(tmp_path: Path) -> None:
+    """Two values, so "each" and the within-cell order can both fail.
+
+    With one value this test would pass against an implementation that
+    reported only a replay-only cell's first value, or reversed them; its
+    record-side twin above has the same shape for the same reason.
+    """
     recorded = a_record(tmp_path / "recorded", {"cell-a": {"loss": 0.5}})
     replayed = a_record(
-        tmp_path / "replayed", {"cell-a": {"loss": 0.5}, "cell-c": {"loss": 0.75}}
+        tmp_path / "replayed",
+        {"cell-a": {"loss": 0.5}, "cell-c": {"loss": 0.75, "grad_norm": 2.5}},
     )
     assert [d.as_document() for d in compare(recorded, replayed).differences] == [
-        {"cell": "cell-c", "key": "loss", "recorded": None, "replayed": 0.75}
+        {"cell": "cell-c", "key": "grad_norm", "recorded": None, "replayed": 2.5},
+        {"cell": "cell-c", "key": "loss", "recorded": None, "replayed": 0.75},
     ]
 
 
@@ -578,6 +746,7 @@ def test_the_report_writes_a_non_finite_value_as_section_8_2s_wrapper(tmp_path: 
     report = compare(recorded, replayed)
     assert report.as_document() == {
         "matched": False,
+        "record_unfinished": False,
         "differences": [
             {
                 "cell": "cell-a",
@@ -649,7 +818,7 @@ def test_a_string_is_compared_exactly() -> None:
         (0.0, -0.0, True, "signed zero: the difference is zero"),
         # The relative part scales, so the same absolute gap passes at 1e6 and
         # fails at 1.0. |1e6 - (1e6 + 1e-4)| is 9.999994654208422e-05 against a
-        # bound of 1.0000000001e-3; at unit magnitude the bound is 1.0001e-9.
+        # bound of 1.0000000000001e-3; at unit magnitude the bound is 1.0001e-9.
         (1e6, 1e6 + 1e-4, True, "inside the relative bound at a large magnitude"),
         (1.0, 1.0 + 1e-4, False, "outside the relative bound at unit magnitude"),
     ],
@@ -699,6 +868,7 @@ def test_raise_if_diverged_carries_the_registry_code_and_the_report() -> None:
     """Each of 9.2's three position shapes reaches the refusal by its own name."""
     report = DiffReport(
         matched=False,
+        record_unfinished=False,
         differences=(
             Difference(cell=None, key="deps_hash", recorded=DEPS_HASH, replayed=None),
             Difference(cell="cell-a", key="loss", recorded=0.5, replayed=0.25),
@@ -718,7 +888,7 @@ def test_raise_if_diverged_carries_the_registry_code_and_the_report() -> None:
 
 
 def test_raise_if_diverged_is_silent_on_a_match() -> None:
-    DiffReport(matched=True, differences=()).raise_if_diverged()
+    DiffReport(matched=True, record_unfinished=False, differences=()).raise_if_diverged()
 
 
 def test_replay_error_is_a_runtime_error_and_not_a_heph_error() -> None:
@@ -728,7 +898,7 @@ def test_replay_error_is_a_runtime_error_and_not_a_heph_error() -> None:
     so its refusals carry no `status`, `title` or `type_url`; `.code` is there
     for correlation and for the registry's disambiguation.
     """
-    report = DiffReport(matched=True, differences=())
+    report = DiffReport(matched=True, record_unfinished=False, differences=())
     error = ReplayError("diverged", report)
     assert isinstance(error, RuntimeError)
     assert not isinstance(error, HephError)
@@ -738,18 +908,19 @@ def test_replay_error_is_a_runtime_error_and_not_a_heph_error() -> None:
 
 def test_the_module_exports_what_the_tests_reach_for() -> None:
     """Every name this file imports is public, so the suite tests the API."""
-    reached: set[str] = {
+    assert set(replay_module.__all__) == {
         "ABSOLUTE_TOLERANCE",
         "COMPARED_MEMBERS",
         "RELATIVE_TOLERANCE",
-        "Difference",
         "DiffReport",
+        "Difference",
         "ReplayError",
+        "Value",
         "compare",
+        "members_match",
         "replay",
         "values_match",
-    }
-    assert reached <= set(replay_module.__all__)
+    }, "every public name is reached by this suite, and nothing else is exported"
 
 
 def test_the_module_carries_its_maturity_label() -> None:
