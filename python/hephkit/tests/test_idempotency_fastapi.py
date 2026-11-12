@@ -16,6 +16,7 @@ import asyncpg
 import httpx
 import pytest
 import pytest_asyncio
+from pydantic import BaseModel
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from opentelemetry.sdk.trace import TracerProvider
@@ -25,9 +26,14 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from hephkit.conventions import IDEMPOTENCY_KEY
 from hephkit.errors import HephError
 from hephkit.errors.fastapi import install_error_handlers
-from hephkit.idempotency.adapters import AsyncpgExecutor
+from hephkit.idempotency.adapters import (
+    WORK_CONNECTION_STATE,
+    AsyncpgExecutor,
+    asyncpg_executors,
+    sqlalchemy_executors,
+)
 from hephkit.idempotency.fastapi import idempotent_route
-from hephkit.idempotency.ports import Executor
+from hephkit.idempotency.ports import Executors
 from hephkit.idempotency.store import IdempotencyStore
 
 KEY = {"Idempotency-Key": "key-0001"}
@@ -45,23 +51,21 @@ def calls() -> _Calls:
     return _Calls()
 
 
-@pytest_asyncio.fixture
-async def client(
-    pg_conn: asyncpg.Connection, postgres_dsn: str, calls: _Calls
-) -> AsyncIterator[httpx.AsyncClient]:
+@pytest.fixture
+def app(pg_conn: asyncpg.Connection, postgres_dsn: str, calls: _Calls) -> FastAPI:
     store = IdempotencyStore()
     app = FastAPI()
     install_error_handlers(app)
 
     @asynccontextmanager
-    async def executors(request: Request) -> AsyncIterator[tuple[Executor, Executor]]:
+    async def executors(request: Request) -> AsyncIterator[Executors]:
         # The one place connection setup is decided: claim_ex plain, work_ex in a transaction.
         claim_conn = await asyncpg.connect(postgres_dsn)
         work_conn = await asyncpg.connect(postgres_dsn)
         tx = work_conn.transaction()
         await tx.start()
         try:
-            yield AsyncpgExecutor(claim_conn), AsyncpgExecutor(work_conn)
+            yield Executors(AsyncpgExecutor(claim_conn), AsyncpgExecutor(work_conn))
         except BaseException:
             await tx.rollback()
             raise
@@ -125,6 +129,26 @@ async def client(
         calls.count += 1
         return JSONResponse({"name": name})
 
+    @app.post("/conflict")
+    @route()
+    async def conflict() -> Response:
+        calls.count += 1
+        return JSONResponse({"error": "taken"}, status_code=409)
+
+    @app.post("/returns-503")
+    @route()
+    async def returns_503() -> Response:
+        calls.count += 1
+        if calls.fail_once:
+            calls.fail_once = False
+            return JSONResponse({"error": "down"}, status_code=503)
+        return JSONResponse({"ok": True}, status_code=201)
+
+    return app
+
+
+@pytest_asyncio.fixture
+async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -299,3 +323,137 @@ def test_an_annotation_that_cannot_be_resolved_is_left_to_the_per_response_check
         raise AssertionError
 
     idempotent_route(_store(), scope=lambda r: "t", executors=_unused)(handler)
+
+
+async def test_a_returned_409_is_stored_and_replayed(client, calls):
+    first = await client.post("/conflict", headers=KEY)
+    again = await client.post("/conflict", headers=KEY)
+    assert first.status_code == again.status_code == 409
+    assert again.content == first.content
+    assert again.headers["idempotent-replayed"] == "true"
+    assert calls.count == 1
+
+
+async def test_a_returned_5xx_response_is_released_so_a_retry_runs_again(client, calls):
+    """The store's rule keys on status, not on whether the 5xx was raised or returned."""
+    calls.fail_once = True
+    first = await client.post("/returns-503", headers=KEY)
+    again = await client.post("/returns-503", headers=KEY)
+    assert first.status_code == 503
+    assert again.status_code == 201
+    assert "idempotent-replayed" not in again.headers
+    assert calls.count == 2
+
+
+async def test_a_server_without_raw_path_is_refused_not_fingerprinted_decoded(app, calls):
+    """Spec 2.2: without raw_path the only path available is percent-decoded, which would
+    make /items/%41 and /items/A one request. It must fail loudly, never fall back."""
+
+    async def no_raw_path(scope, receive, send):
+        scope.pop("raw_path", None)
+        await app(scope, receive, send)
+
+    transport = httpx.ASGITransport(app=no_raw_path)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        with pytest.raises(RuntimeError, match="raw_path"):
+            await c.post("/items/%41", headers=KEY)
+    assert calls.count == 0
+
+
+async def test_a_raw_path_that_carries_the_query_does_not_count_it_twice(app, calls):
+    """The ASGI spec does not say raw_path excludes the query, and some servers include it."""
+    seen = []
+
+    async def with_query_in_raw_path(scope, receive, send):
+        if scope["type"] == "http" and scope["query_string"]:
+            scope["raw_path"] = scope["raw_path"] + b"?" + scope["query_string"]
+        seen.append(scope.get("raw_path"))
+        await app(scope, receive, send)
+
+    transport = httpx.ASGITransport(app=with_query_in_raw_path)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        await c.post("/charges?a=1", json=BODY, headers=KEY)
+        # The same request through a server that strips it must be the same fingerprint.
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        again = await c.post("/charges?a=1", json=BODY, headers=KEY)
+    assert seen[0].endswith(b"?a=1")
+    assert again.headers["idempotent-replayed"] == "true"
+
+
+async def _returns_a_dict(request: Request) -> dict[str, Any]:
+    raise AssertionError
+
+
+class _Out(BaseModel):
+    ok: bool
+
+
+async def _returns_a_model(request: Request) -> _Out:
+    raise AssertionError
+
+
+async def _returns_a_response_union(request: Request) -> JSONResponse | Response:
+    return Response()
+
+
+@pytest.mark.parametrize("handler", [_returns_a_dict, _returns_a_model])
+def test_a_return_annotation_that_is_not_a_response_is_refused_at_decoration(handler):
+    with pytest.raises(TypeError, match="fully built Response"):
+        idempotent_route(_store(), scope=lambda r: "t", executors=_unused)(handler)
+
+
+def test_a_union_of_response_types_is_accepted():
+    idempotent_route(_store(), scope=lambda r: "t", executors=_unused)(_returns_a_response_union)
+
+
+@pytest.mark.parametrize("factory", ["asyncpg", "sqlalchemy"])
+async def test_the_shipped_factories_claim_outside_the_handlers_transaction(
+    factory, pg_conn, postgres_dsn
+):
+    """While the handler runs in its open transaction, another connection already sees the
+    in_flight record: the claim committed on its own. Then the 4xx commits and replays."""
+    if factory == "asyncpg":
+        pool = await asyncpg.create_pool(postgres_dsn, min_size=2, max_size=4)
+        make = asyncpg_executors(pool)
+        closer = pool.close
+    else:
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        engine = create_async_engine(postgres_dsn.replace("postgresql://", "postgresql+asyncpg://", 1))
+        make = sqlalchemy_executors(engine)
+        closer = engine.dispose
+    states: list[Any] = []
+    app = FastAPI()
+    install_error_handlers(app)
+
+    @app.post("/c")
+    @idempotent_route(IdempotencyStore(), scope=lambda r: "t", executors=make)
+    async def handler(request: Request) -> Response:
+        states.append(await pg_conn.fetchval("SELECT state FROM heph_idempotency"))
+        states.append(hasattr(request.state, WORK_CONNECTION_STATE))
+        raise HephError("HEPH-VAL-422", "no")
+
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            first = await c.post("/c", headers=KEY)
+            again = await c.post("/c", headers=KEY)
+    finally:
+        await closer()
+    assert states == ["in_flight", True]
+    assert first.status_code == again.status_code == 422
+    assert again.content == first.content
+    assert await pg_conn.fetchval("SELECT state FROM heph_idempotency") == "completed"
+
+
+def test_executors_roles_are_named():
+    ex = Executors(claim="a", work="b")  # type: ignore[arg-type]
+    assert (ex.claim, ex.work) == ("a", "b")
+
+
+def test_exposing_the_work_connection_tolerates_a_request_without_state():
+    from hephkit.idempotency.adapters import _expose
+
+    _expose(object(), object())  # no .state: nothing to set, nothing raised

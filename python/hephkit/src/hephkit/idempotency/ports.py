@@ -27,9 +27,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
-__all__ = ["Executor", "Proceed", "Replay"]
+__all__ = ["Executor", "Executors", "Proceed", "Replay"]
 
 
 @dataclass(frozen=True)
@@ -91,3 +91,18 @@ class Executor(Protocol):
         row count, SQLAlchemy's ``rowcount`` is typically -1); use ``fetch_one``.
         """
         ...
+
+
+class Executors(NamedTuple):
+    """The two executors a request needs, named so the roles cannot be swapped.
+
+    ``claim`` is on a connection with **no transaction open**; ``work`` is on the
+    handler's connection with its **transaction open** (see the module docstring
+    for why they differ). A bare ``(a, b)`` pair would let ``yield work, claim``
+    type-check and pass any test that uses one connection per role, while
+    silently running the claim inside the handler's transaction, where the
+    ``in_flight`` record is invisible and 2.5 and 2.8 stop working.
+    """
+
+    claim: Executor
+    work: Executor

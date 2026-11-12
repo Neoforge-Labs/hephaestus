@@ -8,16 +8,26 @@ this module costs nothing and a missing driver fails with the extra to install.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
     import asyncpg
-    from sqlalchemy.ext.asyncio import AsyncConnection
+    from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from hephkit.idempotency.ports import Executor
+from hephkit.idempotency.ports import Executor, Executors
 
-__all__ = ["AsyncpgExecutor", "SQLAlchemyExecutor"]
+__all__ = [
+    "WORK_CONNECTION_STATE",
+    "AsyncpgExecutor",
+    "SQLAlchemyExecutor",
+    "asyncpg_executors",
+    "sqlalchemy_executors",
+]
+
+# Where the factories below leave the handler's own connection: `request.state.<this>`.
+WORK_CONNECTION_STATE: Final = "heph_work_connection"
 
 # `$1` -> ` :p1 `, always padded with a space on both sides. SQLAlchemy's bind-name scanner
 # reads `:p1::text` as the bind `:p` and `arr[:p1:p2]` likewise, so a placeholder
@@ -97,6 +107,72 @@ class SQLAlchemyExecutor:
     @staticmethod
     def _bind(params: Sequence[Any]) -> dict[str, Any]:
         return {f"p{i}": v for i, v in enumerate(params, start=1)}
+
+
+def _expose(request: Any, conn: object) -> None:
+    state = getattr(request, "state", None)
+    if state is not None:
+        setattr(state, WORK_CONNECTION_STATE, conn)
+
+
+def asyncpg_executors(
+    pool: asyncpg.Pool,
+) -> Callable[[Any], AbstractAsyncContextManager[Executors]]:
+    """The ``executors=`` argument of ``idempotent_route`` for an asyncpg pool.
+
+    Per request it takes **two connections** from ``pool`` (so the pool needs at
+    least two free; one connection would run the claim inside the handler's
+    transaction, which is the forbidden shape). ``claim`` is a plain connection
+    with no transaction. ``work`` is a connection with a transaction begun: it is
+    committed when the route finishes cleanly and rolled back when it raises. The
+    handler's own connection is ``request.state.heph_work_connection``
+    (:data:`WORK_CONNECTION_STATE`); do the handler's writes on it.
+    """
+
+    @asynccontextmanager
+    async def executors(request: Any) -> AsyncIterator[Executors]:
+        async with pool.acquire() as claim_conn, pool.acquire() as work_conn:
+            tx = work_conn.transaction()
+            await tx.start()
+            _expose(request, work_conn)
+            try:
+                yield Executors(AsyncpgExecutor(claim_conn), AsyncpgExecutor(work_conn))
+            except BaseException:
+                await tx.rollback()
+                raise
+            else:
+                await tx.commit()
+
+    return executors
+
+
+def sqlalchemy_executors(
+    engine: AsyncEngine,
+) -> Callable[[Any], AbstractAsyncContextManager[Executors]]:
+    """The ``executors=`` argument of ``idempotent_route`` for a SQLAlchemy async engine.
+
+    Per request it opens **two connections**. ``claim`` is set to AUTOCOMMIT, which
+    is how SQLAlchemy says "no outer transaction" (otherwise ``connect()`` begins
+    one lazily and the claim stays invisible). ``work`` is an ordinary connection
+    whose transaction is committed on a clean finish and rolled back on an error.
+    The handler's own connection is ``request.state.heph_work_connection``
+    (:data:`WORK_CONNECTION_STATE`).
+    """
+
+    @asynccontextmanager
+    async def executors(request: Any) -> AsyncIterator[Executors]:
+        async with engine.connect() as claim_conn, engine.connect() as work_conn:
+            await claim_conn.execution_options(isolation_level="AUTOCOMMIT")
+            _expose(request, work_conn)
+            try:
+                yield Executors(SQLAlchemyExecutor(claim_conn), SQLAlchemyExecutor(work_conn))
+            except BaseException:
+                await work_conn.rollback()
+                raise
+            else:
+                await work_conn.commit()
+
+    return executors
 
 
 # Static check that both adapters satisfy the port; signature drift fails mypy.
