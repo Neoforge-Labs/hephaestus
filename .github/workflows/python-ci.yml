@@ -21,6 +21,21 @@ jobs:
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # The idempotency store tests require a real Postgres (they fail, not
+      # skip, without one: a skipped test still counts against the coverage gate).
+      HEPH_TEST_DATABASE_URL: postgresql://heph:heph@localhost:5432/heph
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: heph
+          POSTGRES_PASSWORD: heph
+          POSTGRES_DB: heph
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,6 +79,19 @@ jobs:
     if: ${{ inputs.include-slow }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      HEPH_TEST_DATABASE_URL: postgresql://heph:heph@localhost:5432/heph
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: heph
+          POSTGRES_PASSWORD: heph
+          POSTGRES_DB: heph
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

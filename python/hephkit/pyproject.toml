@@ -18,6 +18,8 @@ classifiers = [
 [project.optional-dependencies]
 fastapi = ["fastapi>=0.115"]
 settings = ["pydantic-settings>=2.6"]
+postgres = ["asyncpg>=0.30"]
+sqlalchemy = ["sqlalchemy[asyncio]>=2.0"]
 observability = [
     "structlog>=24.4",
     "opentelemetry-api>=1.28",
@@ -31,6 +33,9 @@ dev = [
     "maturin>=1.7,<2",
     "pytest>=8",
     "pytest-cov>=5",
+    "pytest-asyncio>=0.24",
+    "asyncpg>=0.30",
+    "sqlalchemy[asyncio]>=2.0",
     "hypothesis>=6.100",
     "mypy>=1.11",
     "fastapi>=0.162.0",
@@ -48,10 +53,14 @@ python-source = "src"
 module-name = "hephkit._core"
 manifest-path = "../../core/hephkit-py/Cargo.toml"
 features = ["pyo3/extension-module"]
+# schema.sql is the one copy of the idempotency DDL; the wheel must ship it.
+include = [{ path = "src/hephkit/idempotency/*.sql", format = ["sdist", "wheel"] }]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 markers = ["slow: multi-megabyte inputs; deselect with -m 'not slow'"]
 filterwarnings = ["error"]
 
