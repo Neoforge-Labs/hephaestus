@@ -1,8 +1,8 @@
 {
   "suite": "lab.diff",
   "spec": "0.5.0",
-  "description": "Replay and diff, spec section 9: what a replay compares (9.1), what a difference report contains and in what order (9.2), and how two values at one position are compared (9.3). A case supplies the two sides of a comparison, `recorded` and `replayed`, each a section 8 run record given as its section 7 provenance record plus its rows in the order `rows.jsonl` holds them. A row value is a JSON string, a finite JSON number, or 8.2's wrapper `{\"nonfinite\": t}`. `expect.matched` is whether the report matched and `expect.differences` is the report's differences, in order: each names a position by `cell` and `key` -- `cell` is null for a member of the determinism contract, and `key` is null for a cell that holds no values and is on one side only -- and carries `recorded` and `replayed`, where a null at a row position means the position is absent and a null at one of the four members is the member's own value (7.1). `input.derivation` says which clause of section 9 the expectation comes from; it is prose for the reader, not data an implementation consumes.",
-  "source": "Hand-derived from spec section 9. Every expectation is read off a clause: 9.1 for what is and is not compared (the four determinism-contract members and the rows; never `environment`, `run_id` or `class`), 9.2 for the shape and order of a report and for its treatment of a position only one side holds, and 9.3 for comparison by kind, exact string equality, the non-finite wrapper compared by the value it names, and the float tolerance. The float cases are evaluated by hand against 9.3's formula |a - b| <= max(1e-9 * max(|a|, |b|), 1e-12), and each one's `derivation` states the difference and the bound so a reader can check the arithmetic without running anything: 5.000000413701855e-10 against a bound of 1.0000000005e-9 for the matching pair, about 1e-6 against about 1e-9 for the differing one, and 1e-13 and 1e-11 against the absolute floor of 1e-12 for the two near-zero pairs. Every digest is quoted rather than invented: `sha256:44136fa3...` and `sha256:74234e98...` are conformance/hashing/content.json's `empty-object` and `null`, `sha256:9d7a9f8a...` its `spec-2.2-fingerprint-example`, `sha256:12ae32cb...` its `empty-string` and `sha256:d3626ac3...` its `key-order-does-not-change-hash`, while `sha256:e3b0c442...` is the published SHA-256 of the empty string (FIPS 180-4, RFC 6234). A `code_sha` is a synthetic 40-character lowercase hex value, as in conformance/lab/record.json. No expectation in this file was produced by running this kit, and no implementation of section 9 existed when it was written (CLAUDE.md rule 2).",
+  "description": "Replay and diff, spec section 9: what a replay compares (9.1), what a difference report contains and in what order (9.2), and how two values at one position are compared (9.3). A case supplies the two sides of a comparison, `recorded` and `replayed`, each a section 8 run record given as its section 7 provenance record plus its rows in the order `rows.jsonl` holds them. A row value is a JSON string, a finite JSON number, or 8.2's wrapper `{\"nonfinite\": t}`. `expect.matched` is whether the report matched, `expect.record_unfinished` is whether the record it compared holds no summary (8.4) -- false throughout this file, since every case writes two finished records, and an unfinished one is a contract test rather than a vector, since no input/output pair expresses a run that died -- and `expect.differences` is the report's differences, in order: each names a position by `cell` and `key` -- `cell` is null for a member of the determinism contract, and `key` is null for a cell that holds no values and is on one side only -- and carries `recorded` and `replayed`, where a null at a row position means the position is absent and a null at one of the four members is the member's own value (7.1), which equals only another null (9.3). `input.derivation` says which clause of section 9 the expectation comes from; it is prose for the reader, not data an implementation consumes.",
+  "source": "Hand-derived from spec section 9. Every expectation is read off a clause: 9.1 for what is and is not compared (the four determinism-contract members and the rows; never `environment`, `run_id` or `class`), 9.2 for the shape and order of a report and for its treatment of a position only one side holds, and 9.3 for comparison by kind, exact string equality, the non-finite wrapper compared by the value it names, the null that equals only another null at a determinism-contract member, and the float tolerance. The float cases are evaluated by hand against 9.3's formula |a - b| <= max(1e-9 * max(|a|, |b|), 1e-12), and each one's `derivation` states the difference and the bound so a reader can check the arithmetic without running anything: 5.000000413701855e-10 against a bound of 1.0000000005000001e-9 for the matching pair, about 1e-6 against about 1e-9 for the differing one, and 1e-13 and 1e-11 against the absolute floor of 1e-12 for the two near-zero pairs. Every digest is quoted rather than invented: `sha256:44136fa3...` and `sha256:74234e98...` are conformance/hashing/content.json's `empty-object` and `null`, `sha256:9d7a9f8a...` its `spec-2.2-fingerprint-example`, `sha256:12ae32cb...` its `empty-string` and `sha256:d3626ac3...` its `key-order-does-not-change-hash`, while `sha256:e3b0c442...` is the published SHA-256 of the empty string (FIPS 180-4, RFC 6234). A `code_sha` is a synthetic 40-character lowercase hex value, as in conformance/lab/record.json. No expectation in this file was produced by running this kit, and no implementation of section 9 existed when it was written (CLAUDE.md rule 2).",
   "cases": [
     {
       "name": "identical-records-match",
@@ -67,6 +67,7 @@
       },
       "expect": {
         "matched": true,
+        "record_unfinished": false,
         "differences": []
       }
     },
@@ -133,6 +134,7 @@
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
           {
             "cell": "cell-a",
@@ -209,6 +211,7 @@
       },
       "expect": {
         "matched": true,
+        "record_unfinished": false,
         "differences": []
       }
     },
@@ -275,6 +278,72 @@
       },
       "expect": {
         "matched": true,
+        "record_unfinished": false,
+        "differences": []
+      }
+    },
+    {
+      "name": "a-provenance-only-run-with-no-lockfile-and-no-commit-matches-itself",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": null,
+            "code_sha": null,
+            "class": "provenance-only",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": null,
+            "code_sha": null,
+            "class": "provenance-only",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5
+              }
+            }
+          ]
+        },
+        "derivation": "9.3: a `null` is a fourth kind and equals a `null` and nothing else, so two records that both had no lockfile and whose code no git commit names do not differ at `deps_hash` or `code_sha` -- there is no value either side ever had. 7.1 makes those the two null-able members and 7.3 makes these nulls exactly what a `provenance-only` run carries, so this is the ordinary case rather than an exotic one: an implementation reading 9.3's other three kinds as exhaustive would report this replay as diverged at both members."
+      },
+      "expect": {
+        "matched": true,
+        "record_unfinished": false,
         "differences": []
       }
     },
@@ -341,6 +410,7 @@
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
           {
             "cell": null,
@@ -414,6 +484,7 @@
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
           {
             "cell": null,
@@ -503,6 +574,7 @@
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
           {
             "cell": null,
@@ -584,6 +656,7 @@
       },
       "expect": {
         "matched": true,
+        "record_unfinished": false,
         "differences": []
       }
     },
@@ -650,6 +723,7 @@
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
           {
             "cell": "cell-a",
@@ -733,6 +807,7 @@
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
           {
             "cell": "cell-a",
@@ -815,6 +890,7 @@
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
           {
             "cell": "cell-b",
@@ -905,6 +981,7 @@
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
           {
             "cell": "cell-b",
@@ -979,16 +1056,24 @@
             {
               "cell": "cell-c",
               "values": {
-                "loss": 0.75
+                "loss": 0.75,
+                "grad_norm": 2.5
               }
             }
           ]
         },
-        "derivation": "9.2: positions only the re-execution holds come after the record's, in the order its own rows give them."
+        "derivation": "9.2: positions only the re-execution holds come after the record's, in the order its own rows give them, and such a cell appears as one difference per value it holds -- two here, so the count and the order both bite. 8.1 makes the re-execution's rows canonical JSON too, so 4.1 sorts `grad_norm` before `loss`."
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
+          {
+            "cell": "cell-c",
+            "key": "grad_norm",
+            "recorded": null,
+            "replayed": 2.5
+          },
           {
             "cell": "cell-c",
             "key": "loss",
@@ -1063,6 +1148,7 @@
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
           {
             "cell": "cell-empty",
@@ -1135,6 +1221,7 @@
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
           {
             "cell": "cell-a",
@@ -1202,10 +1289,11 @@
             }
           ]
         },
-        "derivation": "9.3: |1.0 - 1.0000000005| is 5.000000413701855e-10 in binary64, and the bound is max(1e-9 * 1.0000000005, 1e-12) = 1.0000000005e-9, so the values are equal. This is the reassociation 7.2 says a second machine may introduce."
+        "derivation": "9.3: |1.0 - 1.0000000005| is 5.000000413701855e-10 in binary64, and the bound is max(1e-9 * 1.0000000005, 1e-12) = 1.0000000005000001e-9, so the values are equal. This is the reassociation 7.2 says a second machine may introduce."
       },
       "expect": {
         "matched": true,
+        "record_unfinished": false,
         "differences": []
       }
     },
@@ -1270,6 +1358,7 @@
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
           {
             "cell": "cell-a",
@@ -1341,6 +1430,7 @@
       },
       "expect": {
         "matched": true,
+        "record_unfinished": false,
         "differences": []
       }
     },
@@ -1405,6 +1495,7 @@
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
           {
             "cell": "cell-a",
@@ -1476,6 +1567,7 @@
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
           {
             "cell": "cell-a",
@@ -1549,6 +1641,7 @@
       },
       "expect": {
         "matched": false,
+        "record_unfinished": false,
         "differences": [
           {
             "cell": "cell-a",
