@@ -20,7 +20,9 @@ Conventions this module fixes, because the spec does not:
   nesting levels: ``HEPH_OPTIM__LR`` sets ``optim.lr``.
 * **Command line.** Options are ``--<dotted.path>=<value>`` or
   ``--<dotted.path> <value>``. There are no implicit booleans; write
-  ``--flag=true``.
+  ``--flag=true``. The line is read left to right and a repeated option takes
+  its last value -- ``--seed=1 --seed=2`` is 2, not a refusal -- for the same
+  reason a later layer beats an earlier one.
 * **Scalars from the environment and the command line** are read as JSON when
   they parse as JSON and as the raw string otherwise, so ``--seed=7`` is the
   integer 7 and ``--name=resnet`` is the string ``"resnet"``. Pydantic does the
@@ -37,6 +39,24 @@ Conventions this module fixes, because the spec does not:
   subclasses :class:`ConfigError`, so one ``except ConfigError`` still catches
   every refusal this module makes and ``.code`` is what tells them apart. A
   malformed file, or one holding something other than an object, stays ``422``.
+  An absent file is reported **before** any member of any layer is checked, so
+  ``resolve(M, defaults={"unknown": 1}, file=absent)`` is ``424``: a layer that
+  cannot be read at all is a more fundamental failure than one that reads and
+  says something wrong.
+* **A later layer that supplies an object where an earlier one gave a scalar
+  replaces it**, like any other override. But an ``env`` or ``cli`` member such
+  as ``HEPH_OPTIM__LR`` names ``optim.lr`` and says nothing about ``optim``, so
+  where no layer has supplied an object at ``optim`` the override is refused
+  (``422``) rather than silently granted an object it never named. The two
+  mechanisms differ on purpose; `conformance/lab/config.json` pins both.
+* **Refusals are ``ValueError`` subclasses, not ``hephkit.errors.HephError``**,
+  so they carry no ``status``, ``title`` or ``type_url`` and an
+  ``except HephError`` handler rendering problem+json does not see them. That is
+  deliberate and applies to every ``hephkit.lab`` module: this is research
+  tooling that sits *below* research code, not behind an HTTP boundary, and
+  ``.code`` is here for correlation, logging and the registry's disambiguation
+  rather than for wire rendering. A service that needs a lab failure as
+  problem+json maps it at its own edge, as it would any library exception.
 
 Maturity: experimental.
 """
@@ -48,6 +68,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, TypeVar
 
+from hephkit.errors import LAB_422, LAB_424
 from hephkit.hashing import content_hash
 from pydantic import BaseModel, ConfigDict
 from pydantic import ValidationError as _ValidationError
@@ -63,13 +84,20 @@ __all__ = [
     "resolve",
 ]
 
-#: The registry code a config that is wrong carries (`spec/errors.yaml`).
-CODE = "HEPH-LAB-422"
+# Error codes live only in `spec/errors.yaml` (CLAUDE.md). `LAB_422` and
+# `LAB_424` are generated from it into `hephkit.errors._codes` by
+# `tools/gen_errors.py` and re-exported publicly, so they are imported rather
+# than re-spelled here: a hand-written literal would survive both
+# `gen_errors.py --check` and `check_registry.py`, neither of which reads module
+# source, and a renumbering would diverge silently.
+
+#: The registry code a config that is wrong carries.
+CODE = LAB_422
 
 #: The registry code a config file that is absent carries, which 422's own
 #: guidance names: "a config file that is absent rather than wrong is
 #: HEPH-LAB-424".
-MISSING_CODE = "HEPH-LAB-424"
+MISSING_CODE = LAB_424
 
 #: Environment members outside this prefix are not config values.
 ENV_PREFIX = "HEPH_"
@@ -330,14 +358,15 @@ def resolve(
     of one member leaves its siblings alone. Every refusal is a
     :class:`ConfigError` naming the member and the layer.
     """
+    # Read the file before anything else is checked, so an absent file layer is
+    # HEPH-LAB-424 even when another layer also holds a bad member. Explicit
+    # rather than relying on where the call sits in the loop below.
+    file_layer = _read_file(file) if file is not None else None
     merged: dict[str, Any] = {}
     # Dotted path -> the layer that last set it, so a validation failure can
     # name the layer to fix rather than only the member.
     origins: dict[str, str] = {}
-    for layer, mapping in (
-        ("defaults", defaults),
-        ("file", _read_file(file) if file is not None else None),
-    ):
+    for layer, mapping in (("defaults", defaults), ("file", file_layer)):
         if mapping is None:
             continue
         tree = _as_mapping(mapping, layer)

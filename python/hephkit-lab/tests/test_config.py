@@ -271,6 +271,21 @@ def test_a_real_numpy_scalar_is_refused_the_same_way() -> None:
     with pytest.raises(ConfigError) as exc:
         config_hash(cfg)
     assert exc.value.field == "lr"
+    # An array as well as a scalar: `_walk` treats `list` and `tuple` as
+    # containers and deliberately does not reach inside an ndarray, so the
+    # array is one leaf and must be named as one rather than walked into.
+    with pytest.raises(ConfigError) as arr:
+        config_hash(Loose.model_construct(lr=numpy.array([1, 2])))
+    assert arr.value.field == "lr"
+
+
+def test_the_codes_are_the_generated_registry_constants() -> None:
+    """CLAUDE.md: error codes live only in `spec/errors.yaml`. Nothing else on
+    this branch would catch a code hand-spelled in module source."""
+    from hephkit.errors import LAB_422, LAB_424
+
+    assert ConfigError.code is LAB_422
+    assert MissingConfigError.code is LAB_424
 
 
 def test_a_nested_object_replaces_a_scalar_from_an_earlier_layer(tmp_path: Path) -> None:
@@ -348,4 +363,22 @@ def test_a_missing_config_file_is_still_caught_as_a_config_error(tmp_path: Path)
 def test_a_directory_in_place_of_a_config_file_is_also_424(tmp_path: Path) -> None:
     with pytest.raises(MissingConfigError) as exc:
         resolve(Train, defaults=DEFAULTS, file=tmp_path)
+    assert exc.value.code == "HEPH-LAB-424"
+
+
+def test_a_repeated_cli_option_takes_its_last_value() -> None:
+    cfg = resolve(Train, defaults=DEFAULTS, argv=["--seed=2", "--seed=3"])
+    assert cfg.seed == 3
+
+
+def test_a_missing_file_is_reported_before_a_bad_member_in_another_layer(
+    tmp_path: Path,
+) -> None:
+    """424 before 422: a layer that cannot be read at all comes first."""
+    with pytest.raises(MissingConfigError) as exc:
+        resolve(
+            Train,
+            defaults={**DEFAULTS, "epochs": 3},
+            file=tmp_path / "absent.json",
+        )
     assert exc.value.code == "HEPH-LAB-424"
