@@ -55,7 +55,13 @@ step() { # step <name>
 }
 
 says() { grep -Eq "$1" "$LOG/$2.txt"; }        # the step reported this
-silent() { ! grep -Eq "$1" "$LOG/$2.txt"; }    # and did not report that
+
+# ... and did not report that. The `-s` is load-bearing and not defensive
+# tidying: a bare `! grep` over a log that is missing or empty exits non-zero
+# for want of a subject, which `!` turns into a pass. That is this wave's defect
+# species exactly -- a check that cannot fail -- and it would be invisible,
+# because the two claims below are the only ones phrased as an absence.
+silent() { [ -s "$LOG/$2.txt" ] && ! grep -Eq "$1" "$LOG/$2.txt"; }
 
 say() { printf '\n== %s\n' "$1"; }
 
