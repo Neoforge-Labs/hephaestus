@@ -674,6 +674,53 @@ async def test_a_separate_claim_pool_cannot_deadlock(pg_conn, postgres_dsn):
         await claim.close()
 
 
+@pytest.mark.parametrize("factory", ["asyncpg", "sqlalchemy"])
+async def test_a_timeout_the_handler_raises_is_not_renamed_pool_exhaustion(
+    factory, pg_conn, postgres_dsn
+):
+    """Only the acquire is translated, which is what the flag in the helper is for.
+
+    A handler that times out talking to something else is not an exhausted pool,
+    and reporting it as HEPH-DB-503 would send an operator to the wrong place.
+    It keeps its own type on the way out, and the record is still released.
+    """
+    if factory == "asyncpg":
+        pool = await asyncpg.create_pool(postgres_dsn, min_size=2, max_size=4)
+        make = asyncpg_executors(pool)
+        closer = pool.close
+        boom: BaseException = TimeoutError("the handler's own")
+    else:
+        from sqlalchemy.exc import TimeoutError as PoolTimeout
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        engine = create_async_engine(
+            postgres_dsn.replace("postgresql://", "postgresql+asyncpg://", 1)
+        )
+        make = sqlalchemy_executors(engine)
+        closer = engine.dispose
+        boom = PoolTimeout("the handler's own")
+
+    app = FastAPI()
+    install_error_handlers(app)
+
+    @app.post("/c")
+    @idempotent_route(IdempotencyStore(), scope=lambda r: "t", executors=make)
+    async def handler(request: Request) -> Response:
+        raise boom
+
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            with pytest.raises(type(boom)) as raised:
+                await c.post("/c", headers=KEY)
+    finally:
+        await closer()
+    assert raised.value is boom
+    assert not isinstance(raised.value, HephError)
+    assert await pg_conn.fetchval("SELECT count(*) FROM heph_idempotency") == 0
+
+
 async def test_nested_executors_restore_the_outer_connection_and_clear_on_exit(pg_conn, postgres_dsn):
     from types import SimpleNamespace
 
