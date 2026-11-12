@@ -73,7 +73,7 @@ Input classes the spec implies that no task's happy path exercises, most likely 
 
 | File | Change |
 | --- | --- |
-| `spec/heph-spec.md` | Revise §7; add §8 run records, §9 replay; bump to 0.5.0 (0.4.0 is taken by PR #22) |
+| `spec/heph-spec.md` | Bump to 0.5.0 in Task 6 (0.4.0 is taken by PR #22); revise §7 in Task 6; add §8 run records and §9 replay in Task 10 |
 | `conformance/schema/vector-file.schema.json` | Three `lab.*` suites in the `suite` enum; `spec` const → 0.5.0 |
 | every `conformance/*/*.json` | `spec` field re-stamped to 0.5.0 in Task 10 |
 | `spec/errors.yaml` | Four `LAB` codes |
@@ -360,6 +360,13 @@ git commit -m "feat(lab): add the hephkit-lab distribution"
 **Interfaces:**
 - Produces: spec §7 with `run_id`, `config_hash`, `data_hash`, `deps_hash`, `code_sha`, `class`, `environment`; the preconditions for `deterministic`; codes `HEPH-LAB-422`, `HEPH-LAB-409`, `HEPH-LAB-424`, `HEPH-LAB-412`.
 
+- [ ] **Step 0: Bump the spec to 0.5.0 and re-stamp the vectors (Ruling 19)**
+
+This task, not Task 10, owns the version bump: it is the **first** task in the wave to change `spec/heph-spec.md`, and leaving the spec modified while it still declares `0.4.0` would make that version name two different specs mid-branch. Set `- **Version:** 0.5.0` in `spec/heph-spec.md`, set `"const": "0.5.0"` in `conformance/schema/vector-file.schema.json`, and re-stamp the `"spec"` field of every file under `conformance/*/`. PR #22 took `0.4.0` for the idempotency spec change, so this wave's spec work lands in `0.5.0`.
+
+Run afterwards: `uv run tools/check_vectors.py`
+Expected: PASS with every vector file at `0.5.0`.
+
 - [ ] **Step 1: Revise spec §7**
 
 Remove "Status: draft". Add `deps_hash` (normative, content hash of the lockfile) and `environment` (descriptive, never compared on replay) with the field table from the design's §9.2. Add §7.3: a run is `provenance-only` unless the working tree is clean **and** a lockfile exists. Keep `provenance-only` hyphenated.
@@ -553,7 +560,7 @@ git commit -m "feat(lab): crash-safe run records and the experiment registry"
 
 §8: record structure, incremental write semantics, and that an unwritable record is a failed run. §9: what a replay compares (the normative hashes of §7, never `environment`), what a difference report contains, that float comparison uses a stated tolerance, and that NaN compares equal to NaN for replay purposes.
 
-Per Ruling 1, this is the task that owns the version bump, because it is the last task to add a spec section. Set `- **Version:** 0.5.0` in `spec/heph-spec.md`, set `"const": "0.5.0"` in `conformance/schema/vector-file.schema.json`, and re-stamp the `"spec"` field of **every** file under `conformance/*/` — including the three `lab/` suites added by Tasks 7 and 8. PR #22 took 0.4.0 for the idempotency spec change; letting 0.4.0 name two different specs is worse than a second bump.
+**Ruling 19 moved the version bump to Task 6**, which is the first task in the wave to touch the spec. By the time this task runs the spec already declares `0.5.0`, and §8–§10 land inside that same unreleased version, so **do not bump again**. Re-stamp only the `lab/` suite files if Tasks 7 and 8 created them before the bump landed.
 
 Run afterwards: `moon run conformance:check`
 Expected: PASS with every vector file at 0.5.0.
