@@ -1,0 +1,27 @@
+[project]
+name = "lab-replay"
+version = "0.0.0"
+description = "The in-repo replay gate: record a run, replay it with the network blocked, diff a perturbed input, refuse a violating fixture."
+requires-python = ">=3.12"
+# The integrity spine and nothing else. `hephkit-lab`'s base dependencies carry
+# no scientific stack (ADR 0023), so the gate installs in seconds and runs on
+# every pull request; the fixture's arithmetic is the standard library's.
+#
+# `hephkit` is listed as a direct dependency although nothing here imports it
+# directly: `[tool.uv.sources]` below is what makes both portions of the
+# `hephkit` namespace package (ADR 0021) resolve from this repository rather
+# than from an index, and a source only applies to a requirement this project
+# states. Two editable installs is the layout the namespace split is known to
+# work in -- see the long note in python/hephkit-lab/pyproject.toml for the
+# install shapes that do not.
+dependencies = ["hephkit-lab", "hephkit"]
+
+[tool.uv.sources]
+hephkit-lab = { path = "../../python/hephkit-lab", editable = true }
+hephkit = { path = "../../python/hephkit", editable = true }
+
+# Nothing imports this example as a package: `gate_test.sh` runs
+# `experiment.py` as a script. There is no build backend and no wheel on
+# purpose, so uv treats it as a virtual project.
+[tool.uv]
+package = false

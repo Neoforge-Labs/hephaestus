@@ -16,6 +16,7 @@ projects:
   docs-site: 'docs/site'
   heph-cli: 'go'
   examples-hello: 'examples/hello'
+  examples-lab-replay: 'examples/lab-replay'
 
 vcs:
   client: 'git'
