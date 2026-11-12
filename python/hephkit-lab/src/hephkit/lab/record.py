@@ -194,12 +194,20 @@ Experiment = Callable[["RunRecord"], None]
 def _write_durably(handle: TextIO, text: str) -> None:
     """Write `text` to `handle` and hand it to storage before returning (spec 8.3).
 
-    The flush empties the buffer this process owns, so the bytes survive the
-    death of the process; the ``fsync`` hands them to the storage device, so
-    they survive the machine. 8.3 asks for both, and this is the only place in
-    the module that writes anything -- which is what makes it possible to
-    demonstrate that a buffering implementation fails the tests rather than
-    merely to assert that this one passes them.
+    The flush empties the buffer this process owns and the ``fsync`` hands the
+    file's bytes to storage, which together are exactly what 8.3 asks for: the
+    bytes of a row are durable before the call that appended it returns, and
+    they survive the death of this process without a further call.
+
+    That is the whole of the claim, and deliberately not a claim about power
+    loss. This synchronises the file and not the directory holding it, so the
+    *names* of a freshly created ``provenance.json`` and ``rows.jsonl`` are not
+    guaranteed to survive a crash of the machine. 8.3 requires only that the
+    bytes outlive the writing process, so no directory ``fsync`` is made here.
+
+    This is the only place in the module that writes anything -- which is what
+    makes it possible to demonstrate that a buffering implementation fails the
+    tests rather than merely to assert that this one passes them.
     """
     handle.write(text)
     handle.flush()
@@ -336,10 +344,16 @@ def _read_rows(path: Path) -> list[Row]:
     for number, line in enumerate(text.split("\n")[:-1], start=1):
         where = f"{path}:{number}"
         if not line:
-            raise ValueError(f"{where} is empty; each line of a record is one row (spec 8.1)")
+            raise ValueError(
+                f"{where} is empty; every LF-terminated line of a record is one "
+                "row document (spec 8.3)"
+            )
         document = _loads(line)
         if not isinstance(document, dict):
-            raise ValueError(f"{where} does not hold a JSON object (spec 8.1)")
+            raise ValueError(
+                f"{where} does not hold a JSON object, so it is not a row "
+                "document (spec 8.2)"
+            )
         values = document.get("values")
         if isinstance(values, dict):
             document["values"] = {
@@ -539,6 +553,17 @@ def open_record(directory: Path, provenance: ProvenanceRecord) -> RunRecord:
 
     Every failure to create the directory or write into it raises
     :class:`RecordError`: an unwritable record is a failed run (8.5).
+
+    `directory` is arbitrary as far as this module is concerned: it writes and
+    reads a record wherever it is pointed and never derives a path from the run.
+    :mod:`hephkit.lab.gates` is not so free, and a project that wants its runs
+    **citable** has to meet its convention: the citations gate resolves a
+    manuscript's ``run:<run_id>`` to ``records / run_id`` and compares the
+    directory name against the record's own ``run_id``, so the record of
+    ``run_id="demo-0001"`` has to sit at ``<records>/demo-0001``. Recording into
+    a directory named anything else -- ``runs/2026-11-12-sweep/`` -- is
+    supported here and flags every citation of that run the moment the citations
+    gate is turned on.
     """
     for name in (PROVENANCE_NAME, ROWS_NAME, SUMMARY_NAME):
         if (directory / name).exists():

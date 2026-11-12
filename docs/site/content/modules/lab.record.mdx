@@ -67,6 +67,17 @@ record goes through, and prints the four rows. Delete `summary.json` and run the
 read again: `complete` is `False`, because a record with no summary is a run that
 died rather than a broken artefact.
 
+### Name the directory after the run
+
+`runs/demo-0001` for `run_id="demo-0001"` is not decoration. `open_record` and
+`run` take any directory you point them at and never derive one from the run,
+but [`lab.gates`](/modules/lab.gates) does: the citations gate resolves a
+manuscript's `run:<run_id>` to `<records>/<run_id>` and compares the directory
+name against the record's own `run_id`, so a mis-filed record is a finding
+rather than an invisible redirection. Record into `runs/2026-11-12-sweep/`
+instead and the record itself is perfectly good — every citation of that run is
+flagged the moment you turn the citations gate on.
+
 ## A cell per fold, not a run per fold
 
 That is the shape this spine is built for, and it is worth saying because the

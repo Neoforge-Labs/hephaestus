@@ -213,7 +213,7 @@ docstring moves to the docs page, and `hephkit.__version__` is replaced by
 `importlib.metadata.version("hephkit")`, which is documented as a migration
 note and bumps `hephkit` to 0.3.0.
 
-This is recorded as ADR 0025, and it means **wave 1 edits
+This is recorded as ADR 0021, and it means **wave 1 edits
 `python/hephkit/`** — a tree the Phase 2 stream also touches. §13 covers the
 coordination.
 

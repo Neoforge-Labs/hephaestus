@@ -58,20 +58,40 @@ Conventions this module fixes, because the spec does not:
   ``resolve(M, defaults={"unknown": 1}, file=absent)`` is ``424``: a layer that
   cannot be read at all is a more fundamental failure than one that reads and
   says something wrong.
+
+  This taxonomy has one gap, named here so the next reader does not rediscover
+  it: ``_read_file`` separates an absent file from a malformed one, but it
+  catches only ``ValueError``, so a file that is present and cannot be *read* --
+  no permission on it, or an I/O error reading it -- escapes as the bare
+  ``OSError`` the filesystem raised, carrying no ``.code``, no ``.field`` and no
+  ``.layer``. That is a known gap and a recorded follow-up rather than a
+  decision; closing it means settling which code such a file carries, which this
+  module does not yet do.
 * **A later layer that supplies an object where an earlier one gave a scalar
   replaces it**, like any other override. But an ``env`` or ``cli`` member such
   as ``HEPH_LAB_OPTIM__LR`` names ``optim.lr`` and says nothing about ``optim``, so
   where no layer has supplied an object at ``optim`` the override is refused
   (``422``) rather than silently granted an object it never named. The two
   mechanisms differ on purpose; ``conformance/lab/config.json`` pins both.
-* **Refusals are ``ValueError`` subclasses, not ``hephkit.errors.HephError``**,
-  so they carry no ``status``, ``title`` or ``type_url`` and an
-  ``except HephError`` handler rendering problem+json does not see them. That is
-  deliberate and applies to every ``hephkit.lab`` module: this is research
-  tooling that sits *below* research code, not behind an HTTP boundary, and
-  ``.code`` is here for correlation, logging and the registry's disambiguation
-  rather than for wire rendering. A service that needs a lab failure as
-  problem+json maps it at its own edge, as it would any library exception.
+* **Refusals here are ``ValueError`` subclasses, not
+  ``hephkit.errors.HephError``**, so they carry no ``status``, ``title`` or
+  ``type_url`` and an ``except HephError`` handler rendering problem+json does
+  not see them. The ``ValueError`` base is **this module's own** and does not
+  generalise: :class:`ConfigError` subclasses it, so ``except ValueError``
+  catches every refusal this module makes, but the rest of the spine raises from
+  ``RuntimeError`` -- :class:`hephkit.lab.record.RecordError`,
+  :class:`hephkit.lab.replay.ReplayError` and
+  :class:`hephkit.lab.gates.GateError` are not ``ValueError``. A caller that
+  wants every lab failure catches each module's own base class, not
+  ``ValueError``.
+
+  What does generalise to every ``hephkit.lab`` module is the
+  not-``HephError`` half, and each of those classes states it in its own
+  docstring: this is research tooling that sits *below* research code, not
+  behind an HTTP boundary, and ``.code`` is here for correlation, logging and
+  the registry's disambiguation rather than for wire rendering. A service that
+  needs a lab failure as problem+json maps it at its own edge, as it would any
+  library exception.
 
 Maturity: experimental.
 """
