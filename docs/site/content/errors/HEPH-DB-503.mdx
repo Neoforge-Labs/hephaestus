@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-DB-503 — Database connection unavailable"
+---
+
+# HEPH-DB-503
+
+**Database connection unavailable**
+
+| | |
+| --- | --- |
+| HTTP status | `503` |
+| Area | `DB` |
+| Problem `type` | `https://hephkit.dev/errors/HEPH-DB-503` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+The service could not get a database connection in time. Retry the request in a few moments.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+A pooled database connection could not be acquired before the acquire wait ran out, so the request was refused rather than left hanging. It is a capacity fault, not a client fault, and retrying it unchanged is correct once the pressure passes. The usual cause is an under-sized pool rather than a slow database. An idempotent request or delivery holds two connections, the claim one while it waits for the work one, so a single pool needs twice the peak concurrency of whatever uses it, or every request waits on another and none proceeds. Give the claim connections a pool of their own with claim\_pool, or raise the pool's size. Lengthening the wait (acquire\_timeout, or SQLAlchemy's pool\_timeout) only moves the stall. If the pool is big enough, look for connections held open past the request that took them, such as a handler awaiting a slow external call inside its transaction.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error index](/errors).

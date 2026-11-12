@@ -28,3 +28,4 @@ acceptance; a changed decision is superseded by a new record.
 - [0017. Generate the full ISO 4217 currency table, funds codes included](/adrs/0017-full-iso-4217-currency-table)
 - [0018. Disambiguate the name "Atlas" across ADRs 0013 and 0014](/adrs/0018-disambiguate-the-name-atlas)
 - [0019. The public domain is hephkit.dev](/adrs/0019-the-public-domain-is-hephkit-dev)
+- [0020. Idempotency storage boundaries](/adrs/0020-idempotency-storage-boundaries)

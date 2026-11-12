@@ -186,6 +186,14 @@ and two concurrent first requests serialise. **This must be proven by a
 concurrency test, not by reading the manual.** Fallback: an advisory lock on
 `hash(scope, key)`.
 
+> **Settled 2026-11-12, ADR 0020.** The concurrency test was written and it
+> disproved this paragraph. A conflicting insert waits for the first
+> transaction's outcome under `DO NOTHING` and `DO UPDATE` alike, so the
+> serialisation 2.3 demands is the unique index's speculative-insertion wait and
+> not this clause's row lock. `DO UPDATE` was kept for a different reason — it
+> folds 2.7's aged-out reuse into the same atomic statement — and no advisory
+> lock was needed. The measurement is quoted in the ADR.
+
 ### Storage
 
 One table, `heph_idempotency`, primary key `(scope, key)`: fingerprint, kind,

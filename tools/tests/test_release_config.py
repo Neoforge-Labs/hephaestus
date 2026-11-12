@@ -139,6 +139,56 @@ def test_third_party_actions_are_pinned_to_full_shas() -> None:
             assert re.search(r"@[0-9a-f]{40}$", ref), f"{path.name}: {ref}"
 
 
+def _service_images() -> list[tuple[str, str]]:
+    """``(workflow, image)`` for every service container in every workflow.
+
+    Read from the parsed YAML rather than by regex over the text: a conditional
+    service writes its image as a folded scalar on the next line, which a
+    line-oriented pattern misses, and a check that matches nothing passes.
+    """
+    return [
+        (name, service["image"])
+        for name in EXPECTED_WORKFLOWS
+        for job in load_workflow(name)["jobs"].values()
+        for service in (job.get("services") or {}).values()
+    ]
+
+
+def test_service_images_are_pinned_by_digest() -> None:
+    """A service image is as much of a supply chain as an action.
+
+    `postgres:17` moving is `pg_isready`, `gen_random_uuid()` and the default
+    GUCs moving under the idempotency contract suite, four lines from an action
+    pinned to a full sha.
+    """
+    images = _service_images()
+    assert images, "no service container found, so this check proves nothing"
+    for name, image in images:
+        assert "@sha256:" in image, f"{name}: {image} is not pinned by digest"
+
+
+def test_the_postgres_service_is_off_unless_the_caller_asks() -> None:
+    """python-ci.yml is consumed by other repositories at @v0.
+
+    A repository with no database test must not pull an image and wait on
+    pg_isready to find that out, so the service and the DSN are both gated on
+    the input and the input is off by default. This repository's own caller is
+    where it is turned on.
+    """
+    workflow = load_workflow("python-ci.yml")
+    assert workflow["on"]["workflow_call"]["inputs"]["postgres"]["default"] is False
+    for name in ("python", "python-slow"):
+        job = workflow["jobs"][name]
+        assert "inputs.postgres" in job["services"]["postgres"]["image"], name
+        assert "inputs.postgres" in job["env"]["HEPH_TEST_DATABASE_URL"], name
+
+    caller = next(
+        j for j in load_workflow("ci.yml")["jobs"].values()
+        if j.get("uses", "").endswith("python-ci.yml")
+    )
+    assert caller["with"]["postgres"] is True
+
+
 def test_pr_ci_calls_every_gate() -> None:
     jobs = load_workflow("ci.yml")["jobs"]
     called = {j.get("uses", "") for j in jobs.values()}

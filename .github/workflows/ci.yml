@@ -55,6 +55,9 @@ jobs:
   python:
     uses: ./.github/workflows/python-ci.yml
     with:
+      # The idempotency contract suite lives here, so this caller wants the
+      # service; a consuming repository that has no database test does not.
+      postgres: true
       # A merge_group run is pre-merge, so it belongs with pull_request here:
       # without the explicit exclusion it would match (its ref is
       # refs/heads/gh-readonly-queue/..., not refs/heads/work/) and every queued

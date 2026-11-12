@@ -2,7 +2,8 @@ import type { MetaRecord } from 'nextra'
 
 // Sidebar order and titles. Unlisted routes are appended alphabetically.
 // Hand-written on purpose: order is editorial. What the project is, then the
-// contract (spec, errors), then reference, then the why (ADRs) and the plan.
+// contract (spec, errors), then the per-module guides and the reference,
+// then the why (ADRs) and the plan.
 //
 // There is no `index` row: `/` is the landing page (app/page.tsx), outside this
 // content tree, and the docs overview lives at `/docs`.
@@ -14,6 +15,7 @@ const meta: MetaRecord = {
   docs: 'Overview',
   spec: 'Specification',
   errors: 'Error codes',
+  modules: 'Module guides',
   reference: 'Reference',
   adrs: 'Decisions',
   roadmap: 'Roadmap'

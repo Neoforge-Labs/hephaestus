@@ -4,11 +4,11 @@
 title: "heph-spec"
 ---
 
-> **Two version numbers.** This page is version 0.3.0 of the specification. The packages (`hephkit`, `hephkit-core` and the Go module) are versioned independently: a change to the specification bumps the spec version, while package releases follow their own commit history, so the two numbers need not match. Package versions are published with the project's releases.
+> **Two version numbers.** This page is version 0.4.0 of the specification. The packages (`hephkit`, `hephkit-core` and the Go module) are versioned independently: a change to the specification bumps the spec version, while package releases follow their own commit history, so the two numbers need not match. Package versions are published with the project's releases.
 
 # heph-spec
 
-- **Version:** 0.3.0
+- **Version:** 0.4.0
 - **Status:** Draft for implementation in Phase 1; every module implementing it is `experimental`.
 - **Registries:** `spec/errors.yaml` (error codes), `conventions/attributes.yaml` (telemetry attributes), `spec/currencies.yaml` (ISO 4217 minor units, with its publication pinned by `spec/currencies.source.yaml`).
 
@@ -21,7 +21,9 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 - A fingerprint mismatch returns `HEPH-IDEMP-422` even while the original is in flight (2.6).
 - Fingerprint `path` is the raw request target including the query string, never normalised (2.2).
 - Fingerprint `body` is `null` when empty, and `sha256:` plus the hex of the raw bytes for non-JSON media types (2.2).
-- Idempotency records carry a 60 second default lease; 5xx and raised errors release the record, status below 500 is stored and replayed (2.7, 2.8).
+- Idempotency records carry a 60 second default lease. A response with status below 500 is stored and replayed; a response of 500 or above, or a handler that raises, releases the record. A raised error that is itself the sub-500 response the client receives, as on an HTTP route, is stored like any other 4xx; an event handler answers no client, so a raised error there always releases and the broker redelivers (2.7, 2.8).
+- A record whose `in_flight` lease is still live is never treated as new, however old it is: retention expiry applies only when no attempt holds the key (2.7).
+- Taking over an expired lease transfers ownership of the record, and an attempt that has been superseded may neither complete nor release it (2.8).
 - Integer literals above 2^53-1 are rejected with `HEPH-VAL-422`, never rounded; literals with a fraction or exponent follow RFC 8785 number serialisation (4.3).
 - Money `amount` is a string matching `^(0|-?[1-9][0-9]*)$`; JSON numbers are rejected (3.2, 3.4).
 - Fractional digits beyond a currency's exponent are accepted when every one of them is zero, because the value is preserved exactly; a non-zero digit beyond the exponent still needs a rounding mode (3.6, ADR 0016).
@@ -87,9 +89,9 @@ For `POST /v1/charges` with body `{"b":1,"a":2}` the JCS string is `{"body":{"a"
 
 2.6. If a record exists and its fingerprint differs, the server MUST respond `HEPH-IDEMP-422`, whatever its state and whether or not an `in_flight` lease has expired. This takes precedence over 2.5: when the original is still in flight and the fingerprint also differs, the answer is `HEPH-IDEMP-422`, because it names a client bug rather than a retry-later condition.
 
-2.7. **Retention and lease.** The default retention is 24 hours from creation and MAY be configured longer. After expiry a key is treated as new. The default `in_flight` lease is 60 seconds and is configurable.
+2.7. **Retention and lease.** The default retention is 24 hours from creation and MAY be configured longer. After expiry a key is treated as new. A record whose `in_flight` lease has not expired MUST NOT be treated as new, even once its retention has elapsed: retention expiry applies only when no attempt holds the key. Otherwise a record taken over near the retention boundary — 2.8 does not reset the creation time — could be reset while its handler is still running, and two handlers would hold one key. The default `in_flight` lease is 60 seconds and is configurable.
 
-2.8. **Lifecycle.** A request that creates a record starts it `in_flight` with a lease. When the operation produces a response with status below 500, the record MUST become `completed` and store that response; 4xx responses are stored and replayed like any other, because they are real outcomes of the operation. When the operation produces a response with status 500 or above, or the handler raises, the record MUST be released, meaning it is removed (not left `in_flight`), so the client can retry. A request that finds an `in_flight` record whose lease has expired and whose fingerprint equals the stored one (a genuine retry) MUST be allowed to proceed and take over the record with a new lease, so a crashed worker cannot wedge a key for the retention window. A request with a differing fingerprint is answered by 2.6 instead. The stored fingerprint is never replaced for the life of the record: one key means one payload for the whole retention window, and an expired lease says only that the previous attempt's outcome is unknown, not that the client's payload may change.
+2.8. **Lifecycle.** A request that creates a record starts it `in_flight` with a lease. When the operation produces a response with status below 500, the record MUST become `completed` and store that response; 4xx responses are stored and replayed like any other, because they are real outcomes of the operation. When the operation produces a response with status 500 or above, or the handler raises, the record MUST be released, meaning it is removed (not left `in_flight`), so the client can retry. A request that finds an `in_flight` record whose lease has expired and whose fingerprint equals the stored one (a genuine retry) MUST be allowed to proceed and take over the record with a new lease, so a crashed worker cannot wedge a key for the retention window. Taking over a record transfers ownership of it. An attempt that has been superseded MUST NOT complete or release the record: only the attempt that currently holds it may do so. A request with a differing fingerprint is answered by 2.6 instead. The stored fingerprint is never replaced for the life of the record: one key means one payload for the whole retention window, and an expired lease says only that the previous attempt's outcome is unknown, not that the client's payload may change.
 
 ## 3. Money on the wire
 

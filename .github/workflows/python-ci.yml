@@ -13,6 +13,15 @@ on:
           separate job. The default job always runs with -m "not slow".
         type: boolean
         default: false
+      postgres:
+        description: >-
+          Run a Postgres service and point HEPH_TEST_DATABASE_URL at it. Needed
+          by the idempotency contract suite, which fails rather than skips
+          without a database. Off by default: this workflow is consumed by other
+          repositories at @v0, and one with no database test should not pull an
+          image and wait on pg_isready to find that out.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -21,6 +30,36 @@ jobs:
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # The idempotency store tests require a real Postgres (they fail, not
+      # skip, without one: a skipped test still counts against the coverage
+      # gate). Empty unless the caller asked for the service, so a consumer
+      # without a database test is never pointed at a server that is not there.
+      HEPH_TEST_DATABASE_URL: >-
+        ${{ inputs.postgres && 'postgresql://heph:heph@localhost:5432/heph' || '' }}
+    services:
+      postgres:
+        # Conditional service: an empty image does not start the container, which
+        # is what the workflow syntax documentation gives for exactly this case
+        # (jobs.<job_id>.services.<service_id>.image).
+        #
+        # Pinned by digest, like every action above, because the floating tag is
+        # free to move pg_isready, gen_random_uuid() or a default GUC under the
+        # contract suite that ADR 0020 makes every future adapter pass. This is
+        # postgres 17.11, the version ADR 0020's measurements were taken on, and
+        # it is bumped deliberately -- read the new digest from
+        # `docker buildx imagetools inspect postgres:17` and change both jobs --
+        # never whenever Docker Hub rebuilds the tag.
+        image: >-
+          ${{ inputs.postgres && 'postgres:17@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f' || '' }}
+        env:
+          POSTGRES_USER: heph
+          POSTGRES_PASSWORD: heph
+          POSTGRES_DB: heph
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,6 +103,23 @@ jobs:
     if: ${{ inputs.include-slow }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      HEPH_TEST_DATABASE_URL: >-
+        ${{ inputs.postgres && 'postgresql://heph:heph@localhost:5432/heph' || '' }}
+    services:
+      postgres:
+        # Conditional and digest-pinned for the reasons given on the job above;
+        # keep the two digests equal.
+        image: >-
+          ${{ inputs.postgres && 'postgres:17@sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f' || '' }}
+        env:
+          POSTGRES_USER: heph
+          POSTGRES_PASSWORD: heph
+          POSTGRES_DB: heph
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

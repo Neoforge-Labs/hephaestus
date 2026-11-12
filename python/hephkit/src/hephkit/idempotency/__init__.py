@@ -1,17 +1,51 @@
-"""Idempotency keys and request fingerprints (spec section 2). Maturity: experimental.
+"""Idempotency keys, fingerprints and the record store (spec section 2). Maturity: experimental.
 
-**What is implemented here: 2.1 and 2.2 only.** Key syntax and the request
-fingerprint are pure functions over a request, and they are pinned by
-``conformance/idempotency/*.json``. The rest of section 2 -- the record store
-(2.3), replay (2.4), the in-flight and fingerprint-mismatch responses (2.5,
-2.6), retention and leases (2.7, 2.8) -- is **not** here yet. Those need SQL
-transactions and constraints (CLAUDE.md rule 6), which is a larger piece of
-work than this module currently contains. Nothing in this module talks to a
-database or performs I/O.
+The whole of section 2 is here. 2.1 and 2.2 -- key syntax and the request
+fingerprint -- are pure functions over a request, pinned by
+``conformance/idempotency/*.json``, and they live in this file. 2.3 to 2.8 are
+the record store, which needs SQL transactions and constraints (CLAUDE.md rule
+6), so it lives in submodules whose names this module re-exports:
 
-So this is not yet an idempotency middleware you can mount. It is the half of
-section 2 that a middleware will sit on, available early because the spec
-settled it and the vectors pin it.
+* ``IdempotencyStore`` is the decision of 2.3 to 2.8 -- proceed, replay, 409 or
+  422 -- together with ``complete``, ``release``, ``purge_expired`` and the
+  ``idempotent_record`` context manager, whose default way out is release.
+  ``Record`` is what that context manager yields, ``RecordReleased`` what it
+  raises on the way out when 2.8 releases the record instead of storing it, so
+  that the caller's transaction rolls back with it, and ``IdempotencyStateError``
+  what ``complete`` raises when the record is not this attempt's to complete.
+* ``Executor`` is the port every statement runs through. It is "run my
+  statements in your transaction", never "give me a connection"; ``Executors``
+  pairs the two a request needs, and ``Proceed`` and ``Replay`` are what a claim
+  answers.
+* ``AsyncpgExecutor``, ``SQLAlchemyExecutor``, the ``*_executors`` factories and
+  the ``*_work_connection`` accessors are the adapters for the two driver
+  stacks. Drivers are imported lazily, so importing this module requires
+  neither of them. ``asyncpg_executors`` is for a route and
+  ``asyncpg_event_executors`` for an event handler; they differ only in where
+  the work connection goes, because an event has no ``request.state``.
+* ``SCHEMA_SQL`` is the table: the text of ``schema.sql``, safe to run
+  repeatedly. There is deliberately no ``create_schema``: the DDL is a
+  multi-statement script while the port runs one parameterised statement at a
+  time, so the caller executes this text on a connection of its own or pastes it
+  into its own migration. The repo ships no migration tooling (ADR 0020).
+
+**The two framework integrations stay in their own modules and are not
+re-exported here**, so that importing ``hephkit.idempotency`` pulls in no web
+framework -- the same split as ``hephkit.errors`` and ``hephkit.errors.fastapi``:
+
+* ``hephkit.idempotency.fastapi.idempotent_route`` makes one route idempotent on
+  its ``Idempotency-Key`` header. It imports FastAPI, and its handler must
+  return a fully built ``Response``.
+* ``hephkit.idempotency.worker.idempotent`` makes an event handler idempotent on
+  its event id.
+
+hephkit opens no connection, owns no pool and runs no background task: the
+caller hands the store executors over connections it owns, and ``purge_expired``
+(2.7's retention sweep) is the consumer's to schedule. The transaction boundary
+differs per call and the two are not interchangeable -- ``claim`` and ``release``
+commit on their own, ``complete`` runs inside the caller's transaction -- which
+is what makes 2.5, 2.7 and 2.8 reachable at all. ADR 0020 records that and why
+one transaction is not an option; the docs page is `/modules/idempotency`.
 
 The fingerprint is deliberately built from the kit's existing primitives:
 ``hephkit.hashing.content_hash`` canonicalises with RFC 8785 and hashes in one
@@ -27,12 +61,47 @@ from typing import Any, Final
 
 from hephkit.errors import HephError
 from hephkit.hashing import content_hash, content_hash_bytes
+from hephkit.idempotency._sql import DDL as SCHEMA_SQL
+from hephkit.idempotency.adapters import (
+    AsyncpgExecutor,
+    SQLAlchemyExecutor,
+    asyncpg_event_executors,
+    asyncpg_event_work_connection,
+    asyncpg_executors,
+    asyncpg_work_connection,
+    sqlalchemy_executors,
+    sqlalchemy_work_connection,
+)
+from hephkit.idempotency.ports import Executor, Executors, Proceed, Replay
+from hephkit.idempotency.store import (
+    IdempotencyStateError,
+    IdempotencyStore,
+    Record,
+    RecordReleased,
+)
 
 __all__ = [
     "MAX_KEY_LENGTH",
+    "SCHEMA_SQL",
+    "AsyncpgExecutor",
+    "Executor",
+    "Executors",
+    "IdempotencyStateError",
+    "IdempotencyStore",
+    "Proceed",
+    "Record",
+    "RecordReleased",
+    "Replay",
+    "SQLAlchemyExecutor",
+    "asyncpg_event_executors",
+    "asyncpg_event_work_connection",
+    "asyncpg_executors",
+    "asyncpg_work_connection",
     "fingerprint",
     "fingerprint_document",
     "is_json_media_type",
+    "sqlalchemy_executors",
+    "sqlalchemy_work_connection",
     "validate_key",
 ]
 

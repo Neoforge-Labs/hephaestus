@@ -29,7 +29,7 @@ def _root(tmp_path: Path) -> Path:
 def test_one_page_per_code() -> None:
     pages = generate(REPO_ROOT)
     codes = [e["code"] for e in _entries()]
-    assert len(codes) == 12
+    assert len(codes) == 13
     page_paths = {p for p in pages if p.suffix == ".mdx" and p != REPO_ROOT / INDEX_RELPATH}
     assert page_paths == {REPO_ROOT / PAGES_RELDIR / f"{code}.mdx" for code in codes}
     assert set(pages) - page_paths == {REPO_ROOT / INDEX_RELPATH, REPO_ROOT / META_RELPATH}
