@@ -280,8 +280,17 @@ def test_a_real_numpy_scalar_is_refused_the_same_way() -> None:
 
 
 def test_the_codes_are_the_generated_registry_constants() -> None:
-    """CLAUDE.md: error codes live only in `spec/errors.yaml`. Nothing else on
-    this branch would catch a code hand-spelled in module source."""
+    """This module's codes are bound to the objects generated from
+    `spec/errors.yaml`, not to values of its own.
+
+    This pins the *binding* and nothing more. It is not a literal detector:
+    `is` holds here because CPython does not intern a string containing
+    hyphens, so a correct literal happens to be a distinct object -- an
+    implementation detail another interpreter need not share -- and an
+    *incorrect* literal would never reach this assertion at all.
+    `tests/test_error_codes.py` is what forbids a literal, by scanning every
+    `hephkit.lab` module's AST; the two checks are complementary.
+    """
     from hephkit.errors import LAB_422, LAB_424
 
     assert ConfigError.code is LAB_422

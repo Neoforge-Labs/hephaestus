@@ -48,7 +48,7 @@ Conventions this module fixes, because the spec does not:
   as ``HEPH_OPTIM__LR`` names ``optim.lr`` and says nothing about ``optim``, so
   where no layer has supplied an object at ``optim`` the override is refused
   (``422``) rather than silently granted an object it never named. The two
-  mechanisms differ on purpose; `conformance/lab/config.json` pins both.
+  mechanisms differ on purpose; ``conformance/lab/config.json`` pins both.
 * **Refusals are ``ValueError`` subclasses, not ``hephkit.errors.HephError``**,
   so they carry no ``status``, ``title`` or ``type_url`` and an
   ``except HephError`` handler rendering problem+json does not see them. That is
@@ -87,9 +87,11 @@ __all__ = [
 # Error codes live only in `spec/errors.yaml` (CLAUDE.md). `LAB_422` and
 # `LAB_424` are generated from it into `hephkit.errors._codes` by
 # `tools/gen_errors.py` and re-exported publicly, so they are imported rather
-# than re-spelled here: a hand-written literal would survive both
-# `gen_errors.py --check` and `check_registry.py`, neither of which reads module
-# source, and a renumbering would diverge silently.
+# than re-spelled here. Nothing in `tools/` would catch a hand-written literal:
+# `gen_errors.py --check` compares the generated file against the registry and
+# `check_registry.py` validates the YAML, and neither reads module source, so a
+# renumbering would diverge silently. `tests/test_error_codes.py` is the check
+# that forbids a literal, in any `hephkit.lab` module.
 
 #: The registry code a config that is wrong carries.
 CODE = LAB_422
