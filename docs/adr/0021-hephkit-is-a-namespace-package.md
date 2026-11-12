@@ -1,10 +1,4 @@
----
-# GENERATED FILE - do not edit by hand. Source: docs/adr/0024-hephkit-is-a-namespace-package.md.
-# Regenerate with `uv run tools/gen_site_pages.py`; CI runs --check.
-title: "0024. hephkit is a namespace package"
----
-
-# 0024. hephkit is a namespace package
+# 0021. hephkit is a namespace package
 
 ## Status
 
@@ -32,7 +26,7 @@ The break is cheap now and expensive later. `.github/workflows/ecosystem.yml` sa
 
 `hephkit/errors/` and `hephkit/idempotency/` stay regular subpackages with their `__init__.py` files. Only the top-level `hephkit/` becomes a namespace portion; nothing below it does.
 
-**`hephkit.__version__` is removed from a published package.** `hephkit` is on PyPI at `0.2.0` and `__version__` was listed in `__all__`, so an external adopter reading `hephkit.__version__` was doing something conventional and supported, and this release breaks them. We are doing it anyway, and the reason is maturity rather than consumer count: every module is `experimental` under [ADR 0015](/adrs/0015-maturity-levels), which says in as many words that the API may change and that the package is not for production. This is the kind of change `experimental` exists to permit, and the moment to take it is before any consumer exists rather than after. A namespace package can hold no code, so there is no shim and no deprecation period — the attribute is gone in `0.3.0`, not warned about.
+**`hephkit.__version__` is removed from a published package.** `hephkit` is on PyPI at `0.2.0` and `__version__` was listed in `__all__`, so an external adopter reading `hephkit.__version__` was doing something conventional and supported, and this release breaks them. We are doing it anyway, and the reason is maturity rather than consumer count: every module is `experimental` under [ADR 0015](0015-maturity-levels.md), which says in as many words that the API may change and that the package is not for production. This is the kind of change `experimental` exists to permit, and the moment to take it is before any consumer exists rather than after. A namespace package can hold no code, so there is no shim and no deprecation period — the attribute is gone in `0.3.0`, not warned about.
 
 The replacement is `importlib.metadata.version("hephkit")`, which is stdlib, needs no import of `hephkit` itself, and reads the one authoritative copy of the version in `python/hephkit/pyproject.toml` rather than a second copy in source.
 

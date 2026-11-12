@@ -74,7 +74,7 @@ show_missing = true
 [tool.mypy]
 strict = true
 python_version = "3.12"
-# `hephkit` is a PEP 420 namespace package (ADR 0024), so `src/hephkit/` has no
+# `hephkit` is a PEP 420 namespace package (ADR 0021), so `src/hephkit/` has no
 # __init__.py to anchor the package root. Without these two settings, checking a
 # path (`mypy --strict src`, the command CLAUDE.md mandates) makes mypy take
 # `src/hephkit` as a package base too and reach the same file under two module

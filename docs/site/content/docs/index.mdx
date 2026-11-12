@@ -23,7 +23,7 @@ entry points are `hephkit.money`, `hephkit.hashing` and `hephkit.signatures`;
 each is specified in [`heph-spec`](/spec) and listed with its maturity in the
 [module reference](/reference/modules).
 
-It is a [namespace package](/adrs/0024-hephkit-is-a-namespace-package), so
+It is a [namespace package](/adrs/0021-hephkit-is-a-namespace-package), so
 nothing is importable from `hephkit` itself — reach every public name through a
 submodule. Read the installed version with
 `importlib.metadata.version("hephkit")`; there is no `hephkit.__version__`.
