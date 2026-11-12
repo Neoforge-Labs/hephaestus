@@ -644,8 +644,8 @@ def register(name: str) -> Callable[[Experiment], Experiment]:
         _refuse_a_destination(experiment)
         if name in _EXPERIMENTS:
             raise ValueError(
-                f"experiment {name!r} is already registered; a name identifies one "
-                "experiment, and a record names the experiment that produced it"
+                f"experiment {name!r} is already registered; a name identifies "
+                "one experiment"
             )
         _EXPERIMENTS[name] = experiment
         return experiment
