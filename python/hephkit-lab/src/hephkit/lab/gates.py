@@ -2,8 +2,10 @@
 
 :func:`find_hardcoded_metrics` reads figure code, :func:`check_records_wellformed`
 reads run records, :func:`check_cited_runs` reads a manuscript's citations, and
-:func:`check_all` is the one call CI makes: it runs every gate it was given and
-refuses with :class:`GateError` on what they found.
+:func:`check_all` is the one call CI makes: it runs each gate it was given and
+refuses with :class:`GateError` on what they found -- unless a gate finds a
+subject missing rather than wrong, which is a refusal to check and stops there
+(see the 412/424 split below).
 
 This module was harvested from the ``experiments/gates.py`` of a project whose
 manuscript audit found four things, and those four findings are the whole
@@ -95,19 +97,32 @@ never a dict key, so the two shapes this scan looks at cannot reach one.
 
 Conventions this module fixes, because no spec section does:
 
-* **A metric is a name, a float literal and no tuning word.**
-  :data:`METRIC_WORDS` holds the words that name a number a run *produced*;
-  :data:`TUNING_WORDS` holds the words that turn such a name into a knob the
-  author legitimately chose (``loss_weight``, ``accuracy_threshold``,
-  ``f1_cutoff``, ``target_f1``). A name carrying a tuning word is never flagged.
-  Both lists are deliberately small: a false positive on somebody's figure
-  script is how a gate gets switched off, and a false negative is how a
-  transcribed table ships, so each word is in the list because an idiom puts it
-  there.
+* **A metric is a name, a float literal and no veto word.**
+  :data:`METRIC_WORDS` holds the words that name a number a run *produced*.
+  :data:`VETO_WORDS` is what overrides them, in two groups justified
+  differently: :data:`TUNING_WORDS` for how a run was configured
+  (``loss_weight``, ``accuracy_threshold``, ``f1_cutoff``, ``target_f1``) and
+  :data:`PRESENTATION_WORDS` for how a figure was drawn (``f1_ylim``,
+  ``loss_alpha``, ``f1_bar_width``, ``f1_dpi``, ``recall_tick_step``). The
+  second group is not optional decoration: qualifying a drawing parameter with
+  the metric it renders is the ordinary idiom in the only code this gate reads,
+  so without it the gate fires on correct figure code -- and a false positive
+  there is how a gate gets switched off, exactly as a false negative is how a
+  transcribed table ships. Every list is deliberately small, and every word is
+  in one because an idiom puts it there.
 * **An integer literal is not a metric.** In research code an integer is a
-  count, an epoch or a seed, and a transcribed metric has decimals. The gate is
-  a floor rather than a proof: ``f1 = float("0.474")`` evades it, and nothing
-  short of running the figure script could catch that.
+  count, an epoch or a seed, and a transcribed metric has decimals.
+* **The gate is a floor rather than a proof**, and two shapes are outside it on
+  purpose. A value computed at run time -- ``f1 = float("0.474")`` -- is not a
+  literal, and nothing short of running the figure script would catch it. And a
+  literal **bound to no name at all** is not reached: ``ax.bar(["f1", "acc"],
+  [0.474, 0.812])`` and ``return [0.474, 0.812]`` both scan clean, which is the
+  audit's own defect in its most literal form. That is a deliberate floor
+  rather than an oversight: flagging float literals in call arguments would fire
+  on every axis limit, colour, coordinate and figure size in the file, and a
+  gate that noisy is a gate switched off. What catches those is the records gate
+  and the citations gate -- a figure built from numbers nobody can cite has no
+  record behind it.
 * **A record directory is named by the run it records.** That is how a citation
   resolves: ``records / run_id``. The gate also compares the directory name
   against the record's own ``run_id``, so a mis-filed record is a finding
@@ -138,8 +153,10 @@ __all__ = [
     "CITATIONS",
     "FIGURES",
     "METRIC_WORDS",
+    "PRESENTATION_WORDS",
     "RECORDS",
     "TUNING_WORDS",
+    "VETO_WORDS",
     "GateError",
     "MissingSubjectError",
     "ReplayCheck",
@@ -180,6 +197,17 @@ CITATION: Final = re.compile(r"\brun:(?P<run_id>[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-
 METRIC_WORDS: Final[frozenset[str]] = frozenset(
     {
         # Classification, which is where the audit's own `f1 = 0.474` sat.
+        #
+        # `acc` and `precision` are the two most ambiguous entries in this set,
+        # and both are kept deliberately. `acc` is also an accumulator
+        # (`acc = 0.0`, then `acc += x`), and `precision` is also a numerical
+        # tolerance (`precision = 1e-6`) and a number of decimal places. What
+        # settles it is that this gate reads figure and table code, where an
+        # accumulator is rare and a transcribed `acc = 0.812` is the defect;
+        # where the tolerance idiom is spelled `tol`, `atol`, `rtol` or `eps`,
+        # all of which the veto catches; and where decimal places are an
+        # integer, which is not a float literal. Dropping either word is a
+        # one-line change that leaves `accuracy`/`accuracies` standing.
         "accuracy",
         "accuracies",
         "acc",
@@ -254,6 +282,63 @@ TUNING_WORDS: Final[frozenset[str]] = frozenset(
         "clip",
     }
 )
+
+#: Words that make a name a value the **figure** was drawn with rather than a
+#: value a run produced. This is the group a gate pointed only at figure code
+#: cannot do without: qualifying an axis limit, an alpha, a bar width, a line
+#: width, a dpi or a tick position *with the metric it renders* is the ordinary
+#: idiom there -- `f1_ylim`, `loss_ymax`, `f1_vmin`, `loss_alpha`,
+#: `f1_bar_width`, `loss_linewidth`, `f1_dpi`, `recall_tick_step`, `score_pad`,
+#: `f1_xpos` -- and every one of them is a float literal. Flagging the
+#: idiomatic spelling of the only code this gate reads is how a gate gets
+#: switched off, and `tests/fixtures/violations/figure_clean.py` holds each of
+#: those names so the veto has a witness rather than an argument.
+#:
+#: Note what is **not** here: bare `min` and `max`. ``max_f1`` and ``min_loss``
+#: are a reported best-of, not geometry, so the axis forms are listed by their
+#: own names (``ymax``, ``vmin``) and the bare words stay outside the veto.
+PRESENTATION_WORDS: Final[frozenset[str]] = frozenset(
+    {
+        # Axes and limits, in the spellings matplotlib made idiomatic.
+        "lim",
+        "xlim",
+        "ylim",
+        "zlim",
+        "xmin",
+        "xmax",
+        "ymin",
+        "ymax",
+        "vmin",
+        "vmax",
+        # Where a mark sits and how big it is.
+        "pos",
+        "xpos",
+        "ypos",
+        "offset",
+        "pad",
+        "margin",
+        "size",
+        "fontsize",
+        "width",
+        "height",
+        "step",
+        "tick",
+        "bins",
+        # How a mark is drawn.
+        "alpha",
+        "linewidth",
+        "lw",
+        "dpi",
+        "rotation",
+        "zorder",
+    }
+)
+
+#: The whole veto: a name carrying any of these is an input or a drawing
+#: parameter, whatever metric word it also carries. Two groups because they are
+#: justified differently -- one by how a run was configured, one by how a figure
+#: was drawn -- and one union because :func:`names_a_metric` applies them alike.
+VETO_WORDS: Final[frozenset[str]] = TUNING_WORDS | PRESENTATION_WORDS
 
 #: A replay of one cited run: the project's own, because a gate has nowhere
 #: honest to get the re-execution's provenance (see the module docstring). It is
@@ -331,9 +416,12 @@ class Violation(BaseModel):
 def raise_if_violated(violations: Sequence[Violation]) -> None:
     """Refuse if anything was found (``HEPH-LAB-412``).
 
-    The only raise site of :class:`GateError`, and the one line a caller that
-    has collected findings from individual gates writes. Silent on an empty
-    sequence, so it may be called unconditionally.
+    The only raise site of ``HEPH-LAB-412`` in this module, and the one line a
+    caller that has collected findings from individual gates writes. Silent on
+    an empty sequence, so it may be called unconditionally.
+
+    Not the only place a :class:`GateError` comes from: :class:`MissingSubjectError`
+    is one too, and it is raised wherever a gate finds its subject absent.
     """
     if not violations:
         return
@@ -349,8 +437,9 @@ def names_a_metric(name: str) -> bool:
 
     True when a word of the name -- or the name with its separators dropped, so
     ``p_value`` reads as ``pvalue`` -- is in :data:`METRIC_WORDS`, and no word of
-    it is in :data:`TUNING_WORDS`. The veto wins, because a name carrying a
-    tuning word is a knob however much it looks like a result.
+    it is in :data:`VETO_WORDS`. The veto wins, because a name carrying a tuning
+    or presentation word is an input however much it looks like a result:
+    ``loss_weight`` is a knob and ``f1_ylim`` is an axis limit.
 
     Words are split on separators and on camel-case boundaries, so ``f1_macro``,
     ``finalF1`` and ``ROC_AUC`` all match and ``learning_rate`` does not. A
@@ -359,7 +448,7 @@ def names_a_metric(name: str) -> bool:
     outright.
     """
     words = _words(name)
-    if any(_singular(word) in TUNING_WORDS for word in words):
+    if any(_singular(word) in VETO_WORDS for word in words):
         return False
     if any(_singular(word) in METRIC_WORDS for word in words):
         return True
@@ -379,7 +468,7 @@ def _singular(word: str) -> str:
     delete the most common metric word there is.
     """
     stem = word[:-1]
-    if word.endswith("s") and (stem in METRIC_WORDS or stem in TUNING_WORDS):
+    if word.endswith("s") and (stem in METRIC_WORDS or stem in VETO_WORDS):
         return stem
     return word
 
@@ -387,9 +476,14 @@ def _singular(word: str) -> str:
 def find_hardcoded_metrics(paths: Iterable[Path]) -> list[Violation]:
     """Flag every float literal bound to a metric name under `paths` (the figures gate).
 
-    A path may be a Python file or a directory, which is walked for ``*.py``. A
-    path that is neither raises :class:`MissingSubjectError`: a gate pointed at
-    nothing would pass by checking nothing.
+    A path may be a Python file or a directory, which is walked recursively for
+    ``*.py``. A path that is neither raises :class:`MissingSubjectError`: a gate
+    pointed at nothing would pass by checking nothing.
+
+    Point this at the figure and table code, not at a project root: the walk
+    follows every subdirectory, so a repository root would drag in a vendored
+    ``.venv``, generated code and the test suite, and nothing here excludes
+    them.
 
     The source is parsed rather than matched, so a comment never reaches the
     scan and a docstring is never an assignment target. What is flagged is a
@@ -422,22 +516,35 @@ def _python_files(path: Path) -> list[Path]:
     )
 
 
+def _unreadable(file: Path, line: int, why: str) -> Violation:
+    """The finding for a file the gate could not read: not read is not passed."""
+    return Violation(
+        gate=FIGURES,
+        subject=f"{file}:{line}",
+        detail=(
+            f"the gate could not read this file, so it holds no assurance about it: "
+            f"{why}"
+        ),
+    )
+
+
 def _scan_file(file: Path) -> list[Violation]:
-    """Every hardcoded metric in one file, in the order the file gives them."""
-    source = file.read_text(encoding="utf-8")
+    """Every hardcoded metric in one file, in the order the file gives them.
+
+    A file the gate cannot read is a finding rather than an abort, for both of
+    the ways reading can fail: it is **one of many subjects**, so raising would
+    leave every remaining file unchecked and hand the author a reason to exclude
+    the path. The one subject the gate has, by contrast, is what
+    :func:`cited_runs` refuses over.
+    """
+    try:
+        source = file.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        return [_unreadable(file, 1, f"it is not UTF-8 text ({exc.reason})")]
     try:
         tree = ast.parse(source, filename=str(file))
     except SyntaxError as exc:
-        return [
-            Violation(
-                gate=FIGURES,
-                subject=f"{file}:{exc.lineno or 1}",
-                detail=(
-                    f"this file could not be parsed, so the gate could not read it: "
-                    f"{exc.msg}"
-                ),
-            )
-        ]
+        return [_unreadable(file, exc.lineno or 1, f"it could not be parsed: {exc.msg}")]
     found: dict[tuple[int, int], Violation] = {}
     for name, literal in _hardcoded(tree):
         found.setdefault(
@@ -591,10 +698,23 @@ def check_records_wellformed(root: Path) -> list[Violation]:
 def cited_runs(manuscript: Path) -> list[str]:
     """Every run `manuscript` cites, in order of first mention and without repeats.
 
-    The citation form is :data:`CITATION`. A manuscript that is not there raises
-    :class:`MissingSubjectError`.
+    The citation form is :data:`CITATION`. A manuscript that is not there, or
+    that is not UTF-8 text, raises :class:`MissingSubjectError`: the manuscript
+    is this gate's **one** subject, so a manuscript it cannot read leaves
+    nothing to check, and returning "no citations" would be the silent pass the
+    class exists to prevent. That is the other side of the figures gate's rule,
+    where an unreadable file is one subject among many and becomes a finding so
+    the rest still get checked.
     """
-    text = _existing_file(manuscript, "the citations gate").read_text(encoding="utf-8")
+    path = _existing_file(manuscript, "the citations gate")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise MissingSubjectError(
+            f"the citations gate cannot read {path} as UTF-8 text ({exc.reason}), so "
+            "it has no citations to read; a gate with no subject passes by checking "
+            "nothing"
+        ) from exc
     seen: dict[str, None] = {}
     for match in CITATION.finditer(text):
         seen.setdefault(match["run_id"], None)
@@ -694,6 +814,15 @@ def check_all(
     the error. The returned list is therefore empty whenever this returns at
     all; a caller that wants the findings without a refusal calls the individual
     checks, or reads :attr:`GateError.violations`.
+
+    The gates run in order and each one's findings are collected, but a gate
+    that cannot check at all stops the call: a
+    :class:`~hephkit.lab.record.RecordError` (``HEPH-LAB-424``) from a record
+    missing one of its documents propagates, so one absent ``rows.jsonl`` is
+    reported instead of the citations gate's findings. That is deliberate --
+    424 is a refusal to check rather than a finding, and the fix is to produce
+    the artefact and run again -- but it does mean CI's one call has two
+    failure codes, and only the 412 carries a full account.
 
     Being asked to check nothing is a :class:`ValueError` rather than a pass: a
     gate run over no subject is the one way a gate fails silently.

@@ -48,8 +48,10 @@ from hephkit.lab.gates import (
     CITATIONS,
     FIGURES,
     METRIC_WORDS,
+    PRESENTATION_WORDS,
     RECORDS,
     TUNING_WORDS,
+    VETO_WORDS,
     GateError,
     MissingSubjectError,
     Violation,
@@ -340,9 +342,46 @@ def test_the_vocabulary_matches_on_words_rather_than_substrings() -> None:
         assert not names_a_metric(name), name
 
 
-def test_the_two_vocabularies_do_not_overlap() -> None:
-    """A word in both would make the veto silently delete a metric."""
-    assert METRIC_WORDS & TUNING_WORDS == frozenset()
+def test_a_drawing_parameter_qualified_by_its_metric_is_not_flagged() -> None:
+    """The idiom of the only code this gate reads: `f1_ylim`, `loss_alpha`.
+
+    Each of these is a float literal under a name carrying a metric word, so
+    only the presentation veto keeps the gate off correct figure code. The clean
+    fixture holds all ten; this test names them, because a fixture that stops
+    holding one would otherwise go unnoticed.
+    """
+    for name in (
+        "f1_ylim",  # an axis limit for the panel that renders f1
+        "loss_ymax",  # the same, in matplotlib's other spelling
+        "f1_vmin",  # a colour-scale limit
+        "loss_alpha",  # transparency
+        "f1_bar_width",  # geometry
+        "loss_linewidth",
+        "f1_dpi",
+        "recall_tick_step",
+        "score_pad",
+        "f1_xpos",
+    ):
+        assert not names_a_metric(name), name
+        assert scan_source(f"{name} = 0.5\n") == [], name
+
+
+def test_the_presentation_veto_leaves_a_reported_best_of_alone() -> None:
+    """Why the veto lists `ymax` and `vmin` rather than bare `min` and `max`.
+
+    ``max_f1`` and ``min_loss`` are reported numbers, and a veto on the bare
+    words would have cost both.
+    """
+    assert names_a_metric("max_f1")
+    assert names_a_metric("min_loss")
+    assert len(scan_source("max_f1 = 0.521\nmin_loss = 0.031\n")) == 2
+
+
+def test_the_vocabularies_do_not_overlap() -> None:
+    """A word in two of them would make one silently delete the other."""
+    assert METRIC_WORDS & VETO_WORDS == frozenset()
+    assert TUNING_WORDS & PRESENTATION_WORDS == frozenset()
+    assert VETO_WORDS == TUNING_WORDS | PRESENTATION_WORDS
 
 
 def test_every_assignment_shape_the_gate_claims_is_scanned() -> None:
@@ -388,6 +427,42 @@ def test_a_file_that_does_not_parse_is_a_violation_rather_than_a_pass(tmp_path: 
     violations = find_hardcoded_metrics([broken])
     assert len(violations) == 1, violations
     assert "could not be parsed" in violations[0].detail
+
+
+def test_a_file_that_is_not_utf_8_is_a_violation_rather_than_an_abort(
+    tmp_path: Path,
+) -> None:
+    """A file the gate could not read is not a file the gate passed.
+
+    And the scan goes on: aborting would leave every later file unchecked, which
+    is what makes excluding the path the cheapest fix for whoever hits it.
+    """
+    (tmp_path / "latin1.py").write_bytes("caption = 'r\xe9sum\xe9'\n".encode("latin-1"))
+    (tmp_path / "zz_later.py").write_text("f1 = 0.474\n", encoding="utf-8")
+    violations = find_hardcoded_metrics([tmp_path])
+    assert len(violations) == 2, violations
+    assert "not UTF-8" in violations[0].detail
+    assert violations[0].subject == f"{tmp_path / 'latin1.py'}:1"
+    assert violations[1].subject == f"{tmp_path / 'zz_later.py'}:1"
+
+
+def test_a_manuscript_that_is_not_utf_8_is_refused_rather_than_read_as_empty(
+    tmp_path: Path,
+) -> None:
+    """The manuscript is this gate's one subject, so an unreadable one is a refusal.
+
+    Returning "no citations" would be the silent pass: every citation in the
+    file would go unchecked and the gate would report success.
+    """
+    manuscript = tmp_path / "paper.tex"
+    manuscript.write_bytes("Voir run:run-0001 pour le r\xe9sum\xe9.\n".encode("latin-1"))
+    records = tmp_path / "records"
+    records.mkdir()
+    with pytest.raises(MissingSubjectError) as caught:
+        cited_runs(manuscript)
+    assert caught.value.code == LAB_424
+    with pytest.raises(MissingSubjectError):
+        check_cited_runs(manuscript, records)
 
 
 def test_a_figure_path_that_is_not_there_is_refused_as_a_missing_subject(

@@ -26,6 +26,21 @@ xlim = (0.0, 100.0)
 figure_width = 6.4
 figure_height = 4.8
 
+# The same geometry, qualified by the metric the panel renders, which is the
+# ordinary idiom in figure code and the only idiom this gate is ever pointed at.
+# Every one of these is a float literal under a name carrying a metric word, so
+# each needs the presentation veto rather than the structure of the scan.
+f1_ylim = (0.0, 1.0)
+loss_ymax = 2.5
+f1_vmin = 0.4
+loss_alpha = 0.35
+f1_bar_width = 0.8
+loss_linewidth = 1.25
+f1_dpi = 220.0
+recall_tick_step = 0.05
+score_pad = 0.02
+f1_xpos = 1.5
+
 # Hyperparameters, which are inputs to a run.
 learning_rate = 0.001
 lr = 3e-4
