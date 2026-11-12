@@ -8,6 +8,7 @@ own and a renderer has to be handed to it.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -27,10 +28,11 @@ from hephkit.conventions import IDEMPOTENCY_KEY
 from hephkit.errors import HephError
 from hephkit.errors.fastapi import install_error_handlers
 from hephkit.idempotency.adapters import (
-    WORK_CONNECTION_STATE,
     AsyncpgExecutor,
     asyncpg_executors,
+    asyncpg_work_connection,
     sqlalchemy_executors,
+    sqlalchemy_work_connection,
 )
 from hephkit.idempotency.fastapi import idempotent_route
 from hephkit.idempotency.ports import Executors
@@ -128,6 +130,14 @@ def app(pg_conn: asyncpg.Connection, postgres_dsn: str, calls: _Calls) -> FastAP
     async def item(name: str) -> Response:
         calls.count += 1
         return JSONResponse({"name": name})
+
+    @app.post("/optional-conn")
+    @route(required=False)
+    async def optional_conn(request: Request) -> Response:
+        asyncpg_work_connection(request)
+        return JSONResponse({"ok": True})
+
+    app.state.executors = executors
 
     @app.post("/conflict")
     @route()
@@ -403,8 +413,32 @@ def test_a_return_annotation_that_is_not_a_response_is_refused_at_decoration(han
         idempotent_route(_store(), scope=lambda r: "t", executors=_unused)(handler)
 
 
-def test_a_union_of_response_types_is_accepted():
-    idempotent_route(_store(), scope=lambda r: "t", executors=_unused)(_returns_a_response_union)
+async def _returns_an_uncapturable_union(request: Request) -> StreamingResponse | Response:
+    raise AssertionError
+
+
+def test_a_union_with_an_uncapturable_member_is_refused_at_decoration():
+    with pytest.raises(TypeError, match="fully built Response"):
+        idempotent_route(_store(), scope=lambda r: "t", executors=_unused)(
+            _returns_an_uncapturable_union
+        )
+
+
+async def test_a_union_of_response_types_is_accepted_and_works(app, client, calls):
+    """FastAPI itself needs response_model=None on a union of response classes."""
+    idempotent = idempotent_route(
+        IdempotencyStore(), scope=lambda r: "t", executors=app.state.executors
+    )
+
+    async def union(request: Request) -> JSONResponse | Response:
+        calls.count += 1
+        return JSONResponse({"ok": True}, status_code=201)
+
+    app.post("/union", response_model=None)(idempotent(union))
+    first = await client.post("/union", headers=KEY)
+    again = await client.post("/union", headers=KEY)
+    assert again.content == first.content and again.headers["idempotent-replayed"] == "true"
+    assert calls.count == 1
 
 
 @pytest.mark.parametrize("factory", ["asyncpg", "sqlalchemy"])
@@ -412,26 +446,31 @@ async def test_the_shipped_factories_claim_outside_the_handlers_transaction(
     factory, pg_conn, postgres_dsn
 ):
     """While the handler runs in its open transaction, another connection already sees the
-    in_flight record: the claim committed on its own. Then the 4xx commits and replays."""
+    in_flight record: the claim committed on its own. Then the 4xx commits and replays. The
+    work connection is reachable while the handler runs and gone after the route ends."""
     if factory == "asyncpg":
         pool = await asyncpg.create_pool(postgres_dsn, min_size=2, max_size=4)
         make = asyncpg_executors(pool)
         closer = pool.close
+        accessor = asyncpg_work_connection
     else:
         from sqlalchemy.ext.asyncio import create_async_engine
 
         engine = create_async_engine(postgres_dsn.replace("postgresql://", "postgresql+asyncpg://", 1))
         make = sqlalchemy_executors(engine)
         closer = engine.dispose
+        accessor = sqlalchemy_work_connection
     states: list[Any] = []
+    requests: list[Request] = []
     app = FastAPI()
     install_error_handlers(app)
 
     @app.post("/c")
     @idempotent_route(IdempotencyStore(), scope=lambda r: "t", executors=make)
     async def handler(request: Request) -> Response:
+        requests.append(request)
         states.append(await pg_conn.fetchval("SELECT state FROM heph_idempotency"))
-        states.append(hasattr(request.state, WORK_CONNECTION_STATE))
+        states.append(accessor(request) is not None)
         raise HephError("HEPH-VAL-422", "no")
 
     try:
@@ -446,6 +485,103 @@ async def test_the_shipped_factories_claim_outside_the_handlers_transaction(
     assert first.status_code == again.status_code == 422
     assert again.content == first.content
     assert await pg_conn.fetchval("SELECT state FROM heph_idempotency") == "completed"
+    # The connection went back to the pool: a late user (a BackgroundTask, a dependency's
+    # teardown) must not be able to reach it.
+    with pytest.raises(RuntimeError, match="no work connection"):
+        accessor(requests[0])
+
+
+@asynccontextmanager
+async def _yielding(inner):
+    """Acquire, then let the other requests run: how several requests each end up holding
+    one connection while waiting for another."""
+    async with inner as conn:
+        await asyncio.sleep(0.05)
+        yield conn
+
+
+class _YieldingPool:
+    def __init__(self, pool):
+        self._pool = pool
+
+    def acquire(self, **kw):
+        return _yielding(self._pool.acquire(**kw))
+
+
+async def _burst(make, n=4, hold=0.05):
+    app = FastAPI()
+    install_error_handlers(app)
+
+    @app.post("/c")
+    @idempotent_route(IdempotencyStore(), scope=lambda r: "t", executors=make)
+    async def handler(request: Request) -> Response:
+        await asyncio.sleep(hold)
+        return JSONResponse({"ok": True}, status_code=201)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
+        return await asyncio.wait_for(
+            asyncio.gather(
+                *(c.post("/c", headers={"Idempotency-Key": f"k{i}"}) for i in range(n)),
+                return_exceptions=True,
+            ),
+            timeout=15,
+        )
+
+
+async def test_an_exhausted_single_pool_raises_instead_of_hanging(pg_conn, postgres_dsn):
+    """max_size=2 and four concurrent requests: each takes a claim connection and then waits
+    for a work connection nobody can release. Without acquire_timeout this never returns."""
+    pool = await asyncpg.create_pool(postgres_dsn, min_size=2, max_size=2)
+    try:
+        results = await _burst(asyncpg_executors(_YieldingPool(pool), acquire_timeout=0.5))
+        assert any(isinstance(r, TimeoutError) for r in results)
+        # and the pool is not wedged afterwards
+        (ok,) = await _burst(asyncpg_executors(pool, acquire_timeout=5), n=1)
+        assert ok.status_code == 201
+    finally:
+        await pool.close()
+
+
+async def test_a_separate_claim_pool_cannot_deadlock(pg_conn, postgres_dsn):
+    """The same burst, with claim connections from a pool of their own and a timeout too long
+    to rescue it: every request completes, by queueing."""
+    work = await asyncpg.create_pool(postgres_dsn, min_size=2, max_size=2)
+    claim = await asyncpg.create_pool(postgres_dsn, min_size=2, max_size=2)
+    try:
+        results = await _burst(
+            asyncpg_executors(
+                _YieldingPool(work), claim_pool=_YieldingPool(claim), acquire_timeout=30
+            )
+        )
+        assert [r.status_code for r in results] == [201] * 4
+    finally:
+        await work.close()
+        await claim.close()
+
+
+async def test_nested_executors_restore_the_outer_connection_and_clear_on_exit(pg_conn, postgres_dsn):
+    from types import SimpleNamespace
+
+    from starlette.datastructures import State
+
+    pool = await asyncpg.create_pool(postgres_dsn, min_size=2, max_size=6)
+    request = SimpleNamespace(state=State())
+    make = asyncpg_executors(pool)
+    try:
+        async with make(request):
+            outer = asyncpg_work_connection(request)
+            async with make(request):
+                assert asyncpg_work_connection(request) is not outer
+            assert asyncpg_work_connection(request) is outer
+        with pytest.raises(RuntimeError, match="no work connection"):
+            asyncpg_work_connection(request)
+    finally:
+        await pool.close()
+
+
+async def test_an_optional_route_with_no_key_has_no_work_connection(app, client):
+    with pytest.raises(RuntimeError, match="no work connection"):
+        await client.post("/optional-conn")
 
 
 def test_executors_roles_are_named():
@@ -453,7 +589,12 @@ def test_executors_roles_are_named():
     assert (ex.claim, ex.work) == ("a", "b")
 
 
-def test_exposing_the_work_connection_tolerates_a_request_without_state():
-    from hephkit.idempotency.adapters import _expose
-
-    _expose(object(), object())  # no .state: nothing to set, nothing raised
+async def test_waiting_for_a_claim_connection_is_bounded_too(pg_conn, postgres_dsn):
+    """Not a deadlock but a bound: a pool held by a slow request makes the next one raise
+    after acquire_timeout rather than wait as long as the slow one takes."""
+    pool = await asyncpg.create_pool(postgres_dsn, min_size=2, max_size=2)
+    try:
+        results = await _burst(asyncpg_executors(pool, acquire_timeout=0.3), n=2, hold=1.5)
+        assert sorted(type(r).__name__ for r in results) == ["Response", "TimeoutError"]
+    finally:
+        await pool.close()

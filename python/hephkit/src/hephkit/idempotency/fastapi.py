@@ -34,6 +34,14 @@ begin its transaction, yield both, then commit or roll back the work
 transaction after the ``yield``. Application code never builds an executor
 pair by hand, so it cannot get the pair wrong.
 
+The shipped factories also leave the handler's own connection on
+``request.state``; fetch it with ``asyncpg_work_connection(request)`` or
+``sqlalchemy_work_connection(request)`` (usable as ``Depends``), never by the
+key. It is valid only while the handler runs: it is removed when the route
+finishes, before ``response.background`` and a ``yield`` dependency's teardown,
+because by then the connection belongs to another request. A route with
+``required=False`` and no key never enters ``executors`` and has no connection.
+
 **Not this:** one pooled connection with a transaction begun, wrapped twice and
 yielded as both. The claim then runs inside the handler's transaction, the
 ``in_flight`` record is invisible to every other request until the handler
@@ -130,8 +138,9 @@ def _raw_target(request: Request) -> str:
     raw = request.scope.get("raw_path")
     if not isinstance(raw, bytes):
         raise RuntimeError(
-            "idempotent_route needs ASGI raw_path to fingerprint the request target (spec "
-            "2.2: never percent-decoded), and this ASGI server does not supply it"
+            "idempotent_route needs ASGI raw_path, as bytes, to fingerprint the request target "
+            "(spec 2.2: never percent-decoded); this ASGI server either does not supply it or "
+            f"supplies a {type(raw).__name__}"
         )
     # The ASGI spec does not say raw_path excludes the query, and some servers
     # pass it through; strip it so the query is not counted twice.
@@ -144,7 +153,7 @@ def _raw_target(request: Request) -> str:
 
 def _is_response_type(tp: object) -> bool:
     if isinstance(tp, type):
-        return issubclass(tp, Response)
+        return issubclass(tp, Response) and not issubclass(tp, _UNCAPTURABLE)
     args = typing.get_args(tp)
     return bool(args) and all(_is_response_type(a) for a in args)
 
@@ -200,7 +209,10 @@ def idempotent_route(
     ``Executors(claim, work)``; the module docstring says what each is and why
     they differ, and ``adapters.asyncpg_executors`` / ``sqlalchemy_executors``
     build one correctly. The handler runs inside it, so ``work``'s transaction
-    is open while the handler works.
+    is open while the handler works. The factories expose it as
+    ``asyncpg_work_connection(request)`` / ``sqlalchemy_work_connection(request)``
+    for the duration of the handler only (a route that ignores a malformed or
+    absent key never enters ``executors``, so there is none then).
 
     **The handler must return a fully built ``Response``** (``JSONResponse``,
     ``Response``): its status, body and content type are what is stored and
