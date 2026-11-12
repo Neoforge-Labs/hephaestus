@@ -37,15 +37,23 @@ The consequences of that, stated rather than discovered:
   off, and repeating it per metric would be noise.
 * An individual call that fails warns and leaves the rest of the run tracked:
   one rejected metric does not switch tracking off for the ones after it.
+* A run MLflow refuses to start is left alone rather than cleaned up, because
+  "already active" is one of the reasons it refuses and the active run is then
+  somebody else's (see :func:`_start`). A nested run that cannot start is
+  untracked; the run around it is untouched.
 * Warnings use the standard once-per-unique-message filter, so a call that
   fails identically every epoch is reported once. Pass ``-W always`` (or
-  ``PYTHONWARNINGS=always``) to see each occurrence.
+  ``PYTHONWARNINGS=always``) to see each occurrence. Under ``-W error``, which
+  some CI sets globally, this module's defining property **inverts**: every
+  swallowed failure becomes a raised ``RuntimeWarning`` and a missing tracking
+  server does fail the run. Do not set it for a research run; filter
+  ``RuntimeWarning`` back to ``always`` if the rest of the suite needs it.
 
 ``mlflow`` is imported lazily, inside the call :func:`tracked_run` starts a run
-with, and only when the variable is set. It is never imported at module scope: it belongs to the
-``track`` extra, the spine's required dependencies are ``hephkit`` and pydantic
-(ADR 0023), and ``tests/test_package.py`` fails if importing ``hephkit.lab``
-reaches any heavy stack.
+with, and only when the variable is set. It is never imported at module scope:
+it belongs to the ``track`` extra, the spine's required dependencies are
+``hephkit`` and pydantic (ADR 0023), and ``tests/test_package.py`` fails if
+importing ``hephkit.lab`` reaches any heavy stack.
 
 **Tags.** The six scalar members of a :class:`~hephkit.lab.repro.ProvenanceRecord`
 go on the run as tags, read off the record rather than recomputed, which is how
@@ -177,19 +185,29 @@ class _Started(NamedTuple):
 def _start(name: str) -> _Started | None:
     """Begin an MLflow run, or warn and return `None`.
 
-    Every failure mode lands on `None`: the variable is unset, the extra is not
-    installed, or the server refused. The caller cannot tell them apart and does
-    not need to -- all three mean "this run is not tracked".
+    Every failure mode lands on `None`: the variable is unset, mlflow could not
+    be imported, or the server refused. The caller cannot tell them apart and
+    does not need to -- all three mean "this run is not tracked".
+
+    **Nothing already running is touched here.** The two failures are kept in
+    separate blocks because they have opposite cleanups: a `start_run` that
+    raised started nothing, while a `start_run` that succeeded leaves a run
+    active in mlflow's process-global state that only this call can close. See
+    the second block's comment for what conflating them would do.
     """
     uri = tracking_uri()
     if uri is None:
         return None
     try:
         import mlflow
-    except ImportError as exc:
+    # Not `ImportError`: a half-installed `track` extra -- the classic protobuf
+    # or NumPy ABI mismatch somewhere under mlflow's transitive stack -- raises
+    # `TypeError`, `RuntimeError` or `OSError` out of a module body instead, and
+    # a broken install is no more a failed run than a missing one.
+    except Exception as exc:  # noqa: BLE001 - see above
         warnings.warn(
-            f"{TRACKING_URI_VARIABLE} is set but mlflow is not installed, so the "
-            f"run {name!r} is not tracked; install the `track` extra "
+            f"{TRACKING_URI_VARIABLE} is set but mlflow could not be imported, so "
+            f"the run {name!r} is not tracked; install the `track` extra "
             f"(hephkit-lab[track]) or unset the variable: {exc!r}",
             RuntimeWarning,
             stacklevel=_MANAGER_STACKLEVEL,
@@ -197,15 +215,36 @@ def _start(name: str) -> _Started | None:
         return None
     try:
         mlflow.set_tracking_uri(uri)
-        return _Started(mlflow, str(mlflow.start_run(run_name=name).info.run_id))
+        active = mlflow.start_run(run_name=name)
     except Exception as exc:  # noqa: BLE001 - an unreachable server is not a failed run
-        # A run that was started but whose id could not be read would stay
-        # active in mlflow's process-global state and refuse the next one.
-        with suppress(Exception):
-            mlflow.end_run(status=_FAILED)
+        # No `end_run` here, deliberately. A refused `start_run` can mean
+        # another run is already active -- mlflow raises "Run with UUID ... is
+        # already active", which is what an inner per-fold or per-trial
+        # `tracked_run` gets -- and ending it would mark somebody ELSE's run
+        # FAILED and split its remaining metrics into a fresh run, because
+        # mlflow's fluent calls go through `_get_or_start_run()`. A module whose
+        # premise is that it cannot corrupt a run must not do that; an untracked
+        # inner run is the correct outcome.
         warnings.warn(
             f"the run {name!r} could not be started against {TRACKING_URI_VARIABLE} "
             f"{uri!r}, so it is not tracked; the run itself continues: {exc!r}",
+            RuntimeWarning,
+            stacklevel=_MANAGER_STACKLEVEL,
+        )
+        return None
+    try:
+        return _Started(mlflow, str(active.info.run_id))
+    except Exception as exc:  # noqa: BLE001 - see above
+        # This one IS ours: the run started, so left active it would refuse the
+        # next one. Closing it is the only cleanup in this function, and it is
+        # reachable only on the one path where the run being closed is the run
+        # this call just created.
+        with suppress(Exception):
+            mlflow.end_run(status=_FAILED)
+        warnings.warn(
+            f"the run {name!r} started against {TRACKING_URI_VARIABLE} {uri!r} but "
+            f"its id could not be read, so it is not tracked and has been closed; "
+            f"the run itself continues: {exc!r}",
             RuntimeWarning,
             stacklevel=_MANAGER_STACKLEVEL,
         )

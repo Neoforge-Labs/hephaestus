@@ -154,9 +154,22 @@ def fake_mlflow(
     recorder: _Recorder,
     *,
     failing: frozenset[str] = frozenset(),
+    broken_run_info: bool = False,
 ) -> types.ModuleType:
-    """A recording `mlflow`, in which the calls named in `failing` raise."""
+    """A recording `mlflow`, in which the calls named in `failing` raise.
+
+    It **models mlflow's one active run**: a second `start_run` raises the
+    refusal mlflow really raises, and `end_run` releases it. Without that state
+    the stub cannot express the failure that matters most here -- an inner
+    per-fold run being refused while an outer run is live -- and a cleanup that
+    ended the outer run would look fine.
+
+    `broken_run_info` starts the run successfully but returns an object with no
+    `.info`, which is the only shape in which the wrapper's own cleanup is
+    allowed to fire.
+    """
     module = types.ModuleType("mlflow")
+    active: list[str] = []
 
     def entry(name: str) -> Any:
         broken = RuntimeError(f"mlflow {name} is unreachable") if name in failing else None
@@ -165,22 +178,41 @@ def fake_mlflow(
     for name in SINK_CALLS:
         setattr(module, name, entry(name))
 
-    started = entry("start_run")
+    started, ended = entry("start_run"), entry("end_run")
 
     def start_run(**kwargs: Any) -> Any:
         started(**kwargs)
+        if active:
+            raise RuntimeError(f"Run with UUID {active[-1]} is already active.")
+        active.append(RUN_ID)
+        if broken_run_info:
+            return types.SimpleNamespace()
         return types.SimpleNamespace(info=types.SimpleNamespace(run_id=RUN_ID))
 
+    def end_run(**kwargs: Any) -> Any:
+        ended(**kwargs)
+        if active:
+            active.pop()
+
     setattr(module, "start_run", start_run)  # noqa: B010 - a ModuleType attribute
+    setattr(module, "end_run", end_run)  # noqa: B010 - a ModuleType attribute
     return module
 
 
 class _Blocker:
-    """A meta-path finder that refuses mlflow, whatever is installed."""
+    """A meta-path finder that refuses mlflow, whatever is installed.
+
+    `error` is the exception the import raises. It defaults to the `ImportError`
+    of a missing extra, and a half-installed one is any other exception out of a
+    module body -- which is why the wrapper catches more than `ImportError`.
+    """
+
+    def __init__(self, error: BaseException | None = None) -> None:
+        self._error = error
 
     def find_spec(self, name: str, path: Any = None, target: Any = None) -> None:
         if name.split(".")[0] == "mlflow":
-            raise ImportError(f"{name} is blocked for this test")
+            raise self._error or ImportError(f"{name} is blocked for this test")
         return None
 
 
@@ -241,10 +273,12 @@ def install(
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow(recorder, failing=failing))
 
 
-def block_mlflow(monkeypatch: pytest.MonkeyPatch) -> None:
+def block_mlflow(
+    monkeypatch: pytest.MonkeyPatch, error: BaseException | None = None
+) -> None:
     """Make `import mlflow` fail, whatever is installed."""
     monkeypatch.delitem(sys.modules, "mlflow", raising=False)
-    monkeypatch.setattr(sys, "meta_path", [_Blocker(), *sys.meta_path])
+    monkeypatch.setattr(sys, "meta_path", [_Blocker(error), *sys.meta_path])
 
 
 def enable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -395,11 +429,72 @@ def test_context_manager_enters_even_when_mlflow_is_unreachable(
             assert run.run_id is None
             exercise(run, tmp_path)
     assert entered, "the body of the `with` did not run"
-    # The start was attempted and then closed out, so the next run is not
-    # refused by a run left active in mlflow's process-global state -- and
-    # nothing was logged against a run that does not exist.
-    assert recorder.named() == ["set_tracking_uri", "start_run", "end_run"]
+    # The start was attempted, nothing was logged against a run that does not
+    # exist, and -- see the nested test below -- nothing was closed either.
+    assert recorder.named() == ["set_tracking_uri", "start_run"]
+
+
+def test_a_nested_run_that_mlflow_refuses_does_not_end_the_outer_run(
+    monkeypatch: pytest.MonkeyPatch, recorder: _Recorder
+) -> None:
+    """A per-fold or per-trial inner run is an ordinary research shape.
+
+    MLflow allows one active run per process, so the inner `start_run` is
+    refused with "already active". A cleanup that called `end_run` on that
+    refusal would close the **outer** run, mark it `FAILED`, and send its
+    remaining metrics into a fresh run that mlflow's `_get_or_start_run()`
+    creates -- one run silently split in two, the first labelled failed. That is
+    worse than not tracking at all, and it is the one failure this module exists
+    to rule out, so it gets its own test.
+    """
+    install(monkeypatch, recorder)
+    enable(monkeypatch)
+    with tracked_run("outer", provenance=a_provenance("run-outer")) as outer:
+        with pytest.warns(RuntimeWarning, match="already active"):
+            with tracked_run("inner", provenance=a_provenance("run-inner")) as inner:
+                assert inner.enabled is False, "the inner run is untracked"
+                inner.log_metrics({"fold_auc": 0.7})
+        assert outer.enabled is True, "the outer run survived the inner refusal"
+        assert recorder.args("end_run") == [], "nothing closed the outer run"
+        assert outer.run_id == RUN_ID
+        outer.log_metrics({"auc": 0.9})
+    # One run started, one run closed, and it closed FINISHED rather than FAILED.
+    assert recorder.only("end_run") == ((), {"status": "FINISHED"})
+    assert len(recorder.args("start_run")) == 2
+    # And the untracked inner run tagged nothing onto the outer one.
+    assert len(recorder.args("set_tags")) == 1
+    assert recorder.tags()[track.TAG_RUN_ID] == "run-outer"
+    assert recorder.only("log_metrics") == (({"auc": 0.9},), {"step": None})
+
+
+def test_a_run_whose_id_cannot_be_read_is_closed_so_the_next_one_can_start(
+    monkeypatch: pytest.MonkeyPatch, recorder: _Recorder
+) -> None:
+    """The one path on which the wrapper's own cleanup is allowed to fire.
+
+    Here `start_run` succeeded, so the active run is this call's own and leaving
+    it active would refuse every later run. The second `tracked_run` is the
+    assertion that matters: it succeeds only because the first released the
+    process-global state.
+    """
+    monkeypatch.setitem(
+        sys.modules, "mlflow", fake_mlflow(recorder, broken_run_info=True)
+    )
+    enable(monkeypatch)
+    with pytest.warns(RuntimeWarning, match="its id could not be read"):
+        with tracked_run("fit", provenance=a_provenance()) as run:
+            assert run.enabled is False
     assert recorder.only("end_run") == ((), {"status": "FAILED"})
+    # The second run reaches the SAME failure, which is the point: it got far
+    # enough to start. Had the first left its run active, this would have been
+    # refused with "already active" and warned "could not be started" instead.
+    with pytest.warns(RuntimeWarning, match="its id could not be read"):
+        with tracked_run("fit-again", provenance=a_provenance()) as again:
+            assert again.enabled is False
+    assert [kwargs for _, kwargs in recorder.args("start_run")] == [
+        {"run_name": "fit"},
+        {"run_name": "fit-again"},
+    ], "the second start was not refused by a run left active"
 
 
 def test_the_run_is_started_and_closed_when_mlflow_is_reachable(
@@ -415,21 +510,52 @@ def test_the_run_is_started_and_closed_when_mlflow_is_reachable(
 
 
 def test_an_import_error_leaves_the_run_untracked_and_entered(
-    monkeypatch: pytest.MonkeyPatch, recorder: _Recorder, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The `track` extra not installed is the commonest unreachable MLflow.
 
     This is the path the spine itself takes: ADR 0023 keeps mlflow out of the
-    required dependencies, so an unconfigured-but-set variable on a plain
-    install lands exactly here.
+    required dependencies, so a set-but-unusable variable on a plain install
+    lands exactly here.
+
+    No recorder: the blocker empties `sys.modules`, so there is no stub to
+    assert against and a `recorder.calls == []` here could not fail. The
+    `pytest.warns` and the unraised `exercise` are what carry the test.
     """
     block_mlflow(monkeypatch)
     enable(monkeypatch)
-    with pytest.warns(RuntimeWarning, match="mlflow is not installed"):
+    with pytest.warns(RuntimeWarning, match="mlflow could not be imported"):
         with tracked_run("fit", provenance=a_provenance()) as run:
             assert run.enabled is False
             exercise(run, tmp_path)
-    assert recorder.calls == []
+    assert "mlflow" not in sys.modules
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TypeError("bases must be types"),
+        RuntimeError("module compiled against a different NumPy ABI"),
+        OSError("cannot load library libstdc++"),
+    ],
+    ids=["TypeError", "RuntimeError", "OSError"],
+)
+def test_a_half_installed_extra_leaves_the_run_untracked_and_entered(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, error: BaseException
+) -> None:
+    """`ImportError` is not the only way an import fails.
+
+    A half-installed `track` extra -- the classic protobuf or NumPy ABI mismatch
+    under mlflow's transitive stack -- raises out of a module body with whatever
+    type that body raised. Catching only `ImportError` would let it propagate
+    and break the research run, against this module's whole premise.
+    """
+    block_mlflow(monkeypatch, error)
+    enable(monkeypatch)
+    with pytest.warns(RuntimeWarning, match="mlflow could not be imported"):
+        with tracked_run("fit", provenance=a_provenance()) as run:
+            assert run.enabled is False
+            exercise(run, tmp_path)
 
 
 def test_a_logging_call_that_fails_warns_and_the_run_continues(
@@ -609,15 +735,62 @@ def test_no_tag_is_set_when_tracking_is_off(
 # --------------------------------------------------------------------------
 
 
+#: Installs a counting meta-path finder for mlflow BEFORE importing
+#: `hephkit.lab.track`, then reports what the import attempted. The finder is
+#: what makes this total: it records the *attempt*, so it catches a plain
+#: `import mlflow`, an `importlib.import_module("mlflow")` (a `Call`, which no
+#: AST import scan sees), and a module-scope call of a function that imports --
+#: and it does so whether or not the `track` extra is installed, because a
+#: `sys.modules` check alone comes up clean when the import simply fails.
+_IMPORT_PROBE = """
+import json, sys
+
+attempted = []
+
+
+class Finder:
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] == "mlflow":
+            attempted.append(name)
+        return None
+
+
+sys.meta_path.insert(0, Finder())
+import hephkit.lab.track
+
+print(json.dumps({"attempted": attempted, "loaded": "mlflow" in sys.modules}))
+"""
+
+
 def test_import_does_not_require_mlflow() -> None:
-    """Importing `lab.track` must not import mlflow, in a clean interpreter.
+    """Importing `lab.track` must not reach mlflow at all, by any route.
 
     A subprocess rather than this session, which has a stub in `sys.modules`
     and has already imported half the package.
     """
-    program = (
-        "import json, sys; import hephkit.lab.track; "
-        "print(json.dumps('mlflow' in sys.modules))"
+    done = subprocess.run(  # noqa: S603 - fixed argv, our own interpreter
+        [sys.executable, "-c", _IMPORT_PROBE],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, f"importing hephkit.lab.track failed:\n{done.stderr}"
+    assert json.loads(done.stdout) == {"attempted": [], "loaded": False}
+
+
+def test_the_import_probe_sees_an_import_it_should_catch() -> None:
+    """The probe biting, demonstrated rather than assumed.
+
+    The probe is only worth anything if its finder really records an attempt, so
+    the same program is run with one line added that imports mlflow by the route
+    an AST scan cannot see.
+    """
+    program = _IMPORT_PROBE.replace(
+        "import hephkit.lab.track",
+        "import contextlib, importlib\n"
+        "with contextlib.suppress(Exception):\n"
+        "    importlib.import_module('mlflow')\n"
+        "import hephkit.lab.track",
     )
     done = subprocess.run(  # noqa: S603 - fixed argv, our own interpreter
         [sys.executable, "-c", program],
@@ -625,8 +798,8 @@ def test_import_does_not_require_mlflow() -> None:
         text=True,
         check=False,
     )
-    assert done.returncode == 0, f"importing hephkit.lab.track failed:\n{done.stderr}"
-    assert json.loads(done.stdout) is False
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout)["attempted"] == ["mlflow"]
 
 
 def imports_outside_a_function(source: str) -> list[str]:
@@ -660,11 +833,12 @@ def imports_outside_a_function(source: str) -> list[str]:
 
 
 def test_the_module_imports_mlflow_only_inside_a_function() -> None:
-    """The static half, which survives mlflow actually being installed.
+    """A static second opinion, kept for the error message it gives.
 
-    With the extra installed, the subprocess check above still passes if some
-    *other* import pulled mlflow in first, and it says nothing at all about a
-    module-scope import added by a future edit. This reads the source.
+    The subprocess probe above is the total check -- it catches shapes this scan
+    cannot see, and this scan flags shapes that are legal at run time. What this
+    one adds is a failure that names the import, rather than a boolean out of
+    another interpreter.
     """
     found = imports_outside_a_function(MODULE.read_text(encoding="utf-8"))
     assert not [name for name in found if name.split(".")[0] == "mlflow"], found
@@ -748,10 +922,13 @@ def test_the_module_defines_no_exception_class_and_raises_nothing_of_its_own() -
     for the path that throws it.
     """
     tree = ast.parse(MODULE.read_text(encoding="utf-8"))
-    assert [node.name for node in tree.body if isinstance(node, ast.ClassDef)] == [
-        "_Started",
-        "TrackedRun",
-    ]
+    # The whole tree, not `tree.body`: a class defined inside a `try` or an `if`
+    # is still a class this module defines, and a `tree.body` scan would miss
+    # it -- the same shape hole that let a guarded module-scope import through.
+    classes = sorted(
+        node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)
+    )
+    assert classes == ["TrackedRun", "_Started"], classes
     raised = [
         node.lineno
         for node in ast.walk(tree)
