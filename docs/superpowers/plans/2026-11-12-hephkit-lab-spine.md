@@ -81,7 +81,7 @@ Input classes the spec implies that no task's happy path exercises, most likely 
 | `tools/check_vectors.py` | `MIN_CASES` for the three new suites |
 | `tools/check_modules.py` | Scan a second python tree; resolve dotted module names |
 | `python/hephkit/src/hephkit/__init__.py` | **Deleted** (PEP 420) |
-| `python/hephkit/pyproject.toml` | Version 0.3.0 |
+| `python/hephkit/pyproject.toml` | **No version edit** (Ruling 16): `release-please-config.json` has a `linked-versions` plugin grouping `hephaestus`, `hephkit-core`, `hephkit-py`, `hephkit` and `go` at one version, so release-please owns the bump and a hand edit breaks `test_manifest_matches_the_versions_in_the_tree` |
 | `python/hephkit/tests/test_conformance.py` | Exempt `lab.*` suites from the runner assertion |
 | `conformance/moon.yml` | Add `lab/*.json` to inputs |
 | `.moon/workspace.yml` | Add `hephkit-lab: 'python/hephkit-lab'` |
@@ -241,7 +241,7 @@ git commit -m "test(conformance): run lab suites from hephkit-lab, not hephkit"
 
 **Files:**
 - Delete: `python/hephkit/src/hephkit/__init__.py`
-- Modify: `python/hephkit/pyproject.toml` (version `0.3.0`)
+- Modify: `python/hephkit/pyproject.toml` (mypy config only — **no version edit**, Ruling 16)
 - Create: `docs/adr/0021-hephkit-is-a-namespace-package.md`
 - Test: `python/hephkit/tests/test_namespace.py`
 
@@ -257,7 +257,7 @@ def test_hephkit_is_a_namespace_package():
 
 def test_version_is_available_from_metadata():
     from importlib.metadata import version
-    assert version("hephkit").startswith("0.3")
+    assert version("hephkit") == <the version declared in pyproject.toml>
 
 def test_submodules_still_import():
     from hephkit.hashing import content_hash
@@ -270,9 +270,9 @@ def test_submodules_still_import():
 Run: `cd python/hephkit && uv run maturin develop --uv && uv run pytest tests/test_namespace.py -v`
 Expected: FAIL — `hephkit.__file__` is set and the version is `0.2.0`.
 
-- [ ] **Step 3: Delete `__init__.py` and bump the version**
+- [ ] **Step 3: Delete `__init__.py`**
 
-Remove `python/hephkit/src/hephkit/__init__.py`. Set `version = "0.3.0"` in `python/hephkit/pyproject.toml`. Confirm `[tool.maturin]`'s `python-source = "src"` and `module-name = "hephkit._core"` still place the compiled extension inside the namespace directory.
+Remove `python/hephkit/src/hephkit/__init__.py`. **Do not touch the version.** Ruling 16: the five packages are a `linked-versions` group in `release-please-config.json`, so release-please computes and applies the bump across all of them from the conventional-commit history; the `!` in `refactor(hephkit)!:` is what tells it this is breaking. Confirm `[tool.maturin]`'s `python-source = "src"` and `module-name = "hephkit._core"` still place the compiled extension inside the namespace directory.
 
 - [ ] **Step 4: Run the whole `hephkit` suite**
 
