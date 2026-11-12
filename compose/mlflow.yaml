@@ -1,0 +1,61 @@
+# MLflow tracking server (dev and test only). maturity: experimental
+# Host port 54500. Backend store: the `mlflow` database in the postgres
+# fragment. Artifacts: the `mlflow` bucket in the objects (SeaweedFS) fragment,
+# proxied through the server, so clients need no S3 credentials. Credentials
+# are the dev ones from postgres.yaml and seaweedfs-s3.json.
+services:
+  mlflow:
+    # The official image ships neither a Postgres driver nor boto3, so the
+    # command installs exact pins first, then creates the database and bucket
+    # if absent. A separate database (not `heph`) keeps MLflow's own
+    # `alembic_version` table away from Hephaestus migrations. The install
+    # needs network, which is why the healthcheck has a long start_period.
+    image: ghcr.io/mlflow/mlflow:v3.1.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://seaweedfs:8333
+      AWS_ACCESS_KEY_ID: heph
+      AWS_SECRET_ACCESS_KEY: heph-dev-secret
+      AWS_DEFAULT_REGION: us-east-1
+    ports:
+      - "54500:5000"
+    command:
+      - bash
+      - -c
+      - |
+        set -eu
+        pip install -q --no-cache-dir --disable-pip-version-check --root-user-action=ignore psycopg2-binary==2.9.10 boto3==1.38.46
+        python - <<'PY'
+        import boto3, psycopg2
+        c = psycopg2.connect(host="postgres", user="heph", password="heph", dbname="heph")
+        c.autocommit = True
+        cur = c.cursor()
+        cur.execute("select 1 from pg_database where datname = 'mlflow'")
+        if cur.fetchone() is None:
+            cur.execute("create database mlflow")
+        c.close()
+        s3 = boto3.client("s3", endpoint_url="http://seaweedfs:8333")
+        if "mlflow" not in [b["Name"] for b in s3.list_buckets()["Buckets"]]:
+            s3.create_bucket(Bucket="mlflow")
+        PY
+        exec mlflow server --host 0.0.0.0 --port 5000 \
+          --backend-store-uri postgresql://heph:heph@postgres:5432/mlflow \
+          --artifacts-destination s3://mlflow/ --serve-artifacts
+    healthcheck:
+      # Probed from inside, against loopback (the server binds 0.0.0.0). The
+      # image has no curl or wget, hence python. Slow first boot: pip install,
+      # then database and bucket creation, then the server's own migrations
+      # against Postgres, so the budget is generous (start_period + 30 x 5 s).
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=4)"
+      start_period: 30s
+      interval: 5s
+      timeout: 5s
+      retries: 30

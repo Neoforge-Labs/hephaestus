@@ -81,7 +81,7 @@ func TestResolveRealComposeFragments(t *testing.T) {
 	if _, err := os.Stat(src); err != nil {
 		t.Skip("compose/ not found")
 	}
-	got, err := ResolveFrom(os.DirFS(src), []string{"postgres", "objects", "telemetry", "mail", "redis", "stripe"})
+	got, err := ResolveFrom(os.DirFS(src), []string{"postgres", "objects", "telemetry", "mail", "redis", "stripe", "mlflow"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +92,7 @@ func TestResolveRealComposeFragments(t *testing.T) {
 		"mail":      {54025, 54825},
 		"redis":     {54379},
 		"stripe":    nil,
+		"mlflow":    {54500},
 	}
 	for _, f := range got {
 		if !reflect.DeepEqual(f.Ports, want[f.Name]) && !(len(f.Ports) == 0 && len(want[f.Name]) == 0) {
@@ -163,7 +164,7 @@ func TestEmbeddedFragmentsShipInTheBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"mail", "objects", "postgres", "redis", "stripe", "telemetry"}
+	want := []string{"mail", "mlflow", "objects", "postgres", "redis", "stripe", "telemetry"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("embedded fragments = %v, want %v", got, want)
 	}

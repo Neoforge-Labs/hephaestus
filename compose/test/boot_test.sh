@@ -3,7 +3,7 @@
 #  1. each fragment alone: up --wait (120 s), then down -v
 #  2. every fragment except stripe together, with per-service assertions
 # The merged stack gets a larger budget than a single fragment because it is
-# strictly more work: five services starting at once, where `objects` alone
+# strictly more work: six services starting at once, where `objects` alone
 # takes ~43 s. Sharing one 120 s timeout made this marginal, and it failed on a
 # runner while every fragment passed alone.
 # stripe is excluded from the live run because it needs a real STRIPE_API_KEY;
@@ -19,7 +19,7 @@ fails=0
 dc() { docker compose -p "$P" "$@"; }
 cleanup() { dc "${ALL_ARGS[@]}" down -v --remove-orphans >/dev/null 2>&1; dc down -v --remove-orphans >/dev/null 2>&1; }
 ALL_ARGS=()
-for f in postgres objects telemetry mail redis stripe; do ALL_ARGS+=(-f "$DIR/$f.yaml"); done
+for f in postgres objects telemetry mail redis stripe mlflow; do ALL_ARGS+=(-f "$DIR/$f.yaml"); done
 trap cleanup EXIT
 
 check() { # check <description> <command...>
@@ -28,6 +28,8 @@ check() { # check <description> <command...>
 }
 
 # --- 1. each fragment alone ---------------------------------------------------
+# mlflow is not here: it depends on postgres and objects, so it only exists in
+# the merged stack below.
 for f in postgres objects telemetry mail redis; do
   start=$SECONDS
   check "$f alone: up --wait" dc -f "$DIR/$f.yaml" up -d "${WAIT[@]}"
@@ -43,7 +45,7 @@ check "stripe config valid with a key" \
 
 # --- 2. everything except stripe, merged --------------------------------------
 MERGED=()
-for f in postgres objects telemetry mail redis; do MERGED+=(-f "$DIR/$f.yaml"); done
+for f in postgres objects telemetry mail redis mlflow; do MERGED+=(-f "$DIR/$f.yaml"); done
 start=$SECONDS
 # On failure, say WHICH service is unhealthy. `up --wait` only reports that the
 # wait expired, which is why a runner failure here was previously undiagnosable.
@@ -85,6 +87,13 @@ mail_ok() { [ "$(curl -s -o /dev/null -w '%{http_code}' localhost:54825/)" = 200
 check "mailpit UI on 54825 returns 200" mail_ok
 redis_ok() { [ "$(dc "${MERGED[@]}" exec -T redis redis-cli ping)" = PONG ]; }
 check "redis answers PONG" redis_ok
+
+mlflow_ok() { [ "$(curl -s -o /dev/null -w '%{http_code}' localhost:54500/health)" = 200 ]; }
+check "mlflow: /health on 54500 returns 200" mlflow_ok
+# The tracking API proves the Postgres backend store is wired, not just that the
+# process is up: listing experiments reads the database.
+mlflow_backend_ok() { curl -sf "localhost:54500/api/2.0/mlflow/experiments/search?max_results=1" -o /dev/null; }
+check "mlflow: experiments/search answers (postgres backend store)" mlflow_backend_ok
 
 if [ "${FORCE_FAIL:-}" = 1 ]; then check "forced failure (self-test of cleanup)" false; fi
 
