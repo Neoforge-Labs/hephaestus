@@ -45,6 +45,10 @@ MIN_CASES = {
     # precedence chain, a nested override, the refusals, and the config hashes
     # quoted from `hashing.content`.
     "lab.config": 10,
+    # Spec 7. The minimum covers the three conditions of 7.3 in combination,
+    # both ways a code_sha goes null, the reserved environment members of 7.4
+    # and the refusals a record document must meet.
+    "lab.record": 12,
 }
 
 

@@ -1164,6 +1164,96 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "suite": {
+            "const": "lab.record"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "capture"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "capture": {
+                          "$ref": "#/$defs/labRecordCapture"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "record"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "record": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "captured"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "captured": {
+                          "$ref": "#/$defs/labRecordCaptured"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "serialised"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "serialised": {
+                          "type": "object"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "invalid"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "invalid": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -1184,6 +1274,167 @@
             "$ref": "#/$defs/labConfigModel"
           }
         ]
+      }
+    },
+    "labRecordRepo": {
+      "description": "The repository a record is captured from: whether HEAD resolves, what the tree holds, and the lockfile's exact bytes (null for none).",
+      "type": "object",
+      "required": [
+        "git",
+        "lockfile"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "git": {
+          "enum": [
+            "commit",
+            "detached",
+            "no-commits",
+            "absent"
+          ]
+        },
+        "tree": {
+          "enum": [
+            "clean",
+            "modified",
+            "untracked",
+            "ignored-untracked"
+          ]
+        },
+        "lockfile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "labRecordAccelerator": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "model",
+        "driver"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "driver": {
+          "type": "string"
+        }
+      }
+    },
+    "labRecordCapture": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "config_hash",
+        "data_hash",
+        "repo"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "config_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "data_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "repo": {
+          "$ref": "#/$defs/labRecordRepo"
+        },
+        "frameworks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "accelerator": {
+          "$ref": "#/$defs/labRecordAccelerator"
+        }
+      }
+    },
+    "labRecordCaptured": {
+      "description": "What the captured record must carry. code_sha is the sentinel <head> or null; environment_excludes names a fact spec 7.5 forbids.",
+      "type": "object",
+      "required": [
+        "deps_hash",
+        "code_sha",
+        "class"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "config_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "data_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "deps_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "code_sha": {
+          "oneOf": [
+            {
+              "const": "<head>"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "class": {
+          "enum": [
+            "deterministic",
+            "provenance-only"
+          ]
+        },
+        "frameworks": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "accelerator": {
+          "$ref": "#/$defs/labRecordAccelerator"
+        },
+        "environment_members": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "environment_excludes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "hostname",
+              "username",
+              "filesystem-path"
+            ]
+          }
+        }
       }
     }
   }

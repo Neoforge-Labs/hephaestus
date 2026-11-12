@@ -1,0 +1,554 @@
+{
+  "suite": "lab.record",
+  "spec": "0.5.0",
+  "description": "The provenance record of spec section 7: the seven members a record carries (7.1), the two classes and the hyphen in `provenance-only` (7.2), the three conditions a `deterministic` run must satisfy (7.3), the reserved `environment` members (7.4) and the three facts `environment` must never carry (7.5). A case whose `input` holds `capture` captures a record from a repository fixture: `repo.git` is `commit` for a repository whose `HEAD` resolves to a commit, `detached` for the same repository with `HEAD` detached onto that commit, `no-commits` for an initialised repository that holds no commit, and `absent` for a directory under no version control at all; `repo.tree` is `clean`, `modified` for a tracked file changed since the commit, `untracked` for an extra file the repository's ignore rules do not exclude, and `ignored-untracked` for one they do; `repo.lockfile` is the exact bytes of the dependency lockfile, or `null` when the run has none. `capture.frameworks` is the set of library names the implementation looks for, and `capture.accelerator` is the answer its accelerator probe gives. In `expect.captured`, `code_sha` is the sentinel `<head>` where the record must carry the commit `HEAD` resolves to and `null` where it must carry `null`; `environment_members` is the exact member list of `environment`, in order; and `environment_excludes` names a fact 7.5 forbids (`hostname`, `username`, `filesystem-path`). A member 7.4 does not name is serialised after the members it does, in the order the document gave them. A case whose `input` holds `record` instead supplies a provenance-record document: `expect.serialised` is the document the record must serialise back to, member order included, and `expect.invalid` says why a document is not a provenance record.",
+  "source": "Hand-derived from spec section 7. The classification cases are 7.3's three conditions in each combination that matters, with 7.1's rule that a dirty tree keeps its `code_sha` and costs the class instead; the `null` `code_sha` cases are 7.1's \"null exactly when HEAD resolves to no commit\", which names code under no version control and a repository with no commit, while a detached HEAD resolves to a commit and so is an ordinary non-null case. The `environment` cases are 7.4's member table (a `null` under `frameworks` for a library looked for and absent, a `null` `accelerator` for no accelerator, and 7.4's own example values for a present one) and 7.5's prohibition. The document cases are 7.1's \"MUST carry every member\" and \"MUST NOT carry a top-level member this specification does not define\", 7.1's \"omitting the member is never an alternative to the null\" and its lowercase hex, 7.2's normative hyphen, 7.3's \"a record whose class is deterministic therefore MUST carry a non-null code_sha and a non-null deps_hash\", 7.4's non-Python runtime sentence, and spec 4.2 for the content-hash form. Every digest is independently sourced: the `{}` lockfile's `sha256:44136fa3...` is quoted from `conformance/hashing/content.json` (`empty-object`), whose canonical form is those same two bytes; the zero-byte lockfile's `sha256:e3b0c442...` is the published SHA-256 of the empty string (FIPS 180-4, RFC 6234); and the whitespace lockfile's `sha256:1ff73c34...` is hashlib.sha256 over those exact bytes, the source `conformance/hashing/content.json` names for its own digests. That last digest is deliberately not `sha256:d3626ac3...`, which the same file pins for the canonical form of the same JSON document, and the difference between the two is the whole point of the case: 7.1 hashes the lockfile's bytes exactly as read, because a lockfile is not required to be JSON. `config_hash` and `data_hash` throughout are digests quoted from that file as well (`empty-object` and `null`), so no hash string here is of unknown origin, and a `code_sha` in a document case is a synthetic 40-character lowercase hex value. No expectation in this file was produced by running this kit (CLAUDE.md rule 2).",
+  "cases": [
+    {
+      "name": "clean-tree-with-a-lockfile-is-deterministic",
+      "input": {
+        "capture": {
+          "run_id": "run-0001",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "commit", "tree": "clean", "lockfile": "{}"}
+        }
+      },
+      "expect": {
+        "captured": {
+          "run_id": "run-0001",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "code_sha": "<head>",
+          "class": "deterministic"
+        }
+      }
+    },
+    {
+      "name": "a-modified-tracked-file-keeps-code-sha-and-costs-the-class",
+      "input": {
+        "capture": {
+          "run_id": "run-0002",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "commit", "tree": "modified", "lockfile": "{}"}
+        }
+      },
+      "expect": {
+        "captured": {
+          "deps_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "code_sha": "<head>",
+          "class": "provenance-only"
+        }
+      }
+    },
+    {
+      "name": "an-untracked-file-is-not-a-clean-tree",
+      "input": {
+        "capture": {
+          "run_id": "run-0003",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "commit", "tree": "untracked", "lockfile": "{}"}
+        }
+      },
+      "expect": {
+        "captured": {
+          "deps_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "code_sha": "<head>",
+          "class": "provenance-only"
+        }
+      }
+    },
+    {
+      "name": "an-ignored-untracked-file-leaves-the-tree-clean",
+      "input": {
+        "capture": {
+          "run_id": "run-0004",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "commit", "tree": "ignored-untracked", "lockfile": "{}"}
+        }
+      },
+      "expect": {
+        "captured": {
+          "deps_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "code_sha": "<head>",
+          "class": "deterministic"
+        }
+      }
+    },
+    {
+      "name": "a-missing-lockfile-is-provenance-only-with-a-null-deps-hash",
+      "input": {
+        "capture": {
+          "run_id": "run-0005",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "commit", "tree": "clean", "lockfile": null}
+        }
+      },
+      "expect": {
+        "captured": {"deps_hash": null, "code_sha": "<head>", "class": "provenance-only"}
+      }
+    },
+    {
+      "name": "no-version-control-nulls-code-sha",
+      "input": {
+        "capture": {
+          "run_id": "run-0006",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "absent", "lockfile": "{}"}
+        }
+      },
+      "expect": {
+        "captured": {
+          "deps_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "code_sha": null,
+          "class": "provenance-only"
+        }
+      }
+    },
+    {
+      "name": "a-repository-with-no-commit-nulls-code-sha",
+      "input": {
+        "capture": {
+          "run_id": "run-0007",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "no-commits", "lockfile": "{}"}
+        }
+      },
+      "expect": {
+        "captured": {
+          "deps_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "code_sha": null,
+          "class": "provenance-only"
+        }
+      }
+    },
+    {
+      "name": "a-detached-head-resolves-to-a-commit",
+      "input": {
+        "capture": {
+          "run_id": "run-0008",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "detached", "tree": "clean", "lockfile": "{}"}
+        }
+      },
+      "expect": {
+        "captured": {
+          "deps_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "code_sha": "<head>",
+          "class": "deterministic"
+        }
+      }
+    },
+    {
+      "name": "neither-git-nor-a-lockfile-leaves-both-hashes-null",
+      "input": {
+        "capture": {
+          "run_id": "run-0009",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "absent", "lockfile": null}
+        }
+      },
+      "expect": {
+        "captured": {
+          "run_id": "run-0009",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": null,
+          "code_sha": null,
+          "class": "provenance-only",
+          "environment_members": ["platform", "python", "frameworks", "accelerator"]
+        }
+      }
+    },
+    {
+      "name": "an-empty-lockfile-hashes-its-zero-bytes",
+      "input": {
+        "capture": {
+          "run_id": "run-0010",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "commit", "tree": "clean", "lockfile": ""}
+        }
+      },
+      "expect": {
+        "captured": {
+          "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "code_sha": "<head>",
+          "class": "deterministic"
+        }
+      }
+    },
+    {
+      "name": "lockfile-bytes-are-hashed-as-read-not-canonicalised",
+      "input": {
+        "capture": {
+          "run_id": "run-0011",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "commit", "tree": "clean", "lockfile": " { \"b\" : 1 , \"a\" : 2 } "}
+        }
+      },
+      "expect": {
+        "captured": {
+          "deps_hash": "sha256:1ff73c34ab62b266b5852bb53ecb7064dc9fd64629b3397f59e76bc2ce7aa82a",
+          "code_sha": "<head>",
+          "class": "deterministic"
+        }
+      }
+    },
+    {
+      "name": "an-absent-framework-is-recorded-as-null",
+      "input": {
+        "capture": {
+          "run_id": "run-0012",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "absent", "lockfile": null},
+          "frameworks": ["heph-no-such-framework"]
+        }
+      },
+      "expect": {
+        "captured": {
+          "deps_hash": null,
+          "code_sha": null,
+          "class": "provenance-only",
+          "frameworks": {"heph-no-such-framework": null}
+        }
+      }
+    },
+    {
+      "name": "no-accelerator-is-recorded-as-null",
+      "input": {
+        "capture": {
+          "run_id": "run-0013",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "absent", "lockfile": null},
+          "accelerator": null
+        }
+      },
+      "expect": {
+        "captured": {
+          "deps_hash": null,
+          "code_sha": null,
+          "class": "provenance-only",
+          "accelerator": null
+        }
+      }
+    },
+    {
+      "name": "an-accelerator-records-model-and-driver",
+      "input": {
+        "capture": {
+          "run_id": "run-0014",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "absent", "lockfile": null},
+          "accelerator": {"model": "NVIDIA RTX 4090", "driver": "550.54.14"}
+        }
+      },
+      "expect": {
+        "captured": {
+          "deps_hash": null,
+          "code_sha": null,
+          "class": "provenance-only",
+          "accelerator": {"model": "NVIDIA RTX 4090", "driver": "550.54.14"}
+        }
+      }
+    },
+    {
+      "name": "environment-carries-the-four-reserved-members",
+      "input": {
+        "capture": {
+          "run_id": "run-0015",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "commit", "tree": "clean", "lockfile": "{}"},
+          "frameworks": ["heph-no-such-framework"],
+          "accelerator": null
+        }
+      },
+      "expect": {
+        "captured": {
+          "deps_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "code_sha": "<head>",
+          "class": "deterministic",
+          "frameworks": {"heph-no-such-framework": null},
+          "accelerator": null,
+          "environment_members": ["platform", "python", "frameworks", "accelerator"]
+        }
+      }
+    },
+    {
+      "name": "environment-carries-no-hostname-username-or-path",
+      "input": {
+        "capture": {
+          "run_id": "run-0016",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "repo": {"git": "commit", "tree": "clean", "lockfile": "{}"}
+        }
+      },
+      "expect": {
+        "captured": {
+          "deps_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "code_sha": "<head>",
+          "class": "deterministic",
+          "environment_excludes": ["hostname", "username", "filesystem-path"]
+        }
+      }
+    },
+    {
+      "name": "a-record-serialises-in-the-section-7.1-member-order",
+      "input": {
+        "record": {
+          "run_id": "run-0017",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+          "class": "deterministic",
+          "environment": {
+            "platform": "macOS-15.6-arm64",
+            "python": "3.12.7",
+            "frameworks": {"numpy": "2.1.3", "torch": null},
+            "accelerator": {"model": "NVIDIA RTX 4090", "driver": "550.54.14"}
+          }
+        }
+      },
+      "expect": {
+        "serialised": {
+          "run_id": "run-0017",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+          "class": "deterministic",
+          "environment": {
+            "platform": "macOS-15.6-arm64",
+            "python": "3.12.7",
+            "frameworks": {"numpy": "2.1.3", "torch": null},
+            "accelerator": {"model": "NVIDIA RTX 4090", "driver": "550.54.14"}
+          }
+        }
+      }
+    },
+    {
+      "name": "a-provenance-only-record-carries-the-same-members-with-nulls",
+      "input": {
+        "record": {
+          "run_id": "run-0018",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": null,
+          "code_sha": null,
+          "class": "provenance-only",
+          "environment": {
+            "platform": "macOS-15.6-arm64",
+            "python": "3.12.7",
+            "frameworks": {"numpy": null, "torch": null},
+            "accelerator": null
+          }
+        }
+      },
+      "expect": {
+        "serialised": {
+          "run_id": "run-0018",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": null,
+          "code_sha": null,
+          "class": "provenance-only",
+          "environment": {
+            "platform": "macOS-15.6-arm64",
+            "python": "3.12.7",
+            "frameworks": {"numpy": null, "torch": null},
+            "accelerator": null
+          }
+        }
+      }
+    },
+    {
+      "name": "a-non-python-runtime-records-its-own-member",
+      "input": {
+        "record": {
+          "run_id": "run-0019",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": null,
+          "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+          "class": "provenance-only",
+          "environment": {"platform": "Linux-6.8.0-x86_64", "go": "1.23.4", "accelerator": null}
+        }
+      },
+      "expect": {
+        "serialised": {
+          "run_id": "run-0019",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": null,
+          "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+          "class": "provenance-only",
+          "environment": {"platform": "Linux-6.8.0-x86_64", "accelerator": null, "go": "1.23.4"}
+        }
+      }
+    },
+    {
+      "name": "a-record-missing-a-normative-member-is-refused",
+      "input": {
+        "record": {
+          "run_id": "run-0020",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "deps_hash": null,
+          "code_sha": null,
+          "class": "provenance-only",
+          "environment": {"platform": "macOS-15.6-arm64", "python": "3.12.7"}
+        }
+      },
+      "expect": {"invalid": "data_hash is a member of the 7.1 table and no record may leave it out"}
+    },
+    {
+      "name": "an-omitted-code-sha-is-not-an-alternative-to-the-null",
+      "input": {
+        "record": {
+          "run_id": "run-0021",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": null,
+          "class": "provenance-only",
+          "environment": {"platform": "macOS-15.6-arm64", "python": "3.12.7"}
+        }
+      },
+      "expect": {"invalid": "7.1 says omitting code_sha is never an alternative to carrying null"}
+    },
+    {
+      "name": "an-environment-less-record-is-refused",
+      "input": {
+        "record": {
+          "run_id": "run-0022",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": null,
+          "code_sha": null,
+          "class": "provenance-only"
+        }
+      },
+      "expect": {"invalid": "7.4 says environment MUST be present"}
+    },
+    {
+      "name": "an-undefined-top-level-member-is-refused",
+      "input": {
+        "record": {
+          "run_id": "run-0023",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": null,
+          "code_sha": null,
+          "class": "provenance-only",
+          "environment": {"platform": "macOS-15.6-arm64", "python": "3.12.7"},
+          "hostname": "forge-01"
+        }
+      },
+      "expect": {"invalid": "7.1 forbids a top-level member the specification does not define"}
+    },
+    {
+      "name": "provenance_only-with-an-underscore-is-not-a-class",
+      "input": {
+        "record": {
+          "run_id": "run-0024",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": null,
+          "code_sha": null,
+          "class": "provenance_only",
+          "environment": {"platform": "macOS-15.6-arm64", "python": "3.12.7"}
+        }
+      },
+      "expect": {"invalid": "7.2 makes the hyphen in provenance-only normative"}
+    },
+    {
+      "name": "deterministic-with-a-null-code-sha-is-refused",
+      "input": {
+        "record": {
+          "run_id": "run-0025",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "code_sha": null,
+          "class": "deterministic",
+          "environment": {"platform": "macOS-15.6-arm64", "python": "3.12.7"}
+        }
+      },
+      "expect": {"invalid": "7.3: a deterministic record MUST carry a non-null code_sha"}
+    },
+    {
+      "name": "deterministic-with-a-null-deps-hash-is-refused",
+      "input": {
+        "record": {
+          "run_id": "run-0026",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": null,
+          "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+          "class": "deterministic",
+          "environment": {"platform": "macOS-15.6-arm64", "python": "3.12.7"}
+        }
+      },
+      "expect": {"invalid": "7.3: a deterministic record MUST carry a non-null deps_hash"}
+    },
+    {
+      "name": "an-uppercase-code-sha-is-refused",
+      "input": {
+        "record": {
+          "run_id": "run-0027",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": null,
+          "code_sha": "C0FFEEC0FFEEC0FFEEC0FFEEC0FFEEC0FFEEC0FF",
+          "class": "provenance-only",
+          "environment": {"platform": "macOS-15.6-arm64", "python": "3.12.7"}
+        }
+      },
+      "expect": {"invalid": "7.1 states code_sha as lowercase hex"}
+    },
+    {
+      "name": "an-uppercase-content-hash-is-refused",
+      "input": {
+        "record": {
+          "run_id": "run-0028",
+          "config_hash": "sha256:44136FA355B3678A1146AD16F7E8649E94FB4FC21FE77E8310C060F61CAAFF8A",
+          "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": null,
+          "code_sha": null,
+          "class": "provenance-only",
+          "environment": {"platform": "macOS-15.6-arm64", "python": "3.12.7"}
+        }
+      },
+      "expect": {"invalid": "spec 4.2: uppercase hex is not a content hash"}
+    },
+    {
+      "name": "a-content-hash-with-another-prefix-is-refused",
+      "input": {
+        "record": {
+          "run_id": "run-0029",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "data_hash": "sha512:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+          "deps_hash": null,
+          "code_sha": null,
+          "class": "provenance-only",
+          "environment": {"platform": "macOS-15.6-arm64", "python": "3.12.7"}
+        }
+      },
+      "expect": {"invalid": "spec 4.2: a content hash carries the sha256: prefix and no other"}
+    }
+  ]
+}
