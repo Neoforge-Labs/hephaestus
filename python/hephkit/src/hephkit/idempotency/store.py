@@ -348,7 +348,7 @@ class IdempotencyStore:
 
         * clean exit after ``finish`` below 500: ``complete()`` on ``work_ex``;
         * clean exit with no ``finish``, or ``finish`` at 500 or above: release;
-        * a raised ``HephError`` **below 500**: stored, as a 4xx the operation
+        * a raised ``HephError`` **below 500**, for ``kind="http"``: stored, as a 4xx the operation
           really produced (2.8), with that status and an empty body, because
           building a body is the layer above's job. This is the exception to
           "an exception releases", and the rule is the registry's status, not
@@ -357,8 +357,14 @@ class IdempotencyStore:
           back, which would take a record written there with it and leave the
           key in flight. A 4xx has no work to keep, so committing it alone is
           right;
-        * any other exception, a ``HephError`` of 500 or above, or a cancellation:
-          release, and the exception propagates.
+        * any other exception, a ``HephError`` of 500 or above, a cancellation, or
+          **any** ``HephError`` when ``kind="event"``: release, and the exception
+          propagates. The asymmetry is deliberate. 2.8 stores a 4xx *response* so
+          a retrying *client* gets the same answer; a broker is not a client and
+          has no use for a stored 422. Storing it would make the redelivery
+          replay as a no-op, and the broker would ack work that never happened.
+          Released, a poison event fails repeatedly and reaches the broker's own
+          dead-letter queue, where an operator sees it.
 
         ``render_error`` turns a raised sub-500 ``HephError`` into the
         ``(body, media_type)`` that is stored with its status, so a replay returns
@@ -400,7 +406,7 @@ class IdempotencyStore:
         try:
             yield record
         except HephError as exc:
-            if exc.status >= 500:
+            if exc.status >= 500 or kind == "event":
                 await self.release(claim_ex, scope=scope, key=key, attempt_id=attempt)
                 raise
             try:

@@ -21,9 +21,19 @@ event replays, and the same id carrying a different payload is ``HEPH-IDEMP-422`
 **A replayed event is a no-op that returns normally** (``None``). A worker must
 not see an exception for a message it already handled, which would send a
 successfully processed message to a dead-letter queue. A handler that raises
-releases the record, so the broker's redelivery runs it again. Records are
-written with ``kind="event"``; completion stores status 204 and an empty body,
-because there is no response.
+releases the record, so the broker's redelivery runs it again, **including a
+sub-500 ``HephError``**. An HTTP route stores a 4xx (2.8) so a retrying client
+gets the same answer; a broker is not a client, and a stored 4xx would make the
+redelivery a no-op that acks work never done. A poison event instead fails
+repeatedly and reaches the broker's own dead-letter queue, where an operator sees
+it. The store keys this off ``kind="event"``.
+
+A concurrent duplicate delivery of an event still in flight raises
+``HEPH-IDEMP-409``; it is the broker's to retry. An event that is not
+JSON-compatible raises from ``content_hash`` before any connection is opened.
+
+Records are written with ``kind="event"``; completion stores status 204 and an
+empty body, because there is no response.
 """
 
 from __future__ import annotations
@@ -54,6 +64,7 @@ def idempotent(
     def decorate(handler: Handler) -> Handler:
         @functools.wraps(handler)
         async def wrapper(event: Any, *args: Any, **kwargs: Any) -> Any:
+            fp = content_hash(event)  # before any connection or transaction is opened
             async with (
                 executors(event) as ex,
                 store.idempotent_record(
@@ -61,7 +72,7 @@ def idempotent(
                     work_ex=ex.work,
                     scope=scope(event),
                     key=event_id(event),
-                    fingerprint=content_hash(event),
+                    fingerprint=fp,
                     kind="event",
                 ) as record,
             ):
