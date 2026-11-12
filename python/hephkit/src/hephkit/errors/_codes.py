@@ -19,6 +19,7 @@ IDEMP_422: Final = "HEPH-IDEMP-422"
 MONEY_422: Final = "HEPH-MONEY-422"
 MONEY_409: Final = "HEPH-MONEY-409"
 WH_401: Final = "HEPH-WH-401"
+DB_503: Final = "HEPH-DB-503"
 
 # code -> (HTTP status, title)
 REGISTRY: dict[str, tuple[int, str]] = {
@@ -34,6 +35,7 @@ REGISTRY: dict[str, tuple[int, str]] = {
     "HEPH-MONEY-422": (422, "Invalid money amount"),
     "HEPH-MONEY-409": (409, "Currency mismatch"),
     "HEPH-WH-401": (401, "Webhook signature invalid or expired"),
+    "HEPH-DB-503": (503, "Database connection unavailable"),
 }
 
 # code -> guidance for the caller, used as the default problem `detail`
@@ -50,4 +52,5 @@ DETAIL_HINTS: dict[str, str] = {
     "HEPH-MONEY-422": "The amount is not a valid integer minor-units string, or has more precision than its currency allows.",
     "HEPH-MONEY-409": "This operation mixes two different currencies; both amounts must use the same currency.",
     "HEPH-WH-401": "The webhook signature is invalid or has expired.",
+    "HEPH-DB-503": "The service could not get a database connection in time. Retry the request in a few moments.",
 }

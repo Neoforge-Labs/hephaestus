@@ -581,18 +581,80 @@ async def _burst(make, n=4, hold=0.05):
         )
 
 
+def _is_pool_exhaustion(result: Any) -> bool:
+    """A 503 carrying the registry code, which is what the client actually gets.
+
+    The acquire still ends in a TimeoutError; HEPH-DB-503 is the name it is
+    reported under, so asserting on the response rather than on the exception
+    also pins the rendering an operator reads at 03:00.
+    """
+    return (
+        getattr(result, "status_code", None) == 503
+        and result.json()["code"] == "HEPH-DB-503"
+        and result.headers["content-type"] == "application/problem+json"
+    )
+
+
 async def test_an_exhausted_single_pool_raises_instead_of_hanging(pg_conn, postgres_dsn):
     """max_size=2 and four concurrent requests: each takes a claim connection and then waits
     for a work connection nobody can release. Without acquire_timeout this never returns."""
     pool = await asyncpg.create_pool(postgres_dsn, min_size=2, max_size=2)
     try:
         results = await _burst(asyncpg_executors(_YieldingPool(pool), acquire_timeout=0.5))
-        assert any(isinstance(r, TimeoutError) for r in results)
+        assert any(_is_pool_exhaustion(r) for r in results)
         # and the pool is not wedged afterwards
         (ok,) = await _burst(asyncpg_executors(pool, acquire_timeout=5), n=1)
         assert ok.status_code == 201
     finally:
         await pool.close()
+
+
+@pytest.mark.parametrize("factory", ["asyncpg", "sqlalchemy"])
+async def test_a_pool_that_cannot_hand_out_two_connections_is_a_registry_coded_503(
+    factory, pg_conn, postgres_dsn
+):
+    """One connection, and a request needs two: the second acquire times out.
+
+    A bare TimeoutError renders as HEPH-GEN-500, which tells the operator
+    nothing about connections -- and ADR 0020 calls pool exhaustion the thing an
+    adopter is most likely to get wrong. The caller-facing body stays the
+    registry's hint; the sizing rule is on the exception and at
+    /errors/HEPH-DB-503, never on the wire.
+    """
+    if factory == "asyncpg":
+        pool = await asyncpg.create_pool(postgres_dsn, min_size=1, max_size=1)
+        make = asyncpg_executors(pool, acquire_timeout=0.3)
+        closer = pool.close
+    else:
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        engine = create_async_engine(
+            postgres_dsn.replace("postgresql://", "postgresql+asyncpg://", 1),
+            pool_size=1,
+            max_overflow=0,
+            pool_timeout=0.3,
+        )
+        make = sqlalchemy_executors(engine)
+        closer = engine.dispose
+
+    app = FastAPI()
+    install_error_handlers(app)
+
+    @app.post("/c")
+    @idempotent_route(IdempotencyStore(), scope=lambda r: "t", executors=make)
+    async def handler(request: Request) -> Response:  # pragma: no cover - never reached
+        raise AssertionError("the executors never opened")
+
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            r = await c.post("/c", headers=KEY)
+    finally:
+        await closer()
+    assert _is_pool_exhaustion(r)
+    assert "pool" not in r.json()["detail"]  # the sizing rule is not caller copy
+    assert await pg_conn.fetchval("SELECT count(*) FROM heph_idempotency") == 0
 
 
 async def test_a_separate_claim_pool_cannot_deadlock(pg_conn, postgres_dsn):
@@ -649,7 +711,7 @@ async def test_waiting_for_a_claim_connection_is_bounded_too(pg_conn, postgres_d
     try:
         started = time.monotonic()
         results = await _burst(asyncpg_executors(pool, acquire_timeout=0.3), n=2, hold=1.5)
-        assert "TimeoutError" in {type(r).__name__ for r in results}
+        assert any(_is_pool_exhaustion(r) for r in results)
         # The waiter gave up on its own timeout; only the holder takes as long as `hold`.
         assert time.monotonic() - started < 1.5 + 0.5
     finally:

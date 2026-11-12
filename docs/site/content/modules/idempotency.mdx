@@ -220,15 +220,21 @@ key, one for the handler's transaction — and holds the first while waiting for
 the second. A single pool therefore needs **twice** the route's peak
 concurrency. At exactly `max_size` every request waits on another and none
 proceeds; the acquires are bounded (`acquire_timeout`, 10 seconds by default)
-so that this raises `TimeoutError` instead of hanging for good. Pass a separate
-`claim_pool` and the deadlock cannot happen at all:
+so that this ends in
+[HEPH-DB-503](/errors/HEPH-DB-503) instead of hanging for good. That page
+carries the sizing rule, which is why the code exists: a bare `TimeoutError`
+renders as `HEPH-GEN-500` and says nothing about connections to whoever is
+reading the log. The client's body stays the registry's generic hint. Pass a
+separate `claim_pool` and the deadlock cannot happen at all:
 
 ```python
 asyncpg_executors(work_pool, claim_pool=claim_pool, acquire_timeout=10.0)
 ```
 
 The SQLAlchemy factory is the same shape: `sqlalchemy_executors(engine)`, whose
-engine pool needs twice the peak concurrency for the same reason.
+engine pool needs twice the peak concurrency for the same reason. There the wait
+is SQLAlchemy's own `pool_timeout`, configured on the engine; what hephkit adds
+is the same name for what it ends in.
 
 ## Retention is yours to schedule
 

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from starlette.requests import Request
     from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from hephkit.errors import DB_503, HephError
 from hephkit.idempotency.ports import Executor, Executors
 
 __all__ = [
@@ -112,6 +113,76 @@ class SQLAlchemyExecutor:
         return {f"p{i}": v for i, v in enumerate(params, start=1)}
 
 
+def _pool_timeout(role: str) -> HephError:
+    """The registry's 503 for an acquire that ran out of time.
+
+    ``acquire_timeout`` already turns pool exhaustion into an error rather than
+    a permanent stall, but a bare ``TimeoutError`` carries no code, so
+    ``install_error_handlers`` renders it as ``HEPH-GEN-500`` and the operator
+    woken by it learns nothing about connections. ADR 0020 calls this the thing
+    an adopter is most likely to get wrong, so it gets a code of its own, and
+    503 because the right answer is to retry once the pressure passes.
+
+    **``detail`` is left ``None`` deliberately**, so the response body carries
+    the registry's caller-facing hint. The sizing rule is developer guidance,
+    which the registry publishes at ``/errors/HEPH-DB-503`` -- the problem
+    ``type`` of this very response -- and never sends on the wire. The message
+    the exception itself carries, which is what a log line and a traceback show,
+    is the operator's half, and the original ``TimeoutError`` stays chained to
+    it.
+    """
+    error = HephError(DB_503)
+    error.args = (
+        f"timed out acquiring the {role} connection: the pool had none free. An idempotent "
+        "request holds two connections and waits for the second while holding the first, so a "
+        "single pool needs twice the route's peak concurrency. Pass claim_pool= to take the "
+        "claim connections from a pool of their own, or raise the pool's size.",
+    )
+    return error
+
+
+@asynccontextmanager
+async def _acquired(pool: Any, role: str, timeout: float | None) -> AsyncIterator[Any]:
+    """``pool.acquire(timeout=...)``, with a timeout on the *acquire* named as HEPH-DB-503.
+
+    The flag keeps the translation to the acquire itself. A ``TimeoutError`` the
+    handler raises inside the block, or one raised while the connection goes
+    back to the pool, is not pool exhaustion and must pass through with its own
+    meaning intact.
+    """
+    acquiring = True
+    try:
+        async with pool.acquire(timeout=timeout) as conn:
+            acquiring = False
+            yield conn
+    except TimeoutError as exc:
+        if acquiring:
+            raise _pool_timeout(role) from exc
+        raise
+
+
+@asynccontextmanager
+async def _connected(engine: Any, role: str) -> AsyncIterator[Any]:
+    """``engine.connect()``, with SQLAlchemy's own pool wait named as HEPH-DB-503.
+
+    The wait itself stays SQLAlchemy's (``pool_timeout``, 30 seconds by
+    default); only the name of the error it ends in changes, and only for the
+    connect. SQLAlchemy raises its own ``sqlalchemy.exc.TimeoutError`` there,
+    which is not the builtin, so the two factories cannot share one arm.
+    """
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+
+    connecting = True
+    try:
+        async with engine.connect() as conn:
+            connecting = False
+            yield conn
+    except PoolTimeout as exc:
+        if connecting:
+            raise _pool_timeout(role) from exc
+        raise
+
+
 def _expose(request: Any, conn: object) -> object:
     """Put the work connection on ``request.state``; return what was there before."""
     previous = getattr(request.state, _WORK_CONNECTION_STATE, None)
@@ -192,24 +263,30 @@ def asyncpg_executors(
     holds a claim connection while waiting for its work connection, so if the
     route's concurrency reaches the pool's ``max_size`` every request waits on
     another and none ever proceeds. The pool therefore needs **twice** the peak
-    concurrency of the route, and ``acquire_timeout`` turns exhaustion into an
-    error (``TimeoutError``) instead of a silent hang. Pass a separate
-    ``claim_pool`` and the deadlock cannot happen: nothing holds a connection
-    from one pool while waiting on that same pool.
+    concurrency of the route, and ``acquire_timeout`` turns exhaustion into
+    ``HEPH-DB-503`` instead of a silent hang. Pass a separate ``claim_pool`` and
+    the deadlock cannot happen: nothing holds a connection from one pool while
+    waiting on that same pool.
 
     ``acquire_timeout`` defaults to **10.0 seconds** and applies to each acquire.
     It also bounds opening a new connection when the pool grows, so a slow
-    database now raises ``TimeoutError`` where an unbounded wait would have
-    succeeded eventually. ``None`` restores the unbounded wait, and with it the
-    permanent hang described above if the pool is under-sized.
+    database now fails where an unbounded wait would have succeeded eventually.
+    ``None`` restores the unbounded wait, and with it the permanent hang
+    described above if the pool is under-sized.
+
+    An acquire that runs out of time raises ``HephError`` with ``HEPH-DB-503``,
+    so the response is a 503 the client can retry and the log line names the
+    pool rather than reading as a generic 500. The exception's message carries the sizing rule above; the
+    body the client gets carries the registry's hint and nothing about
+    connection pools.
     """
     claims = claim_pool if claim_pool is not None else pool
 
     @asynccontextmanager
     async def executors(request: Any) -> AsyncIterator[Executors]:
         async with (
-            claims.acquire(timeout=acquire_timeout) as claim_conn,
-            pool.acquire(timeout=acquire_timeout) as work_conn,
+            _acquired(claims, "claim", acquire_timeout) as claim_conn,
+            _acquired(pool, "work", acquire_timeout) as work_conn,
         ):
             tx = work_conn.transaction()
             await tx.start()
@@ -243,12 +320,18 @@ def sqlalchemy_executors(
     **Sizing.** Each in-flight request holds two pooled connections, one of them
     while waiting for the other, so the engine's pool needs twice the route's
     peak concurrency. Under-sizing stalls requests for the pool's ``pool_timeout``
-    (30 s by default) and then raises, rather than hanging for good.
+    (30 s by default) and then raises, rather than hanging for good. The wait is
+    SQLAlchemy's own and is configured on the engine; what hephkit adds is the
+    name, ``HEPH-DB-503``, so that exhaustion reads as exhaustion in the response
+    and in the log rather than as a generic 500.
     """
 
     @asynccontextmanager
     async def executors(request: Any) -> AsyncIterator[Executors]:
-        async with engine.connect() as claim_conn, engine.connect() as work_conn:
+        async with (
+            _connected(engine, "claim") as claim_conn,
+            _connected(engine, "work") as work_conn,
+        ):
             await claim_conn.execution_options(isolation_level="AUTOCOMMIT")
             previous = _expose(request, work_conn)
             try:
