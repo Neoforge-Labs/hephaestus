@@ -35,7 +35,7 @@
 - Conventional Commits. Branch `work/<topic>`. **No AI attribution** in commit messages, PR bodies or branch names.
 - Local host ports come from the 54xxx block. MLflow takes **54500**.
 - Vectors are never produced by running our own implementation (CLAUDE.md rule 2).
-- ADRs 0021–0024 land contiguously in wave 1 and are **blocked on Phase 2 landing ADR 0020**.
+- ADRs land contiguously in the order tasks COMPLETE, not the order the design first listed them (Ruling 15): **Task 4 = 0021** (PEP 420), **Task 5 = 0022 and 0023**, **Task 6 = 0024**. `tools/check_adrs.py` fails on any gap, so writing a higher number before a lower one exists turns the branch red.
 
 ## Review Focus
 
@@ -237,12 +237,12 @@ git commit -m "test(conformance): run lab suites from hephkit-lab, not hephkit"
 
 ## Wave 1 — the integrity spine
 
-### Task 4: Convert `hephkit` to a PEP 420 namespace package (ADR 0024)
+### Task 4: Convert `hephkit` to a PEP 420 namespace package (ADR 0021)
 
 **Files:**
 - Delete: `python/hephkit/src/hephkit/__init__.py`
 - Modify: `python/hephkit/pyproject.toml` (version `0.3.0`)
-- Create: `docs/adr/0024-hephkit-is-a-namespace-package.md`
+- Create: `docs/adr/0021-hephkit-is-a-namespace-package.md`
 - Test: `python/hephkit/tests/test_namespace.py`
 
 **Interfaces:**
@@ -279,7 +279,7 @@ Remove `python/hephkit/src/hephkit/__init__.py`. Set `version = "0.3.0"` in `pyt
 Run: `cd python/hephkit && uv run maturin develop --uv && uv run pytest -m "not slow" --cov=hephkit --cov-fail-under=90 && uv run mypy --strict src`
 Expected: PASS. If coverage drops because the deleted `__init__.py` held covered lines, it is the denominator that changed, not the tests.
 
-- [ ] **Step 5: Write ADR 0024**
+- [ ] **Step 5: Write ADR 0021**
 
 Record: the three mechanisms considered, that `ecosystem.yml` states no consumer has adopted `hephkit` (so the break is nearly free now and expensive later), the loss of `hephkit.__version__` and its replacement, and that `hephkit.ai` will need the same mechanism.
 
@@ -291,15 +291,15 @@ Expected: PASS. **If this fails on a gap at 0020, Phase 2 has not landed its ADR
 - [ ] **Step 7: Commit**
 
 ```bash
-git add -A python/hephkit docs/adr/0024-hephkit-is-a-namespace-package.md
+git add -A python/hephkit docs/adr/0021-hephkit-is-a-namespace-package.md
 git commit -m "refactor(hephkit)!: make hephkit a PEP 420 namespace package"
 ```
 
-### Task 5: The `hephkit-lab` distribution (ADR 0021, 0023)
+### Task 5: The `hephkit-lab` distribution (ADR 0022, 0023)
 
 **Files:**
 - Create: `python/hephkit-lab/pyproject.toml`, `moon.yml`, `src/hephkit/lab/__init__.py`, `tests/test_package.py`
-- Create: `docs/adr/0021-research-integrity-is-the-spine.md`, `docs/adr/0023-hephkit-lab-ships-separately.md`
+- Create: `docs/adr/0022-research-integrity-is-the-spine.md`, `docs/adr/0023-hephkit-lab-ships-separately.md`
 - Modify: `.moon/workspace.yml`, `.github/workflows/python-ci.yml`
 
 **Interfaces:**
@@ -338,23 +338,23 @@ Expected: FAIL — the package does not exist.
 Run: `moon run hephkit-lab:test-fast hephkit-lab:typecheck`
 Expected: PASS
 
-- [ ] **Step 6: Write ADR 0021 and ADR 0023**
+- [ ] **Step 6: Write ADR 0022 and ADR 0023**
 
-0021: research integrity as the spine, superseding the parent design's lab table, with the NeoRx and SAWA evidence. 0023: separate distribution, the extras partition, Ligase as a leaf with the dependency direction reversed, and that `ligase-bio` and `causalphylo` are on PyPI.
+0022: research integrity as the spine, superseding the parent design's lab table, with the NeoRx and SAWA evidence. 0023: separate distribution, the extras partition, Ligase as a leaf with the dependency direction reversed, and that `ligase-bio` and `causalphylo` are on PyPI.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add python/hephkit-lab .moon/workspace.yml .github/workflows/python-ci.yml docs/adr/0021-research-integrity-is-the-spine.md docs/adr/0023-hephkit-lab-ships-separately.md
+git add python/hephkit-lab .moon/workspace.yml .github/workflows/python-ci.yml docs/adr/0022-research-integrity-is-the-spine.md docs/adr/0023-hephkit-lab-ships-separately.md
 git commit -m "feat(lab): add the hephkit-lab distribution"
 ```
 
-### Task 6: Provenance record in the spec (ADR 0022) and the LAB error codes
+### Task 6: Provenance record in the spec (ADR 0024) and the LAB error codes
 
 **Files:**
 - Modify: `spec/heph-spec.md` (§7 revision)
 - Modify: `spec/errors.yaml`
-- Create: `docs/adr/0022-provenance-record-splits-hashes-from-environment.md`
+- Create: `docs/adr/0024-provenance-record-splits-hashes-from-environment.md`
 - Modify: `python/hephkit/src/hephkit/errors/_codes.py` (generated)
 
 **Interfaces:**
@@ -373,14 +373,14 @@ In `spec/errors.yaml`, append the four codes with `area: LAB`. Each needs a call
 Run: `python tools/gen_errors.py && moon run hephkit:gen-errors && python tools/check_adrs.py && uv run tools/gen_error_pages.py --check`
 Expected: the generated `_codes.py` and error pages are regenerated and `--check` passes. Never hand-edit either.
 
-- [ ] **Step 4: Write ADR 0022**
+- [ ] **Step 4: Write ADR 0024**
 
 Record why `deps_hash` is normative and `environment` is not: putting the GPU driver in the determinism contract means nothing reproduces across machines and the label becomes decorative. Record the hostname exclusion and the two `deterministic` preconditions as the user's decisions.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add spec docs/adr/0022-provenance-record-splits-hashes-from-environment.md python/hephkit/src/hephkit/errors/_codes.py docs/site
+git add spec docs/adr/0024-provenance-record-splits-hashes-from-environment.md python/hephkit/src/hephkit/errors/_codes.py docs/site
 git commit -m "spec(provenance): split normative hashes from descriptive environment"
 ```
 

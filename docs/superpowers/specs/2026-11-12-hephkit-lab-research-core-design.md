@@ -245,6 +245,33 @@ PyTorch **conditionally**, and the provenance record states which frameworks
 were present rather than assuming any. That is specified in §9.2, not left to
 the builder.
 
+#### 7.1.3. Typing markers across portions — established by experiment
+
+`mypy` resolves a PEP 561 `py.typed` marker **per `sys.path` entry, not per
+logical namespace**. Verified in both install shapes during wave 1: with a second
+portion on its own `.pth` — exactly what `uv run maturin develop --uv` produces,
+since it writes a `.pth` holding the source-tree path — `hephkit/py.typed` does
+**not** make that tree's `hephkit.lab` typed. It reports `import-untyped` and
+silently degrades to `Any`, while `hephkit.money` resolves correctly from the
+same import. External consumers of a real wheel are unaffected and stay fully
+typed; the failure is specific to a second portion on its own path entry, which
+is the development loop CLAUDE.md mandates.
+
+So:
+
+- `hephkit` keeps `hephkit/py.typed`. Its modules sit directly in the namespace
+  directory, there is no deeper placement available, and it owns that path alone.
+- **Every later portion ships its marker inside the subpackage it alone owns** —
+  `hephkit/lab/py.typed`, and `hephkit/ai/py.typed` when that arrives.
+- `hephkit-lab` must **not** ship `hephkit/py.typed`. It would type-check, but in
+  a merged `pip install` layout two distributions would own one file, which is the
+  exact collision §7.1.1 exists to prevent.
+
+Deleting `hephkit/__init__.py` also breaks `mypy --strict src` outright with
+"Source file found twice under different module names", so `[tool.mypy]` carries
+`mypy_path = "src"` and `explicit_package_bases = true` — mypy's documented
+namespace-package fix, taken in preference to weakening `--strict`.
+
 ### 7.2. Dependency layering
 
 ```
@@ -486,18 +513,28 @@ codes are added only as a module needs them, never speculatively.
 
 Numbered from 0021, which waits on Phase 2's 0020 landing.
 
-- **0021 — Research integrity is the spine of `hephkit.lab`.** Records, replay,
+> **Renumbered (Ruling 15).** ADR numbers follow the order the decisions LAND,
+> not the order this section first listed them, because `tools/check_adrs.py`
+> enforces contiguity from 0001 and a decision's ADR ships in the same PR as the
+> decision. The PEP 420 conversion landed first (wave 1, Task 4), so it takes
+> **0021**; the numbers below are the corrected assignment.
+
+- **0021 — `hephkit` becomes a PEP 420 namespace package.** So that a second
+  distribution can supply `hephkit.lab`. Breaking for `hephkit.__version__`;
+  cheap now because no consumer *in this repository* reads it, and expensive
+  later. The ADR states plainly that an `__all__`-exported attribute is being
+  removed from a package published on PyPI at 0.2.0, which breaks a conventional
+  external adopter, and that this is acceptable only because every module is
+  `experimental` under ADR 0015.
+- **0022 — Research integrity is the spine of `hephkit.lab`.** Records, replay,
   frozen inputs and gates are the foundation; tracking is a view onto them.
   Supersedes the lab table in the parent design and re-cuts the rollout.
-- **0022 — The provenance record splits normative hashes from descriptive
+- **0024 — The provenance record splits normative hashes from descriptive
   environment.** Adds `deps_hash`, adds `environment`, and states why the
   environment stays outside the determinism contract.
 - **0023 — `hephkit-lab` ships separately and Ligase stays a leaf.** Reverses
   the parent design's dependency direction between Ligase and the lab tier, and
   records why bio capability is an extra.
-- **0024 — `hephkit` becomes a PEP 420 namespace package.** So that a second
-  distribution can supply `hephkit.lab`. Breaking for `hephkit.__version__`;
-  cheap now because no consumer has adopted the package, and expensive later.
 - **0025 — Adopt CausalPhylo for identification.** Rule 8: the capability exists
   as a clean, documented, single-dependency package extracted from NeoRx for
   exactly this purpose. Both it and `ligase-bio` are published on PyPI, so this
