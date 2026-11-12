@@ -1,0 +1,1563 @@
+{
+  "suite": "lab.diff",
+  "spec": "0.5.0",
+  "description": "Replay and diff, spec section 9: what a replay compares (9.1), what a difference report contains and in what order (9.2), and how two values at one position are compared (9.3). A case supplies the two sides of a comparison, `recorded` and `replayed`, each a section 8 run record given as its section 7 provenance record plus its rows in the order `rows.jsonl` holds them. A row value is a JSON string, a finite JSON number, or 8.2's wrapper `{\"nonfinite\": t}`. `expect.matched` is whether the report matched and `expect.differences` is the report's differences, in order: each names a position by `cell` and `key` -- `cell` is null for a member of the determinism contract, and `key` is null for a cell that holds no values and is on one side only -- and carries `recorded` and `replayed`, where a null at a row position means the position is absent and a null at one of the four members is the member's own value (7.1). `input.derivation` says which clause of section 9 the expectation comes from; it is prose for the reader, not data an implementation consumes.",
+  "source": "Hand-derived from spec section 9. Every expectation is read off a clause: 9.1 for what is and is not compared (the four determinism-contract members and the rows; never `environment`, `run_id` or `class`), 9.2 for the shape and order of a report and for its treatment of a position only one side holds, and 9.3 for comparison by kind, exact string equality, the non-finite wrapper compared by the value it names, and the float tolerance. The float cases are evaluated by hand against 9.3's formula |a - b| <= max(1e-9 * max(|a|, |b|), 1e-12), and each one's `derivation` states the difference and the bound so a reader can check the arithmetic without running anything: 5.000000413701855e-10 against a bound of 1.0000000005e-9 for the matching pair, about 1e-6 against about 1e-9 for the differing one, and 1e-13 and 1e-11 against the absolute floor of 1e-12 for the two near-zero pairs. Every digest is quoted rather than invented: `sha256:44136fa3...` and `sha256:74234e98...` are conformance/hashing/content.json's `empty-object` and `null`, `sha256:9d7a9f8a...` its `spec-2.2-fingerprint-example`, `sha256:12ae32cb...` its `empty-string` and `sha256:d3626ac3...` its `key-order-does-not-change-hash`, while `sha256:e3b0c442...` is the published SHA-256 of the empty string (FIPS 180-4, RFC 6234). A `code_sha` is a synthetic 40-character lowercase hex value, as in conformance/lab/record.json. No expectation in this file was produced by running this kit, and no implementation of section 9 existed when it was written (CLAUDE.md rule 2).",
+  "cases": [
+    {
+      "name": "identical-records-match",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5,
+                "accuracy": 0.93
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5,
+                "accuracy": 0.93
+              }
+            }
+          ]
+        },
+        "derivation": "9.2: a report matched if and only if it carries no difference. Every compared position holds the same value on both sides."
+      },
+      "expect": {
+        "matched": true,
+        "differences": []
+      }
+    },
+    {
+      "name": "a-changed-metric-names-its-cell-and-key",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5,
+                "accuracy": 0.93
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5,
+                "accuracy": 0.91
+              }
+            }
+          ]
+        },
+        "derivation": "9.2: a position both sides hold whose values differ is one difference carrying both. 9.3: |0.93 - 0.91| = 0.02, and the bound is max(1e-9 * 0.93, 1e-12) = 9.3e-10, so the values differ. `loss` is identical on both sides and so is not a difference."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": "cell-a",
+            "key": "accuracy",
+            "recorded": 0.93,
+            "replayed": 0.91
+          }
+        ]
+      }
+    },
+    {
+      "name": "a-changed-environment-is-not-a-difference",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5,
+                "accuracy": 0.93
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "Linux-6.8.0-x86_64",
+              "python": "3.13.1",
+              "frameworks": {
+                "numpy": "2.2.0",
+                "torch": "2.6.0"
+              },
+              "accelerator": {
+                "model": "NVIDIA RTX 4090",
+                "driver": "550.54.14"
+              }
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5,
+                "accuracy": 0.93
+              }
+            }
+          ]
+        },
+        "derivation": "7.2 and 9.1: `environment` MUST NOT be compared, and two records differing only in `environment` MUST NOT be reported as a divergence. Every member of 7.4's table differs here, platform, runtime version and accelerator included."
+      },
+      "expect": {
+        "matched": true,
+        "differences": []
+      }
+    },
+    {
+      "name": "run-id-and-class-are-not-compared",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5,
+                "accuracy": 0.93
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0002",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "provenance-only",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5,
+                "accuracy": 0.93
+              }
+            }
+          ]
+        },
+        "derivation": "9.1: `run_id` is opaque and 7.1 says two records differing only in it describe the same re-execution; `class` classifies how a run was made rather than what it produced. All four determinism-contract members are equal and the rows are equal, so there is nothing to report."
+      },
+      "expect": {
+        "matched": true,
+        "differences": []
+      }
+    },
+    {
+      "name": "a-changed-deps-hash-is-a-difference",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5,
+                "accuracy": 0.93
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:d3626ac30a87e6f7a6428233b3c68299976865fa5508e4267c5415c76af7a772",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5,
+                "accuracy": 0.93
+              }
+            }
+          ]
+        },
+        "derivation": "9.1: `deps_hash` is in the determinism contract of 7.1, so a replay compares it. 9.2: a determinism-contract difference carries `cell` null and the member name as `key`. The rows are equal."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": null,
+            "key": "deps_hash",
+            "recorded": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "replayed": "sha256:d3626ac30a87e6f7a6428233b3c68299976865fa5508e4267c5415c76af7a772"
+          }
+        ]
+      }
+    },
+    {
+      "name": "every-determinism-member-differs-in-the-table-order",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5,
+                "accuracy": 0.93
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:9d7a9f8a22e4d35d3efc80eafe7f0026713f6ad9ba4a3abd5c025e92036fd6eb",
+            "data_hash": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+            "deps_hash": null,
+            "code_sha": null,
+            "class": "provenance-only",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5,
+                "accuracy": 0.93
+              }
+            }
+          ]
+        },
+        "derivation": "9.2: the determinism-contract members come first, in the order of 7.1's table. The `null` on the replayed side of `deps_hash` and `code_sha` is the member's value, which 7.1 permits, not an absence; 7.3 is why that side is `provenance-only`."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": null,
+            "key": "config_hash",
+            "recorded": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "replayed": "sha256:9d7a9f8a22e4d35d3efc80eafe7f0026713f6ad9ba4a3abd5c025e92036fd6eb"
+          },
+          {
+            "cell": null,
+            "key": "data_hash",
+            "recorded": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "replayed": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+          },
+          {
+            "cell": null,
+            "key": "deps_hash",
+            "recorded": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "replayed": null
+          },
+          {
+            "cell": null,
+            "key": "code_sha",
+            "recorded": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "replayed": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "member-differences-are-reported-before-row-differences",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:9d7a9f8a22e4d35d3efc80eafe7f0026713f6ad9ba4a3abd5c025e92036fd6eb",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.25
+              }
+            }
+          ]
+        },
+        "derivation": "9.2's order: the determinism-contract members first, then the positions of the record's rows."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": null,
+            "key": "config_hash",
+            "recorded": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "replayed": "sha256:9d7a9f8a22e4d35d3efc80eafe7f0026713f6ad9ba4a3abd5c025e92036fd6eb"
+          },
+          {
+            "cell": "cell-a",
+            "key": "loss",
+            "recorded": 0.5,
+            "replayed": 0.25
+          }
+        ]
+      }
+    },
+    {
+      "name": "nan-matches-nan",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": {
+                  "nonfinite": "NaN"
+                }
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": {
+                  "nonfinite": "NaN"
+                }
+              }
+            }
+          ]
+        },
+        "derivation": "9.3: a non-finite value is compared by the value its wrapper names, so NaN compares equal to NaN for the purposes of a replay. IEEE 754 equality would report a difference between a run and that same run."
+      },
+      "expect": {
+        "matched": true,
+        "differences": []
+      }
+    },
+    {
+      "name": "nan-against-a-number-differs",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": {
+                  "nonfinite": "NaN"
+                }
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5
+              }
+            }
+          ]
+        },
+        "derivation": "9.3: a non-finite value and a finite number are two kinds, and two values of different kinds differ."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": "cell-a",
+            "key": "loss",
+            "recorded": {
+              "nonfinite": "NaN"
+            },
+            "replayed": 0.5
+          }
+        ]
+      }
+    },
+    {
+      "name": "infinity-matches-itself-and-differs-from-negative-infinity",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "up": {
+                  "nonfinite": "Infinity"
+                },
+                "down": {
+                  "nonfinite": "-Infinity"
+                }
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "up": {
+                  "nonfinite": "Infinity"
+                },
+                "down": {
+                  "nonfinite": "Infinity"
+                }
+              }
+            }
+          ]
+        },
+        "derivation": "9.3: Infinity equals Infinity, and Infinity and -Infinity differ."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": "cell-a",
+            "key": "down",
+            "recorded": {
+              "nonfinite": "-Infinity"
+            },
+            "replayed": {
+              "nonfinite": "Infinity"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "a-cell-only-the-record-holds-names-each-of-its-values",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5
+              }
+            },
+            {
+              "cell": "cell-b",
+              "values": {
+                "loss": 0.25,
+                "grad_norm": 1.5
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5
+              }
+            }
+          ]
+        },
+        "derivation": "9.2: a cell only one side holds appears as one difference per value it holds, so every unaccounted-for value is named; the `null` says the position is absent, since a row value is never null (8.2). The order is the record's rows and each row's `values`."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": "cell-b",
+            "key": "loss",
+            "recorded": 0.25,
+            "replayed": null
+          },
+          {
+            "cell": "cell-b",
+            "key": "grad_norm",
+            "recorded": 1.5,
+            "replayed": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "replay-only-positions-come-after-every-recorded-position",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5
+              }
+            },
+            {
+              "cell": "cell-b",
+              "values": {
+                "loss": 0.25
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5,
+                "extra": 1.5
+              }
+            },
+            {
+              "cell": "cell-b",
+              "values": {
+                "loss": 0.75
+              }
+            }
+          ]
+        },
+        "derivation": "9.2's order: every position of the record's rows first, then the positions only the re-execution holds. The two differences are in different cells, so an implementation that grouped a shared cell's replay-only values beside its recorded ones would emit this pair the other way round. |0.25 - 0.75| = 0.5 against a bound of max(1e-9 * 0.75, 1e-12) = 7.5e-10, so `cell-b`'s `loss` differs."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": "cell-b",
+            "key": "loss",
+            "recorded": 0.25,
+            "replayed": 0.75
+          },
+          {
+            "cell": "cell-a",
+            "key": "extra",
+            "recorded": null,
+            "replayed": 1.5
+          }
+        ]
+      }
+    },
+    {
+      "name": "a-cell-only-the-replay-holds-is-reported-after-the-records-positions",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5
+              }
+            },
+            {
+              "cell": "cell-c",
+              "values": {
+                "loss": 0.75
+              }
+            }
+          ]
+        },
+        "derivation": "9.2: positions only the re-execution holds come after the record's, in the order its own rows give them."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": "cell-c",
+            "key": "loss",
+            "recorded": null,
+            "replayed": 0.75
+          }
+        ]
+      }
+    },
+    {
+      "name": "an-empty-cell-on-one-side-only-is-a-difference-with-both-values-null",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5
+              }
+            },
+            {
+              "cell": "cell-empty",
+              "values": {}
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5
+              }
+            }
+          ]
+        },
+        "derivation": "9.2: 8.2 permits an empty `values`, so such a cell has no (cell, key) position and MUST still be reported: one difference naming the cell with `key`, `recorded` and `replayed` all null. A difference with both values null is exactly this case."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": "cell-empty",
+            "key": null,
+            "recorded": null,
+            "replayed": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "a-value-only-the-record-holds-in-a-shared-cell",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5,
+                "accuracy": 0.93
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.5
+              }
+            }
+          ]
+        },
+        "derivation": "9.2: a position only one side holds carries that side's value with null on the other, whether or not the cell itself is shared."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": "cell-a",
+            "key": "accuracy",
+            "recorded": 0.93,
+            "replayed": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "floats-within-the-tolerance-match",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 1.0
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 1.0000000005
+              }
+            }
+          ]
+        },
+        "derivation": "9.3: |1.0 - 1.0000000005| is 5.000000413701855e-10 in binary64, and the bound is max(1e-9 * 1.0000000005, 1e-12) = 1.0000000005e-9, so the values are equal. This is the reassociation 7.2 says a second machine may introduce."
+      },
+      "expect": {
+        "matched": true,
+        "differences": []
+      }
+    },
+    {
+      "name": "floats-outside-the-tolerance-differ",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 1.0
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 1.000001
+              }
+            }
+          ]
+        },
+        "derivation": "9.3: |1.0 - 1.000001| is about 1e-6 and the bound is about 1e-9, so the values differ. A change in the sixth significant figure is a moved value, not noise."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": "cell-a",
+            "key": "loss",
+            "recorded": 1.0,
+            "replayed": 1.000001
+          }
+        ]
+      }
+    },
+    {
+      "name": "a-near-zero-difference-is-inside-the-absolute-tolerance",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.0
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 1e-13
+              }
+            }
+          ]
+        },
+        "derivation": "9.3: the relative part gives 1e-9 * 1e-13 = 1e-22, which no non-zero difference could pass, so the absolute part decides: 1e-13 <= 1e-12, and the values are equal. This is why the tolerance has an absolute part at all."
+      },
+      "expect": {
+        "matched": true,
+        "differences": []
+      }
+    },
+    {
+      "name": "a-near-zero-difference-outside-the-absolute-tolerance-differs",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 0.0
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "loss": 1e-11
+              }
+            }
+          ]
+        },
+        "derivation": "9.3: max(1e-9 * 1e-11, 1e-12) = 1e-12, and 1e-11 > 1e-12, so the values differ. The absolute part is a floor, not an amnesty."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": "cell-a",
+            "key": "loss",
+            "recorded": 0.0,
+            "replayed": 1e-11
+          }
+        ]
+      }
+    },
+    {
+      "name": "a-number-and-a-string-at-one-position-differ",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "score": 0.5
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "score": "0.5"
+              }
+            }
+          ]
+        },
+        "derivation": "9.3: values are compared by kind first, so the string \"0.5\" and the number 0.5 are a difference however alike they look."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": "cell-a",
+            "key": "score",
+            "recorded": 0.5,
+            "replayed": "0.5"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a-string-value-is-compared-exactly",
+      "input": {
+        "recorded": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "note": "converged",
+                "tag": "a"
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "provenance": {
+            "run_id": "run-0001",
+            "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "data_hash": "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+            "deps_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "code_sha": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+            "class": "deterministic",
+            "environment": {
+              "platform": "macOS-15.6-arm64",
+              "python": "3.12.7",
+              "frameworks": {
+                "numpy": "2.1.3",
+                "torch": null
+              },
+              "accelerator": null
+            }
+          },
+          "rows": [
+            {
+              "cell": "cell-a",
+              "values": {
+                "note": "converged",
+                "tag": "A"
+              }
+            }
+          ]
+        },
+        "derivation": "9.3: two strings are equal only if they are the same sequence of code points; nothing is normalised, trimmed or case-folded. `note` is identical and so is not a difference."
+      },
+      "expect": {
+        "matched": false,
+        "differences": [
+          {
+            "cell": "cell-a",
+            "key": "tag",
+            "recorded": "a",
+            "replayed": "A"
+          }
+        ]
+      }
+    }
+  ]
+}
