@@ -15,8 +15,10 @@ needs SQL transactions and constraints (CLAUDE.md rule 6):
   SQLAlchemy executors. Neither this module nor ``ports`` imports a driver.
 * ``schema.sql`` (also ``_sql.DDL``) is the table.
 
-Completing and releasing a record, and the middleware that would call all
-three, are not here yet: this is not an idempotency middleware you can mount.
+``store.IdempotencyStore`` also completes and releases a record, and
+``store.idempotent_record`` wraps all three around a block. The FastAPI route
+integration is ``hephkit.idempotency.fastapi.idempotent_route``; the worker
+decorator is not here yet.
 
 The fingerprint is deliberately built from the kit's existing primitives:
 ``hephkit.hashing.content_hash`` canonicalises with RFC 8785 and hashes in one
