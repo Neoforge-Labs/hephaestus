@@ -556,7 +556,11 @@ git commit -m "feat(lab): crash-safe run records and the experiment registry"
 - Consumes: `lab.record.RunRecord`, `read_record`.
 - Produces: `class Difference(BaseModel)` with `cell`, `key`, `recorded`, `replayed`; `class DiffReport(BaseModel)` with `matched: bool`, `differences: list[Difference]`; `replay(record: Path, *, experiment: str) -> DiffReport`; `ReplayError(RuntimeError)` with `.code == "HEPH-LAB-409"`.
 
-- [ ] **Step 1: Write spec §8 and §9, and bump the spec to 0.5.0**
+- [ ] **Step 0a: Add a reserved §10 (Ruling 21)**
+
+§7.1 forward-references §10 for the digest scope of `data_hash`, and §10 belongs to a later wave with `lab.data` — so without this the shipped spec points at a section that does not exist. Add a short reserved §10 ("Dataset manifests"), stating that the section is not yet specified and that the digest scope of `data_hash` (§7.1) is settled there. This mirrors how §7 itself was carried as a draft before this wave, so it is consistent with repo practice rather than a new device.
+
+- [ ] **Step 1: Write spec §8 and §9**
 
 §8: record structure, incremental write semantics, and that an unwritable record is a failed run. §9: what a replay compares (the normative hashes of §7, never `environment`), what a difference report contains, that float comparison uses a stated tolerance, and that NaN compares equal to NaN for replay purposes.
 
