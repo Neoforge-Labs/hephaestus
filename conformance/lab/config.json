@@ -1,8 +1,8 @@
 {
   "suite": "lab.config",
   "spec": "0.5.0",
-  "description": "Layered experiment-config resolution (design 8.1: defaults, file, environment, CLI, in that order) and the config hash, which is a content hash (spec 4.2) over the resolved config's canonical JSON (spec 4.1). `model` describes the config shape: a member whose value is a string names a scalar type, and a member whose value is an object is a nested config. Env members are read only under the `HEPH_` prefix, with `__` separating nesting levels; CLI options are `--<dotted.path>=<value>`. A scalar from the env or the CLI is read as JSON when it parses as JSON and as a string otherwise. `expect.field` is the dotted path of the member the refusal names.",
-  "source": "Hand-derived. The precedence cases are the merge stated by design 8.1 applied to the layers each case supplies; no value in them is computed. The five `expect.hash` cases quote `conformance/hashing/content.json` verbatim: the resolved config of each one canonicalises (spec 4.1) to a document already pinned there, so the digest is taken from that independently sourced vector and not from this kit. empty-config <- `empty-object` ({}); two-integer-members and declaration-order-does-not-change-the-hash <- `key-order-does-not-change-hash` ({\"a\":2,\"b\":1}); non-ascii-string-member <- `non-ascii-string-hashed-as-utf8`; nested-object <- `spec-2.2-fingerprint-example`, whose digest spec 2.2 also states in prose.",
+  "description": "Layered experiment-config resolution (design 8.1: defaults, file, environment, CLI, in that order) and the config hash, which is a content hash (spec 4.2) over the resolved config's canonical JSON (spec 4.1). `model` describes the config shape: a member whose value is a string names a scalar type, and a member whose value is an object is a nested config. Env members are read only under the `HEPH_` prefix, with `__` separating nesting levels; CLI options are `--<dotted.path>=<value>`. A scalar from the env or the CLI is read as JSON when it parses as JSON and as a string otherwise. `missing_file` names a file layer whose path does not exist, as against `file`, which supplies one. `expect.field` is the dotted path of the member the refusal names.",
+  "source": "Hand-derived. The precedence cases are the merge stated by design 8.1 applied to the layers each case supplies; no value in them is computed. The five `expect.hash` cases quote `conformance/hashing/content.json` verbatim: the resolved config of each one canonicalises (spec 4.1) to a document already pinned there, so the digest is taken from that independently sourced vector and not from this kit. empty-config <- `empty-object` ({}); two-integer-members and declaration-order-does-not-change-the-hash <- `key-order-does-not-change-hash` ({\"a\":2,\"b\":1}); non-ascii-string-member <- `non-ascii-string-hashed-as-utf8`; nested-object <- `spec-2.2-fingerprint-example`, whose digest spec 2.2 also states in prose. missing-config-file-is-refused comes from `spec/errors.yaml`, whose HEPH-LAB-422 guidance states that \"a config file that is absent rather than wrong is HEPH-LAB-424\", and from HEPH-LAB-424's own entry, \"Required record, manifest or frozen input is missing\".",
   "cases": [
     {
       "name": "defaults-only",
@@ -184,6 +184,17 @@
       "expect": {
         "error": "HEPH-LAB-422",
         "field": "optim.lr"
+      }
+    },
+    {
+      "name": "missing-config-file-is-refused",
+      "input": {
+        "model": {"seed": "int", "name": "str"},
+        "defaults": {"seed": 1, "name": "base"},
+        "missing_file": true
+      },
+      "expect": {
+        "error": "HEPH-LAB-424"
       }
     },
     {

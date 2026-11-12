@@ -25,9 +25,18 @@ Conventions this module fixes, because the spec does not:
   they parse as JSON and as the raw string otherwise, so ``--seed=7`` is the
   integer 7 and ``--name=resnet`` is the string ``"resnet"``. Pydantic does the
   rest of the coercion.
-* **The file layer** is one JSON object. A ``file`` that does not exist is not
-  this module's error to invent: :class:`OSError` propagates. The registry
-  reserves ``HEPH-LAB-424`` for an absent required artefact.
+* **The file layer** is one JSON **object**, and JSON only. YAML is what a
+  researcher reaches for, and it is deliberately absent: PyYAML in
+  ``[project].dependencies`` would breach the two-dependency spine of ADR 0023,
+  which ``test_spine_declares_no_heavy_dependencies`` enforces. Do not "add
+  YAML support" here -- it belongs behind an extra, or in the task that owns
+  config files on disk.
+* **An absent config file is ``HEPH-LAB-424``**, not ``422``: 422's guidance in
+  ``spec/errors.yaml`` says in as many words that "a config file that is absent
+  rather than wrong is HEPH-LAB-424". :class:`MissingConfigError` carries it and
+  subclasses :class:`ConfigError`, so one ``except ConfigError`` still catches
+  every refusal this module makes and ``.code`` is what tells them apart. A
+  malformed file, or one holding something other than an object, stays ``422``.
 
 Maturity: experimental.
 """
@@ -49,12 +58,18 @@ __all__ = [
     "ENV_PREFIX",
     "ConfigError",
     "ExperimentConfig",
+    "MissingConfigError",
     "config_hash",
     "resolve",
 ]
 
-#: The registry code every refusal in this module carries (`spec/errors.yaml`).
+#: The registry code a config that is wrong carries (`spec/errors.yaml`).
 CODE = "HEPH-LAB-422"
+
+#: The registry code a config file that is absent carries, which 422's own
+#: guidance names: "a config file that is absent rather than wrong is
+#: HEPH-LAB-424".
+MISSING_CODE = "HEPH-LAB-424"
 
 #: Environment members outside this prefix are not config values.
 ENV_PREFIX = "HEPH_"
@@ -80,6 +95,17 @@ class ConfigError(ValueError):
         super().__init__(message)
         self.field = field
         self.layer = layer
+
+
+class MissingConfigError(ConfigError):
+    """A config layer's file is not there at all (``HEPH-LAB-424``).
+
+    A subclass of :class:`ConfigError` so one ``except`` clause covers every
+    refusal of this module, with ``.code`` distinguishing the absent file from
+    the malformed one.
+    """
+
+    code = MISSING_CODE
 
 
 class ExperimentConfig(BaseModel):
@@ -228,6 +254,11 @@ def _env_values(env: Mapping[str, str], prefix: str) -> dict[tuple[str, ...], An
 
 
 def _read_file(file: Path) -> Mapping[str, Any]:
+    if not file.is_file():
+        raise MissingConfigError(
+            f"the config file {file} does not exist; produce it, or pass no file layer",
+            layer="file",
+        )
     try:
         document = json.loads(file.read_text(encoding="utf-8"))
     except ValueError as exc:

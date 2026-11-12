@@ -51,6 +51,9 @@ def run_config(case: Case, tmp_path: Path) -> None:
     if "file" in i:
         path = tmp_path / "config.json"
         path.write_text(json.dumps(i["file"]), encoding="utf-8")
+    elif i.get("missing_file"):
+        # A path that does not exist: the file layer is absent rather than wrong.
+        path = tmp_path / "absent.json"
 
     def compute() -> ExperimentConfig:
         return resolve(

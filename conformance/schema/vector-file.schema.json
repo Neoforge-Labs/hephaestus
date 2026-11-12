@@ -1091,6 +1091,9 @@
                     "file": {
                       "type": "object"
                     },
+                    "missing_file": {
+                      "const": true
+                    },
                     "env": {
                       "type": "object",
                       "additionalProperties": {
@@ -1103,6 +1106,12 @@
                         "type": "string"
                       }
                     }
+                  },
+                  "not": {
+                    "required": [
+                      "file",
+                      "missing_file"
+                    ]
                   }
                 },
                 "expect": {

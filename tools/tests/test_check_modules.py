@@ -331,16 +331,23 @@ def test_removing_the_label_from_a_real_module_fails_the_check(tmp_path, home, n
     ignore = shutil.ignore_patterns("target", ".venv", "__pycache__", "node_modules", "*.so", "*.dylib")
     for d in ("spec", "core", "go", "docker", "compose"):
         shutil.copytree(REPO_ROOT / d, tmp_path / d, ignore=ignore)
-    shutil.copytree(
-        REPO_ROOT / "python" / "hephkit" / "src",
-        tmp_path / "python" / "hephkit" / "src",
-        ignore=ignore,
-    )
+    # Both python trees: check_modules scans each, and a `shipped` row whose
+    # tree is missing from the copy makes the scratch repository invalid before
+    # a single label has been stripped.
+    for tree in ("hephkit", "hephkit-lab"):
+        shutil.copytree(
+            REPO_ROOT / "python" / tree / "src",
+            tmp_path / "python" / tree / "src",
+            ignore=ignore,
+        )
     assert check_modules(tmp_path) == []  # the copy starts valid
 
     if home == "python":
-        base = tmp_path / "python" / "hephkit" / "src" / "hephkit"
-        files = [base / f"{name}.py", base / name / "__init__.py"]
+        # A dotted name such as `lab.config` lives in the hephkit-lab tree.
+        tree = "hephkit-lab" if "." in name else "hephkit"
+        base = tmp_path / "python" / tree / "src" / "hephkit"
+        stem = name.replace(".", "/")
+        files = [base / f"{stem}.py", base / stem / "__init__.py"]
     elif home == "rust":
         files = sorted((tmp_path / "core" / name / "src").rglob("*.rs"))
     else:

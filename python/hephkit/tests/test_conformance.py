@@ -324,13 +324,13 @@ def _write_vector(root: Path, rel: str, suite: str) -> None:
 
 
 def test_lab_suites_are_not_required_to_have_a_hephkit_runner(tmp_path: Path) -> None:
-    _write_vector(tmp_path, "lab/config.json", "lab.config.resolve")
+    _write_vector(tmp_path, "lab/config.json", "lab.config")
     assert runnerless_vector_files(tmp_path) == {}
 
 
 def test_runnerless_file_outside_lab_still_fails(tmp_path: Path) -> None:
     # The lab exemption must not weaken the check for any other area.
-    _write_vector(tmp_path, "lab/config.json", "lab.config.resolve")
+    _write_vector(tmp_path, "lab/config.json", "lab.config")
     _write_vector(tmp_path, "money/newthing.json", "money.newthing")
     assert runnerless_vector_files(tmp_path) == {"money/newthing.json": "money.newthing"}
 

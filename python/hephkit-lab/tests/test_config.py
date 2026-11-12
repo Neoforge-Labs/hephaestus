@@ -20,6 +20,7 @@ from hephkit.lab.config import (
     ENV_PREFIX,
     ConfigError,
     ExperimentConfig,
+    MissingConfigError,
     config_hash,
     resolve,
 )
@@ -321,3 +322,30 @@ def test_a_wrong_type_names_the_layer_that_set_it(tmp_path: Path) -> None:
     with pytest.raises(ConfigError) as cli:
         resolve(Train, defaults=DEFAULTS, argv=["--seed=abc"])
     assert (cli.value.field, cli.value.layer) == ("seed", "cli")
+
+
+def test_a_config_file_that_does_not_exist_is_heph_lab_424(tmp_path: Path) -> None:
+    """`spec/errors.yaml` settles this: HEPH-LAB-422's guidance says "a config
+    file that is absent rather than wrong is HEPH-LAB-424"."""
+    path = tmp_path / "absent.json"
+    with pytest.raises(MissingConfigError) as exc:
+        resolve(Train, defaults=DEFAULTS, file=path)
+    assert exc.value.code == "HEPH-LAB-424"
+    assert exc.value.layer == "file"
+    assert "absent.json" in str(exc.value)
+
+
+def test_a_missing_config_file_is_still_caught_as_a_config_error(tmp_path: Path) -> None:
+    """One `except ConfigError` catches every refusal of this module; `.code`
+    is what distinguishes the absent file from the malformed one."""
+    assert issubclass(MissingConfigError, ConfigError)
+    with pytest.raises(ConfigError) as exc:
+        resolve(Train, defaults=DEFAULTS, file=tmp_path / "absent.json")
+    assert exc.value.code == "HEPH-LAB-424"
+    assert ConfigError.code == "HEPH-LAB-422"
+
+
+def test_a_directory_in_place_of_a_config_file_is_also_424(tmp_path: Path) -> None:
+    with pytest.raises(MissingConfigError) as exc:
+        resolve(Train, defaults=DEFAULTS, file=tmp_path)
+    assert exc.value.code == "HEPH-LAB-424"
