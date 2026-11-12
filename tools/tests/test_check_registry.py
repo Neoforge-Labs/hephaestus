@@ -47,8 +47,12 @@ def _load(path: Path) -> list[dict]:
 def test_registry_codes_valid() -> None:
     assert check_registry(ERRORS, ATTRIBUTES) == []
     entries = _load(ERRORS)
-    assert len(entries) == 12
-    assert {e["code"] for e in entries} == set(V01_CODES)
+    # The v0.1 codes are a floor, as V01_ATTRIBUTES is below: a code may be
+    # added (HEPH-DB-503 was, for an exhausted connection pool), and none of
+    # these may be dropped or renumbered, because every one of them is a promise
+    # to a caller already reading them.
+    assert len(entries) == 13
+    assert set(V01_CODES) <= {e["code"] for e in entries}
     assert {e["code"]: e["area"] for e in entries}["HEPH-NF-404"] == "NF"
     assert all(e["title"] and e["detail_hint"] for e in entries)
 
