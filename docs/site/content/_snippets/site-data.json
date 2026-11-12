@@ -95,6 +95,11 @@
       "maturity": "experimental"
     },
     {
+      "name": "lab.repro",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
       "name": "money",
       "home": "python",
       "maturity": "experimental"
@@ -130,11 +135,6 @@
       "name": "auth",
       "home": "python",
       "phase": 2
-    },
-    {
-      "name": "lab.repro",
-      "home": "python",
-      "phase": 3
     },
     {
       "name": "billing",

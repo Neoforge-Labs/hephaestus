@@ -5,6 +5,10 @@ Vector files are discovered by globbing `conformance/lab/*.json`. A file whose
 must not be silently untested. This mirrors
 `python/hephkit/tests/test_conformance.py`, which owns every other area and
 exempts `lab/` because it must keep zero runtime dependencies.
+
+The `lab.record` runner borrows `test_repro.py`'s git fixture helpers rather
+than growing a second copy of them: the vectors and the unit tests must agree
+on what "a clean tree" is, and two builders would eventually disagree.
 """
 
 from __future__ import annotations
@@ -14,15 +18,22 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+import env_rules
 import pytest
-from pydantic import create_model
+import test_repro
+from pydantic import ValidationError, create_model
 
 from hephkit.lab.config import ConfigError, ExperimentConfig, config_hash, resolve
+from hephkit.lab.repro import Accelerator, ProvenanceRecord, capture
 
 ROOT = Path(__file__).resolve().parents[3] / "conformance"
 LAB = ROOT / "lab"
 
 Case = dict[str, Any]
+
+#: What a `lab.record` case writes for "the commit HEAD resolves to", which no
+#: vector file can hold, since the fixture repository is built per run.
+HEAD_SENTINEL = "<head>"
 
 #: The scalar type names a `lab.config` vector's `model` may use.
 SCALARS: dict[str, type] = {"int": int, "float": float, "str": str, "bool": bool}
@@ -79,8 +90,105 @@ def run_config(case: Case, tmp_path: Path) -> None:
         assert config_hash(cfg) == expect["hash"]
 
 
+def build_repo(spec: Mapping[str, Any], tmp_path: Path) -> Path:
+    """Build the repository fixture a `lab.record` case describes.
+
+    git is what puts the fixture into each state and what confirms it reached
+    it, so the `<head>` the case expects comes from `git rev-parse HEAD` rather
+    than from the code under test.
+    """
+    tree = test_repro.a_tree(tmp_path, lockfile=spec["lockfile"])
+    state = spec["git"]
+    if state == "absent":
+        return tree
+    test_repro.git(tree, "init", "-b", "main")
+    if state == "no-commits":
+        assert test_repro.head(tree) is None, "the fixture is meant to hold no commit"
+        return tree
+    test_repro.git(tree, "add", "-A")
+    test_repro.git(tree, "commit", "-m", "first")
+    commit = test_repro.head(tree)
+    assert commit is not None, "the fixture is meant to hold a commit"
+    if state == "detached":
+        test_repro.git(tree, "checkout", "--detach", commit)
+        assert "HEAD detached" in test_repro.git(tree, "status")
+    tree_state = spec.get("tree", "clean")
+    if tree_state == "modified":
+        (tree / "train.py").write_text("print('changed')\n", encoding="utf-8")
+    elif tree_state == "untracked":
+        (tree / "scratch.py").write_text("x = 1\n", encoding="utf-8")
+    elif tree_state == "ignored-untracked":
+        (tree / "ignored" / "checkpoint.bin").write_bytes(b"\x00")
+    dirty = test_repro.git(tree, "status", "--porcelain") != ""
+    assert dirty == (tree_state in {"modified", "untracked"}), (
+        f"the {tree_state!r} fixture did not reach the tree state it claims"
+    )
+    return tree
+
+
+def run_capture(case: Case, tmp_path: Path) -> None:
+    i = case["input"]["capture"]
+    repo = build_repo(i["repo"], tmp_path)
+    kwargs: dict[str, Any] = {}
+    if "frameworks" in i:
+        kwargs["frameworks"] = tuple(i["frameworks"])
+    if "accelerator" in i:
+        answer = i["accelerator"]
+        probe = None if answer is None else Accelerator.model_validate(answer)
+        kwargs["accelerator_probe"] = lambda: probe
+    document = capture(
+        run_id=i["run_id"],
+        config_hash=i["config_hash"],
+        data_hash=i["data_hash"],
+        repo=repo,
+        **kwargs,
+    ).as_document()
+
+    expect = case["expect"]["captured"]
+    for member in ("run_id", "config_hash", "data_hash", "deps_hash", "class"):
+        if member in expect:
+            assert document[member] == expect[member], member
+    if expect["code_sha"] == HEAD_SENTINEL:
+        head = test_repro.head(repo)
+        assert head is not None
+        assert document["code_sha"] == head
+    else:
+        assert document["code_sha"] is None
+    environment = document["environment"]
+    if "frameworks" in expect:
+        assert environment["frameworks"] == expect["frameworks"]
+    if "accelerator" in expect:
+        assert environment["accelerator"] == expect["accelerator"]
+    if "environment_members" in expect:
+        assert list(environment) == expect["environment_members"]
+    for fact in expect.get("environment_excludes", ()):
+        assert env_rules.CHECKS[fact](environment) == [], fact
+
+
+def run_record(case: Case, _tmp_path: Path) -> None:
+    document = case["input"]["record"]
+    expect = case["expect"]
+    if "invalid" in expect:
+        with pytest.raises(ValidationError):
+            ProvenanceRecord.model_validate(document)
+        return
+    record = ProvenanceRecord.model_validate(document)
+    serialised = record.as_document()
+    assert serialised == expect["serialised"]
+    assert list(serialised) == list(expect["serialised"]), "member order"
+
+
+def run_record_case(case: Case, tmp_path: Path) -> None:
+    """One `lab.record` case: a capture, or a record document."""
+    if "capture" in case["input"]:
+        run_capture(case, tmp_path)
+    else:
+        run_record(case, tmp_path)
+
+
 RUNNERS: dict[str, Callable[[Case, Path], None]] = {
     "lab.config": run_config,
+    "lab.record": run_record_case,
 }
 
 

@@ -118,3 +118,17 @@ python_version = "3.12"
 # so running mypy from the repository root cannot break it.
 mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
 explicit_package_bases = true
+
+# `lab.repro` imports NumPy and PyTorch inside its seeding functions, behind
+# `except ImportError` (ADR 0023 keeps both out of the spine, so neither is
+# installed in this environment and neither may be a module-scope import).
+# Without this, `mypy --strict` fails on the two guarded imports for want of
+# stubs. An inline `# type: ignore[import-not-found]` would be worse: with
+# `--strict`, the ignore becomes an unused-ignore error in any environment where
+# the ml extra IS installed, so the typecheck would pass or fail depending on
+# what the developer happened to have.
+[[tool.mypy.overrides]]
+# A bare name and a dotted pattern are separate matches in mypy, so each
+# library needs both.
+module = ["numpy", "numpy.*", "torch", "torch.*"]
+ignore_missing_imports = true
