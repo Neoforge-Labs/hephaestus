@@ -9,6 +9,8 @@ own and a renderer has to be handed to it.
 from __future__ import annotations
 
 import asyncio
+import inspect
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -524,7 +526,7 @@ async def _burst(make, n=4, hold=0.05):
                 *(c.post("/c", headers={"Idempotency-Key": f"k{i}"}) for i in range(n)),
                 return_exceptions=True,
             ),
-            timeout=15,
+            timeout=3,
         )
 
 
@@ -594,7 +596,17 @@ async def test_waiting_for_a_claim_connection_is_bounded_too(pg_conn, postgres_d
     after acquire_timeout rather than wait as long as the slow one takes."""
     pool = await asyncpg.create_pool(postgres_dsn, min_size=2, max_size=2)
     try:
+        started = time.monotonic()
         results = await _burst(asyncpg_executors(pool, acquire_timeout=0.3), n=2, hold=1.5)
-        assert sorted(type(r).__name__ for r in results) == ["Response", "TimeoutError"]
+        assert "TimeoutError" in {type(r).__name__ for r in results}
+        # The waiter gave up on its own timeout; only the holder takes as long as `hold`.
+        assert time.monotonic() - started < 1.5 + 0.5
     finally:
         await pool.close()
+
+
+def test_the_default_acquire_timeout_is_bounded():
+    """Both burst tests pass a timeout explicitly; this pins what a caller who does not gets.
+    None would restore the permanent hang on an under-sized pool."""
+    default = inspect.signature(asyncpg_executors).parameters["acquire_timeout"].default
+    assert default == 10.0

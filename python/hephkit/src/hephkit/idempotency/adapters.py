@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
     import asyncpg
+    from starlette.requests import Request
     from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from hephkit.idempotency.ports import Executor, Executors
@@ -120,7 +121,12 @@ def _expose(request: Any, conn: object) -> object:
 
 def _unexpose(request: Any, previous: object) -> None:
     """Remove it (or restore an outer decorated callable's), so a late user cannot
-    reach a connection that has gone back to the pool and belongs to another request."""
+    reach a connection that has gone back to the pool and belongs to another request.
+
+    Save and restore is a stack discipline: correct for **nested** use only. Two
+    decorated callables running concurrently in one request (``asyncio.gather``)
+    can exit out of order and leave a released connection behind.
+    """
     if previous is None:
         delattr(request.state, _WORK_CONNECTION_STATE)
     else:
@@ -135,13 +141,20 @@ def _work_connection(request: Any, driver: str) -> Any:
             f"no work connection on this request. Either the route is not decorated with "
             f"idempotent_route, the request carried no Idempotency-Key on a route that does not "
             f"require one (the executors are never entered), the handler is running after the "
-            f"transaction ended (a BackgroundTask or a dependency's teardown), or the route's "
+            f"transaction ended (a BackgroundTask or a dependency's teardown), this was called "
+            f"from a Depends(...) (dependencies resolve before the handler, so before the "
+            f"connection exists; call it inside the handler body), or the route's "
             f"executors= is not {driver}_executors(...)"
         ) from None
 
 
-def asyncpg_work_connection(request: Any) -> asyncpg.Connection:
-    """The handler's own connection, with its transaction open (usable as ``Depends``).
+def asyncpg_work_connection(request: Request) -> asyncpg.Connection:
+    """The handler's own connection, with its transaction open.
+
+    **Call it inside the handler body, not as a ``Depends(...)``.** FastAPI
+    resolves every dependency before it calls the endpoint, which is before
+    ``idempotent_route`` enters ``executors``, so the connection does not exist
+    yet and a dependency would fail on every request.
 
     Valid **only while the handler runs**: it goes back to the pool when the
     route finishes, before ``response.background`` and before a ``yield``
@@ -151,9 +164,12 @@ def asyncpg_work_connection(request: Any) -> asyncpg.Connection:
     return _work_connection(request, "asyncpg")
 
 
-def sqlalchemy_work_connection(request: Any) -> AsyncConnection:
-    """The handler's own ``AsyncConnection``, with its transaction open (usable as
-    ``Depends``). Valid only while the handler runs; see :func:`asyncpg_work_connection`."""
+def sqlalchemy_work_connection(request: Request) -> AsyncConnection:
+    """The handler's own ``AsyncConnection``, with its transaction open.
+
+    Call it inside the handler body, never as a ``Depends(...)`` (dependencies
+    resolve before ``executors`` is entered). Valid only while the handler runs;
+    see :func:`asyncpg_work_connection`."""
     return _work_connection(request, "sqlalchemy")  # type: ignore[no-any-return]
 
 
@@ -180,6 +196,12 @@ def asyncpg_executors(
     error (``TimeoutError``) instead of a silent hang. Pass a separate
     ``claim_pool`` and the deadlock cannot happen: nothing holds a connection
     from one pool while waiting on that same pool.
+
+    ``acquire_timeout`` defaults to **10.0 seconds** and applies to each acquire.
+    It also bounds opening a new connection when the pool grows, so a slow
+    database now raises ``TimeoutError`` where an unbounded wait would have
+    succeeded eventually. ``None`` restores the unbounded wait, and with it the
+    permanent hang described above if the pool is under-sized.
     """
     claims = claim_pool if claim_pool is not None else pool
 

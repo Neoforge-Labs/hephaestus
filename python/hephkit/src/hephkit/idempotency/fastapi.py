@@ -36,8 +36,12 @@ pair by hand, so it cannot get the pair wrong.
 
 The shipped factories also leave the handler's own connection on
 ``request.state``; fetch it with ``asyncpg_work_connection(request)`` or
-``sqlalchemy_work_connection(request)`` (usable as ``Depends``), never by the
-key. It is valid only while the handler runs: it is removed when the route
+``sqlalchemy_work_connection(request)`` inside the handler body, never by the
+key. **It cannot be a ``Depends(...)``:** FastAPI resolves dependencies before it
+calls the endpoint, which is before this wrapper enters ``executors``, so the
+connection does not exist yet. It is valid only while the handler runs, and for
+nested use only (two decorated callables running concurrently in one request can
+leave a released connection behind): it is removed when the route
 finishes, before ``response.background`` and a ``yield`` dependency's teardown,
 because by then the connection belongs to another request. A route with
 ``required=False`` and no key never enters ``executors`` and has no connection.
@@ -211,7 +215,8 @@ def idempotent_route(
     build one correctly. The handler runs inside it, so ``work``'s transaction
     is open while the handler works. The factories expose it as
     ``asyncpg_work_connection(request)`` / ``sqlalchemy_work_connection(request)``
-    for the duration of the handler only (a route that ignores a malformed or
+    (called in the handler body, not via ``Depends``) for the duration of the
+    handler only (a route that ignores a malformed or
     absent key never enters ``executors``, so there is none then).
 
     **The handler must return a fully built ``Response``** (``JSONResponse``,
