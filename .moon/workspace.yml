@@ -9,6 +9,7 @@ projects:
   conformance: 'conformance'
   core: 'core'
   hephkit: 'python/hephkit'
+  hephkit-lab: 'python/hephkit-lab'
   spec: 'spec'
   docker: 'docker'
   compose: 'compose'

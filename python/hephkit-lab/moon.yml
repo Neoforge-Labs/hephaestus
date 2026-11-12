@@ -1,0 +1,36 @@
+language: 'python'
+layer: 'library'
+
+tasks:
+  test:
+    # No maturin step: there is no Rust in this distribution. `uv run` syncs the
+    # environment, which builds the editable `hephkit` portion from
+    # `../hephkit` -- that one does compile the PyO3 extension.
+    script: 'uv run pytest --cov=hephkit.lab --cov-fail-under=90'
+    inputs:
+      - 'src/**/*'
+      - 'tests/**/*'
+      - 'pyproject.toml'
+      - '/python/hephkit/src/**/*'
+      - '/python/hephkit/pyproject.toml'
+      - '/core/hephkit-core/**/*'
+      - '/core/hephkit-py/**/*'
+  test-fast:
+    # CI default, mirroring `hephkit:test-fast`: everything except the
+    # `slow`-marked tests. No lab test is slow yet; the deselection is here so
+    # the two task sets stay identical as the suite grows.
+    script: 'uv run pytest -m "not slow" --cov=hephkit.lab --cov-fail-under=90'
+    inputs:
+      - 'src/**/*'
+      - 'tests/**/*'
+      - 'pyproject.toml'
+      - '/python/hephkit/src/**/*'
+      - '/python/hephkit/pyproject.toml'
+      - '/core/hephkit-core/**/*'
+      - '/core/hephkit-py/**/*'
+  typecheck:
+    command: 'uv run mypy --strict src'
+    inputs:
+      - 'src/**/*'
+      - 'pyproject.toml'
+      - '/python/hephkit/src/**/*'

@@ -30,3 +30,5 @@ acceptance; a changed decision is superseded by a new record.
 - [0019. The public domain is hephkit.dev](/adrs/0019-the-public-domain-is-hephkit-dev)
 - [0020. Idempotency storage boundaries](/adrs/0020-idempotency-storage-boundaries)
 - [0021. hephkit is a namespace package](/adrs/0021-hephkit-is-a-namespace-package)
+- [0022. Research integrity is the spine of hephkit.lab](/adrs/0022-research-integrity-is-the-spine)
+- [0023. hephkit-lab ships separately and Ligase stays a leaf](/adrs/0023-hephkit-lab-ships-separately)
