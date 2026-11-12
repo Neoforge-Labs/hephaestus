@@ -751,16 +751,78 @@ def test_executors_roles_are_named():
     assert (ex.claim, ex.work) == ("a", "b")
 
 
-async def test_waiting_for_a_claim_connection_is_bounded_too(pg_conn, postgres_dsn):
-    """Not a deadlock but a bound: a pool held by a slow request makes the next one raise
-    after acquire_timeout rather than wait as long as the slow one takes."""
+async def _warm(pool) -> None:
+    """Exercise every pooled connection before a timed section.
+
+    `create_pool` opens `min_size` connections but does not make them do any
+    work, so the first statement on each can pay for a cold server: plan
+    construction, catalog reads, a cold page cache. That cost lands inside the
+    measurement and has nothing to do with what the test is asserting.
+    """
+    async with pool.acquire() as a, pool.acquire() as b:
+        await a.fetchval("SELECT 1")
+        await b.fetchval("SELECT 1")
+
+
+class _RecordingPool:
+    """A pool that records the ``timeout`` each acquire was given.
+
+    The wall-clock test below cannot tell which of the two acquires timed out:
+    with two requests against two connections, an interleaving where both take
+    a claim connection first makes the *work* acquire raise, and the claim
+    acquire is never exercised. That was verified by mutation — unbinding the
+    claim acquire leaves the wall-clock test green. So the bound on each
+    acquire is pinned here instead, where no interleaving can hide it.
+    """
+
+    def __init__(self, pool) -> None:
+        self._pool = pool
+        self.timeouts: list[float | None] = []
+
+    def acquire(self, **kw):
+        self.timeouts.append(kw.get("timeout"))
+        return self._pool.acquire(**kw)
+
+
+async def test_both_acquires_are_bounded(pg_conn, postgres_dsn):
+    """Every acquire carries the configured timeout — claim as well as work.
+
+    An unbounded claim acquire is the permanent hang this parameter exists to
+    prevent, and it is invisible to a timing assertion.
+    """
+    pool = await asyncpg.create_pool(postgres_dsn, min_size=1, max_size=2)
+    spy = _RecordingPool(pool)
+    try:
+        (ok,) = await _burst(asyncpg_executors(spy, acquire_timeout=7.5), n=1)
+        assert ok.status_code == 201
+        assert spy.timeouts == [7.5, 7.5], spy.timeouts
+    finally:
+        await pool.close()
+
+
+async def test_an_exhausted_pool_fails_fast_rather_than_waiting_out_the_holder(
+    pg_conn, postgres_dsn
+):
+    """A pool held by a slow request makes the next one raise rather than wait as long as
+    the slow one takes. Which acquire raises depends on interleaving — that both are
+    bounded is pinned by test_both_acquires_are_bounded."""
     pool = await asyncpg.create_pool(postgres_dsn, min_size=2, max_size=2)
     try:
+        # Both connections do a statement first, so a cold server is not timed.
+        await _warm(pool)
         started = time.monotonic()
         results = await _burst(asyncpg_executors(pool, acquire_timeout=0.3), n=2, hold=1.5)
         assert any(_is_pool_exhaustion(r) for r in results)
         # The waiter gave up on its own timeout; only the holder takes as long as `hold`.
-        assert time.monotonic() - started < 1.5 + 0.5
+        #
+        # The margin is deliberately loose. Each request needs two of the two
+        # connections, so without the claim timeout the waiter serialises behind
+        # the holder and the burst takes about 2 * hold = 3.0s. Anything under
+        # that discriminates; 1.0s of headroom over `hold` keeps a shared runner
+        # or a cold container from reddening a correct result, which a 0.5s
+        # margin did not. The assertion that carries the finding is the
+        # pool-exhaustion check above — this one only says it failed fast.
+        assert time.monotonic() - started < 1.5 + 1.0
     finally:
         await pool.close()
 
