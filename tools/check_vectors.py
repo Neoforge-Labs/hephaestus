@@ -48,7 +48,7 @@ MIN_CASES = {
     # Spec 7. The minimum covers the three conditions of 7.3 in combination,
     # both ways a code_sha goes null, the reserved environment members of 7.4
     # and the refusals a record document must meet.
-    "lab.record": 12,
+    "lab.provenance": 12,
     # Spec 9. The minimum covers what 9.1 compares and what it must not, the
     # report shapes of 9.2 including a position only one side holds, and 9.3's
     # kinds, non-finite wrapper and float tolerance on both sides of each bound.

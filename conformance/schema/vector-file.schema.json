@@ -26,7 +26,7 @@
         "idempotency.key",
         "idempotency.fingerprint",
         "lab.config",
-        "lab.record",
+        "lab.provenance",
         "lab.diff"
       ]
     },
@@ -1169,7 +1169,7 @@
       "if": {
         "properties": {
           "suite": {
-            "const": "lab.record"
+            "const": "lab.provenance"
           }
         },
         "required": [

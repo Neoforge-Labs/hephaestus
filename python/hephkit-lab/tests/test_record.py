@@ -3,7 +3,7 @@
 Design 9.3 gives this module **contract tests** rather than JSON vectors,
 because its behaviour is about effects on the world: no input/output pair can
 express "the completed rows survive a kill -9". So there is no
-``conformance/lab/record.json`` case for anything here, and the burden moves
+``conformance/lab/provenance.json`` case for anything here, and the burden moves
 onto these tests to be the kind that can fail.
 
 Three habits make that checkable rather than claimed.

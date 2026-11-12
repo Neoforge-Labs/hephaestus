@@ -68,7 +68,7 @@ DATA_HASH = "sha256:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982
 OTHER_HASH = "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
 DEPS_HASH = "sha256:d3626ac30a87e6f7a6428233b3c68299976865fa5508e4267c5415c76af7a772"
 
-# Synthetic commit SHAs, 40 lowercase hex, as `conformance/lab/record.json` uses.
+# Synthetic commit SHAs, 40 lowercase hex, as `conformance/lab/provenance.json` uses.
 CODE_SHA = "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff"
 OTHER_SHA = "dec0dedec0dedec0dedec0dedec0dedec0dedec0"
 

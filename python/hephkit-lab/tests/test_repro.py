@@ -471,7 +471,7 @@ def test_an_accelerator_records_its_model_and_driver() -> None:
 
 
 def test_a_member_7_4_does_not_name_serialises_after_the_ones_it_does() -> None:
-    """The convention `conformance/lab/record.json` states, pinned here too.
+    """The convention `conformance/lab/provenance.json` states, pinned here too.
 
     7.4 permits further members and says nothing about their order, so this is
     a convention of this implementation rather than a clause of the spec.

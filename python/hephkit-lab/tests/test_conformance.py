@@ -6,7 +6,7 @@ must not be silently untested. This mirrors
 `python/hephkit/tests/test_conformance.py`, which owns every other area and
 exempts `lab/` because it must keep zero runtime dependencies.
 
-The `lab.record` runner borrows `test_repro.py`'s git fixture helpers rather
+The `lab.provenance` runner borrows `test_repro.py`'s git fixture helpers rather
 than growing a second copy of them: the vectors and the unit tests must agree
 on what "a clean tree" is, and two builders would eventually disagree.
 """
@@ -33,7 +33,7 @@ LAB = ROOT / "lab"
 
 Case = dict[str, Any]
 
-#: What a `lab.record` case writes for "the commit HEAD resolves to", which no
+#: What a `lab.provenance` case writes for "the commit HEAD resolves to", which no
 #: vector file can hold, since the fixture repository is built per run.
 HEAD_SENTINEL = "<head>"
 
@@ -93,7 +93,7 @@ def run_config(case: Case, tmp_path: Path) -> None:
 
 
 def build_repo(spec: Mapping[str, Any], tmp_path: Path) -> Path:
-    """Build the repository fixture a `lab.record` case describes.
+    """Build the repository fixture a `lab.provenance` case describes.
 
     git is what puts the fixture into each state and what confirms it reached
     it, so the `<head>` the case expects comes from `git rev-parse HEAD` rather
@@ -185,7 +185,7 @@ def assert_member_order(actual: Any, expected: Any, where: str = "<root>") -> No
 
     * It descends into **arrays of objects**, with the index in the path, so a
       later suite whose expectation holds a list of records cannot acquire a
-      case that silently cannot fail. No shape in `record.json` needs it today.
+      case that silently cannot fail. No shape in `provenance.json` needs it today.
     * A value of the wrong **kind** -- a scalar where an object was expected --
       **fails** rather than being skipped. `run_record` happens to be safe
       because its dict-equality assertion runs first, but shared machinery must
@@ -226,7 +226,7 @@ def run_record(case: Case, _tmp_path: Path) -> None:
 
 
 def run_record_case(case: Case, tmp_path: Path) -> None:
-    """One `lab.record` case: a capture, or a record document."""
+    """One `lab.provenance` case: a capture, or a record document."""
     if "capture" in case["input"]:
         run_capture(case, tmp_path)
     else:
@@ -273,7 +273,7 @@ def run_diff(case: Case, tmp_path: Path) -> None:
 
 RUNNERS: dict[str, Callable[[Case, Path], None]] = {
     "lab.config": run_config,
-    "lab.record": run_record_case,
+    "lab.provenance": run_record_case,
     "lab.diff": run_diff,
 }
 
@@ -322,7 +322,7 @@ def test_the_member_order_check_reaches_a_nested_object() -> None:
 def test_the_member_order_check_descends_into_an_array_of_objects() -> None:
     """Arrays are descended into, with the index in the path.
 
-    Nothing in `record.json` is shaped like this; `diff.json` is -- its
+    Nothing in `provenance.json` is shaped like this; `diff.json` is -- its
     `expect.differences` is an array of objects -- and a helper that skipped
     arrays would hand that suite a case that cannot fail.
     """

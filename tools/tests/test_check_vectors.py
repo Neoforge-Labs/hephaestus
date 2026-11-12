@@ -28,7 +28,7 @@ MINIMUM_CASES = {
     "idempotency.key": 12,
     "idempotency.fingerprint": 16,
     "lab.config": 10,
-    "lab.record": 12,
+    "lab.provenance": 12,
     "lab.diff": 8,
 }
 

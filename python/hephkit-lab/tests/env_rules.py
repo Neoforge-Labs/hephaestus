@@ -12,7 +12,7 @@ reserves four names and explicitly permits further ones, and a model that
 refused every member name resembling a path would be inventing a rule the spec
 does not state. So the MUST becomes checkable here, in the tests, and this
 module is the one place that says what checking it means. It is imported by
-``test_repro.py`` and by the ``lab.record`` runner in ``test_conformance.py``,
+``test_repro.py`` and by the ``lab.provenance`` runner in ``test_conformance.py``,
 whose vectors name a fact to exclude rather than restating the scan.
 
 Not a ``test_`` module, so pytest does not collect it.
