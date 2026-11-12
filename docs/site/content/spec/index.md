@@ -364,7 +364,7 @@ The differences are **ordered**, so that one replay reported twice reads the sam
 
 A report says which values moved and no more. An implementation MUST NOT put a conclusion in it — a ranking, a cause, a verdict on whether the run is flaky — because the report is read by someone deciding exactly that, and the values are what they need.
 
-9.3. Two values at a position are compared **by kind first**. A string, a finite number and a non-finite value (8.2) are three kinds, and two values of different kinds differ whatever they look like: the string `"1.0"` and the number `1.0` are a difference, and so are `NaN` and any number.
+9.3. Two values at a position are compared **by kind first**. A string, a finite number and a non-finite value (8.2) are three of the four kinds, and a `null` is the fourth; two values of different kinds differ whatever they look like, so the string `"1.0"` and the number `1.0` are a difference, and so are `NaN` and any number.
 
 A **`null`** is a fourth kind. It occurs only at a determinism-contract position, because 7.1 makes `deps_hash` and `code_sha` the two members that may be `null` and 8.2 never lets a row value be one. A `null` is equal to a `null` and to nothing else. Two records that both had no lockfile, or whose code no git commit names, therefore **do not differ** at that member: there is no value either side ever had, and reporting one would be reporting a difference between two absences. This is not an edge case — 7.3 makes those nulls exactly what a `provenance-only` run carries, so it is every replay of the ordinary case, and an implementation that read the three kinds above as exhaustive would call each one diverged at `deps_hash`.
 
