@@ -41,6 +41,10 @@ MIN_CASES = {
     # likely to "helpfully" get wrong.
     "idempotency.key": 12,
     "idempotency.fingerprint": 16,
+    # Design 8.1. The minimum covers each of the four layers alone, the full
+    # precedence chain, a nested override, the refusals, and the config hashes
+    # quoted from `hashing.content`.
+    "lab.config": 10,
 }
 
 

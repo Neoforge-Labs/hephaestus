@@ -25,9 +25,9 @@
         "signatures.verify",
         "idempotency.key",
         "idempotency.fingerprint",
-        "lab.config.resolve",
-        "lab.provenance.record",
-        "lab.provenance.diff"
+        "lab.config",
+        "lab.record",
+        "lab.diff"
       ]
     },
     "spec": {
@@ -1058,6 +1058,124 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "suite": {
+            "const": "lab.config"
+          }
+        },
+        "required": [
+          "suite"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "required": [
+                    "model"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "model": {
+                      "$ref": "#/$defs/labConfigModel"
+                    },
+                    "defaults": {
+                      "type": "object"
+                    },
+                    "file": {
+                      "type": "object"
+                    },
+                    "env": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "argv": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "expect": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "config"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "config": {
+                          "type": "object"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "hash"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "hash": {
+                          "type": "string",
+                          "pattern": "^sha256:[0-9a-f]{64}$"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "pattern": "^HEPH-[A-Z]{2,6}-[0-9]{3}$"
+                        },
+                        "field": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
     }
-  ]
+  ],
+  "$defs": {
+    "labConfigModel": {
+      "description": "A config shape: a string names a scalar type, an object is a nested config.",
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "enum": [
+              "int",
+              "float",
+              "str",
+              "bool"
+            ]
+          },
+          {
+            "$ref": "#/$defs/labConfigModel"
+          }
+        ]
+      }
+    }
+  }
 }
