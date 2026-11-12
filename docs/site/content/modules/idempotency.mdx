@@ -1,0 +1,285 @@
+---
+title: "Idempotency"
+---
+
+# Idempotency
+
+`hephkit.idempotency` is spec [section 2](/spec) in Python: the `Idempotency-Key`
+header, the request fingerprint, and the record that makes a retried payment
+charge once. A repeated key with the same payload replays the first response
+byte for byte; the same key with a different payload is
+[HEPH-IDEMP-422](/errors/HEPH-IDEMP-422); a duplicate that arrives while the
+original is still running is [HEPH-IDEMP-409](/errors/HEPH-IDEMP-409).
+
+Maturity: **`experimental`**. The API may change, and per
+[ADR 0015](/adrs/0015-maturity-levels) nothing below `stable` may sit in a
+production money path. The storage decisions behind it — why the transaction
+boundaries are split, and why one transaction cannot implement section 2 — are
+[ADR 0020](/adrs/0020-idempotency-storage-boundaries).
+
+It needs Postgres and one of the two driver extras:
+
+```bash
+uv add "hephkit[fastapi,postgres]"   # or hephkit[fastapi,sqlalchemy]
+```
+
+## The table
+
+The record lives in one table, `heph_idempotency`, whose correctness is in its
+constraints rather than in application code. hephkit ships that table's DDL as
+text and nothing else: `SCHEMA_SQL` is the packaged `schema.sql`, and it is
+idempotent (`CREATE TABLE IF NOT EXISTS`), so running it twice is safe.
+
+```python
+from hephkit.idempotency import SCHEMA_SQL
+
+async with pool.acquire() as conn:
+    await conn.execute(SCHEMA_SQL)
+```
+
+**There is no migration tooling in this repo, and this module does not invent
+one** ([ADR 0020](/adrs/0020-idempotency-storage-boundaries)): run the text at
+startup, as above, or paste the file into whatever your project already uses.
+There is no `create_schema()` function either, because the DDL is a
+multi-statement script while the executor port runs one parameterised statement
+at a time — so the schema is yours to run, on a connection of your own.
+
+## A route, end to end
+
+Every name below is exported by `hephkit.idempotency`, except the two framework
+integrations: `idempotent_route` is in `hephkit.idempotency.fastapi` and
+`idempotent` in `hephkit.idempotency.worker`, so that importing the module
+itself pulls in no web framework.
+
+```python
+# app.py
+from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+
+import asyncpg
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, Response
+
+from hephkit.errors.fastapi import install_error_handlers
+from hephkit.idempotency import (
+    SCHEMA_SQL,
+    Executors,
+    IdempotencyStore,
+    asyncpg_executors,
+    asyncpg_work_connection,
+)
+from hephkit.idempotency.fastapi import idempotent_route
+
+DSN = "postgresql://heph:heph@localhost:54320/heph"
+
+store = IdempotencyStore()  # 24 hour retention, 60 second lease (spec 2.7)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Two connections per in-flight idempotent request: see "Pool sizing".
+    app.state.pool = await asyncpg.create_pool(DSN, min_size=2, max_size=20)
+    async with app.state.pool.acquire() as conn:
+        await conn.execute(SCHEMA_SQL)
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS charges ("
+            "  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),"
+            "  amount_minor bigint NOT NULL,"
+            "  currency text NOT NULL)"
+        )
+    yield
+    await app.state.pool.close()
+
+
+app = FastAPI(lifespan=lifespan)
+install_error_handlers(app)  # renders HEPH-IDEMP-409 and -422 as problem+json
+
+
+def db_executors(request: Request) -> AbstractAsyncContextManager[Executors]:
+    """The claim and work executors for this request.
+
+    The route is decorated at import time, before the pool exists, so the pool
+    is resolved per request rather than captured in the decorator.
+    """
+    return asyncpg_executors(request.app.state.pool)(request)
+
+
+def tenant_of(request: Request) -> str:
+    """The scope a key belongs to (spec 2.3).
+
+    The authenticated principal's tenant, never a client-supplied header or
+    body field. The empty string is a real scope, for a single-tenant service.
+    """
+    return getattr(request.state, "tenant", "")
+
+
+@app.post("/charges")
+@idempotent_route(store, scope=tenant_of, executors=db_executors)
+async def create_charge(request: Request) -> Response:
+    body = await request.json()
+    conn = asyncpg_work_connection(request)  # in the handler body, not a Depends
+    row = await conn.fetchrow(
+        "INSERT INTO charges (amount_minor, currency) VALUES ($1, $2) RETURNING id",
+        int(body["amount"]),
+        body["currency"],
+    )
+    return JSONResponse({"id": str(row["id"]), **body}, status_code=201)
+```
+
+It needs the Postgres those credentials belong to: put `fragments =
+["postgres"]` in your `heph.toml` and run `heph dev up`, which publishes it on
+port 54320. Then serve the app:
+
+```bash
+uv run fastapi dev app.py --port 54080
+```
+
+and, in another shell, send the same request twice:
+
+```bash
+KEY='Idempotency-Key: 018f7c2e-7b7a-7f1a-9a1e-2f3b4c5d6e7f'
+BODY='{"amount": "1999", "currency": "USD"}'
+curl -si -X POST localhost:54080/charges -H "$KEY" -H 'Content-Type: application/json' -d "$BODY" | head -1
+curl -si -X POST localhost:54080/charges -H "$KEY" -H 'Content-Type: application/json' -d "$BODY" | head -3
+```
+
+The first call answers `201` and inserts one row. The second answers the same
+`201` with the same body and an extra header, and inserts nothing:
+
+```text
+HTTP/1.1 201 Created
+idempotent-replayed: true
+content-type: application/json
+```
+
+Reuse that key with a different body and the answer is `422` with a
+`HEPH-IDEMP-422` problem body, because one key means one payload for the whole
+retention window. `SELECT count(*) FROM charges` stays at 1 throughout.
+
+## Three things the example cannot show you
+
+**The handler must return a `Response`.** FastAPI applies `status_code` and
+serialises a `response_model` *after* the endpoint returns, so a decorator under
+the route never sees the bytes a plain `dict` or a pydantic model becomes — and
+a replay has to be byte-exact. Return `JSONResponse` or `Response`. A return
+annotation that resolves to anything else is refused when the route is
+decorated, and so is `StreamingResponse` or `FileResponse`, whose body cannot be
+captured at all. This is the constraint you will hit first.
+
+**The work connection cannot be a `Depends(...)`.** FastAPI resolves every
+dependency *before* it calls the endpoint, which is before the route wrapper
+opens the transaction, so a dependency would fail on every request. Call
+`asyncpg_work_connection(request)` (or `sqlalchemy_work_connection(request)`) in
+the handler body instead. It is valid only while the handler runs: the
+connection goes back to the pool when the route finishes, before
+`response.background` and before a `yield` dependency's teardown, and a late
+caller gets a `RuntimeError` rather than another request's connection.
+
+**Writes must go through that connection, not a fresh one.** It is the
+connection whose transaction holds the stored response, which is the whole
+guarantee: the response and the work it describes commit together, or neither
+does. A write on any other connection commits on its own and can outlive a
+rolled-back request.
+
+## Pool sizing
+
+Each in-flight idempotent request holds **two** connections — one to claim the
+key, one for the handler's transaction — and holds the first while waiting for
+the second. A single pool therefore needs **twice** the route's peak
+concurrency. At exactly `max_size` every request waits on another and none
+proceeds; the acquires are bounded (`acquire_timeout`, 10 seconds by default)
+so that this raises `TimeoutError` instead of hanging for good. Pass a separate
+`claim_pool` and the deadlock cannot happen at all:
+
+```python
+asyncpg_executors(work_pool, claim_pool=claim_pool, acquire_timeout=10.0)
+```
+
+The SQLAlchemy factory is the same shape: `sqlalchemy_executors(engine)`, whose
+engine pool needs twice the peak concurrency for the same reason.
+
+## Retention is yours to schedule
+
+Records expire 24 hours after creation by default, and
+`IdempotencyStore(retention=...)` may only lengthen that (spec 2.7). Nothing is
+deleted on its own: hephkit runs no background task. Call `purge_expired` from
+your own scheduler — a cron job, a periodic task — on a connection with no
+transaction open:
+
+```python
+from hephkit.idempotency import AsyncpgExecutor
+
+async with pool.acquire() as conn:  # no transaction open
+    removed = await store.purge_expired(AsyncpgExecutor(conn))
+```
+
+A record whose lease is still live is left alone however old it is, so the
+sweep can never pull the key out from under a running handler.
+
+## Events, keyed on an event id
+
+A broker that delivers at least once needs the same record with no HTTP request
+in sight. `idempotent` keys on the event id and fingerprints the event payload,
+so a redelivery of the same event is a no-op that returns `None`, and the same
+id carrying a different payload is `HEPH-IDEMP-422`.
+
+```python
+from typing import Any
+
+from hephkit.idempotency import AsyncpgExecutor, Executors
+from hephkit.idempotency.worker import idempotent
+
+POOL: asyncpg.Pool  # created once at worker startup, as the route example does
+
+
+@asynccontextmanager
+async def event_executors(event: dict[str, Any]) -> AsyncIterator[Executors]:
+    """The worker's own claim and work executors.
+
+    There is no shipped factory for this path: the route factories hand the work
+    connection to the handler through `request.state`, and an event has none, so
+    passing it on — a contextvar, an argument — is the application's to decide.
+    """
+    async with POOL.acquire() as claim_conn, POOL.acquire() as work_conn:
+        tx = work_conn.transaction()
+        await tx.start()
+        try:
+            yield Executors(AsyncpgExecutor(claim_conn), AsyncpgExecutor(work_conn))
+        except BaseException:
+            await tx.rollback()
+            raise
+        else:
+            await tx.commit()
+
+
+@idempotent(
+    store,
+    scope=lambda event: event["tenant"],
+    event_id=lambda event: event["id"],
+    executors=event_executors,
+)
+async def on_payment_settled(event: dict[str, Any]) -> None:
+    ...
+```
+
+A handler that raises releases the record, so the broker's redelivery runs it
+again — **including a `HephError` below 500**, which an HTTP route would have
+stored. A broker is not a client: a stored 422 would make the redelivery an ack
+for work that never happened, while a released record lets a poison event fail
+repeatedly into the broker's own dead-letter queue, where an operator sees it.
+[ADR 0020](/adrs/0020-idempotency-storage-boundaries) records why.
+
+## What is stored, and what is not
+
+Only the status, the body and the content type (spec 2.4). A replayed `201`
+carries no `Location` and no header your handler set, and a replayed
+problem+json body carries the first request's `trace_id`. Keys are opaque and
+are recorded as the `idempotency.key` telemetry attribute without redaction, so
+clients must not put personal data in one (spec 2.1). A route can opt out of
+requiring a key with `required=False`, which ignores a malformed key and runs
+the handler without touching the store.
+
+The pure half of section 2 is importable on its own, with no database in sight:
+`validate_key`, `fingerprint`, `fingerprint_document` and `is_json_media_type`
+are pure functions over a request, pinned by the shared conformance vectors in
+`conformance/idempotency/`.

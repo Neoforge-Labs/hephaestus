@@ -47,7 +47,7 @@ Five failure modes §2 implies that no task's obvious tests would reach. Each li
 | `python/hephkit/src/hephkit/idempotency/schema.sql` | The DDL as a file, for consumers with their own migration tool. |
 | `python/hephkit/src/hephkit/idempotency/ports.py` | The `Executor` Protocol and the outcome types. No driver import. |
 | `python/hephkit/src/hephkit/idempotency/adapters.py` | `AsyncpgExecutor`, `SQLAlchemyExecutor`. The only file that imports a driver. |
-| `python/hephkit/src/hephkit/idempotency/store.py` | `IdempotencyStore`: `claim`, `complete`, `release`, `purge_expired`, `create_schema`, and the `idempotent_record` context manager. |
+| `python/hephkit/src/hephkit/idempotency/store.py` | `IdempotencyStore`: `claim`, `complete`, `release`, `purge_expired`, and the `idempotent_record` context manager. **No `create_schema`:** the DDL is a multi-statement script and the `Executor` port runs one parameterised statement at a time, so the schema is published as text (`SCHEMA_SQL`, the contents of `schema.sql`) for the caller to run on its own connection or paste into its own migration. |
 | `python/hephkit/src/hephkit/idempotency/fastapi.py` | Per-route integration. The only file importing FastAPI or OpenTelemetry. |
 | `python/hephkit/src/hephkit/idempotency/worker.py` | `@idempotent` for event handlers. |
 | `python/hephkit/tests/conftest.py` | The Postgres fixtures and the adapter parametrisation. |
@@ -487,7 +487,7 @@ git commit -am "feat(idempotency): a context manager whose default exit is relea
   ```
   Per-route, never global (2.1 distinguishes endpoints that require a key). `scope` is supplied by the application — hephkit does not infer a tenant. A route whose return annotation is `StreamingResponse` raises at **decoration time**, not per request.
 
-Behaviour: validate the key (2.1); compute the fingerprint from the method, the **raw** request target (`request.url.path`, plus `?` and `request.url.query` when a query is present — never a normalised path) and the body bytes with their content type (2.2). Set `IDEMPOTENCY_KEY` on the current span. On `Replay`, return the stored bytes with the stored status, the stored content type and `Idempotent-Replayed: true`. `HephError`s propagate to `install_error_handlers`; this module builds no body.
+Behaviour: validate the key (2.1); compute the fingerprint from the method, the **raw** request target (ASGI's `scope["raw_path"]` with any query stripped, plus `?` and `request.url.query` when a query is present — never a normalised path. **Not `request.url.path`,** which Starlette percent-decodes: that would make `/items/%41` and `/items/A` one request, which 2.2 forbids. A server that supplies no `raw_path` is refused with `RuntimeError` rather than fingerprinted from the decoded path) and the body bytes with their content type (2.2). Set `IDEMPOTENCY_KEY` on the current span. On `Replay`, return the stored bytes with the stored status, the stored content type and `Idempotent-Replayed: true`. `HephError`s propagate to `install_error_handlers`; this module builds no body.
 
 - [ ] **Step 1: Write the failing tests**
 
