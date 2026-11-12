@@ -2,7 +2,7 @@
   "_generated": "GENERATED FILE - do not edit by hand. Source: spec/modules.yaml, spec/errors.yaml, spec/heph-spec.md and the design's Rollout. Regenerate with `uv run tools/gen_site_pages.py`.",
   "specVersion": "0.4.0",
   "currentPhase": 1,
-  "errorCodeCount": 12,
+  "errorCodeCount": 13,
   "shipped": [
     {
       "name": "mail",
