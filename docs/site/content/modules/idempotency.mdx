@@ -265,37 +265,10 @@ id carrying a different payload is `HEPH-IDEMP-422`.
 ```python
 from typing import Any
 
-from hephkit.idempotency import AsyncpgExecutor, Executors
+from hephkit.idempotency import asyncpg_event_executors, asyncpg_event_work_connection
 from hephkit.idempotency.worker import idempotent
 
 POOL: asyncpg.Pool  # created once at worker startup, as the route example does
-
-
-@asynccontextmanager
-async def event_executors(event: dict[str, Any]) -> AsyncIterator[Executors]:
-    """The worker's own claim and work executors.
-
-    There is no shipped factory for this path: the route factories hand the work
-    connection to the handler through `request.state`, and an event has none, so
-    passing it on — a contextvar, an argument — is the application's to decide.
-
-    Two connections from one pool, so the sizing rule above applies here too,
-    and the timeouts are what turn an under-sized pool into an error instead of
-    a permanent stall.
-    """
-    async with (
-        POOL.acquire(timeout=10.0) as claim_conn,
-        POOL.acquire(timeout=10.0) as work_conn,
-    ):
-        tx = work_conn.transaction()
-        await tx.start()
-        try:
-            yield Executors(AsyncpgExecutor(claim_conn), AsyncpgExecutor(work_conn))
-        except BaseException:
-            await tx.rollback()
-            raise
-        else:
-            await tx.commit()
 
 
 @idempotent(
@@ -309,11 +282,29 @@ async def event_executors(event: dict[str, Any]) -> AsyncIterator[Executors]:
     # the field.
     scope=lambda event: event["tenant"],
     event_id=lambda event: event["id"],
-    executors=event_executors,
+    executors=asyncpg_event_executors(POOL),
 )
 async def on_payment_settled(event: dict[str, Any]) -> None:
-    ...
+    conn = asyncpg_event_work_connection()  # the handler's own open transaction
+    await conn.execute(
+        "UPDATE invoices SET paid_at = now() WHERE id = $1", event["invoice_id"]
+    )
 ```
+
+`asyncpg_event_executors` is `asyncpg_executors` for this path, down to
+`claim_pool=` and `acquire_timeout=`, so the **two connections per event in
+flight** and the sizing rule above apply here too. The one difference is where
+the handler's connection goes: a route reads it off `request.state`, and an
+event has no request, so it travels in a `ContextVar` the factory sets around
+your handler and `asyncpg_event_work_connection()` returns. Like the route
+accessor it is valid only while the handler runs — afterwards the connection is
+back in the pool and the call raises `RuntimeError` rather than handing you
+another event's connection — and a task you start but never await can outlive
+it, so await what you start.
+
+**Write through that connection.** It is the one whose transaction holds the
+record, so your work and the record commit together or neither does; a write on
+any other connection commits on its own and survives a delivery that failed.
 
 A handler that raises releases the record, so the broker's redelivery runs it
 again — **including a `HephError` below 500**, which an HTTP route would have

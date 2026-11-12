@@ -12,6 +12,12 @@ argument; ``scope``, ``event_id`` and ``executors`` each receive that event.
 ``hephkit.idempotency.fastapi.idempotent_route`` (see its module docstring):
 ``Executors(claim, work)``, with ``claim`` on a connection with no transaction
 open and ``work`` on the handler's own transaction.
+``hephkit.idempotency.adapters.asyncpg_event_executors(pool)`` builds one
+correctly; use it unless you have a reason not to. It is the route factory for
+this path, and it hands the handler its own connection through
+``asyncpg_event_work_connection()`` rather than ``request.state``, which an
+event has none of. **Write through that connection**, or the work and the record
+no longer commit together.
 
 The key is the event id. The fingerprint is ``content_hash(event)``, so the event
 must be JSON-compatible. It is the 2.2 canonicaliser, so a redelivery of the same

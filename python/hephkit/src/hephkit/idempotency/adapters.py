@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
@@ -23,6 +24,8 @@ from hephkit.idempotency.ports import Executor, Executors
 __all__ = [
     "AsyncpgExecutor",
     "SQLAlchemyExecutor",
+    "asyncpg_event_executors",
+    "asyncpg_event_work_connection",
     "asyncpg_executors",
     "asyncpg_work_connection",
     "sqlalchemy_executors",
@@ -32,6 +35,11 @@ __all__ = [
 # Where the factories below leave the handler's own connection: `request.state.<this>`.
 # Internal: applications use the typed accessors.
 _WORK_CONNECTION_STATE: Final = "heph_work_connection"
+
+# The same thing for an event, which has no request to hang it on. A ContextVar
+# because the only thing a message handler and its factory share is the task
+# they run in: set around the handler, reset after it, read by the accessor.
+_EVENT_WORK_CONNECTION: Final[ContextVar[Any]] = ContextVar("heph_event_work_connection")
 
 # `$1` -> ` :p1 `, always padded with a space on both sides. SQLAlchemy's bind-name scanner
 # reads `:p1::text` as the bind `:p` and `arr[:p1:p2]` likewise, so a placeholder
@@ -242,6 +250,87 @@ def sqlalchemy_work_connection(request: Request) -> AsyncConnection:
     resolve before ``executors`` is entered). Valid only while the handler runs;
     see :func:`asyncpg_work_connection`."""
     return _work_connection(request, "sqlalchemy")  # type: ignore[no-any-return]
+
+
+def asyncpg_event_work_connection() -> asyncpg.Connection:
+    """The handler's own connection, inside a handler decorated with ``@idempotent``.
+
+    The event path's :func:`asyncpg_work_connection`. An event carries no
+    request, so there is no ``request.state`` to read it off and no argument the
+    decorator could add without changing how every handler is called; the
+    connection travels in a ``ContextVar`` that
+    :func:`asyncpg_event_executors` sets around the handler, and this returns
+    it.
+
+    Valid **only while the handler runs**. Afterwards the connection is back in
+    the pool and belongs to whatever event took it next, so a late caller gets
+    ``RuntimeError`` rather than someone else's connection. Concurrent events
+    are separate tasks with separate contexts, so they do not see each other's;
+    a task the handler starts inherits a copy of the value, which means a task
+    it does not await can outlive the handler holding a connection that has
+    been released. Await what you start.
+    """
+    try:
+        return _EVENT_WORK_CONNECTION.get()
+    except LookupError:
+        raise RuntimeError(
+            "no work connection for this event. Either the handler is not decorated with "
+            "idempotent, its executors= is not asyncpg_event_executors(...), or this was "
+            "called after the handler returned (the connection goes back to the pool then, "
+            "so it is removed) or from a task the handler started and did not await"
+        ) from None
+
+
+def asyncpg_event_executors(
+    pool: asyncpg.Pool,
+    *,
+    claim_pool: asyncpg.Pool | None = None,
+    acquire_timeout: float = 10.0,
+) -> Callable[[Any], AbstractAsyncContextManager[Executors]]:
+    """The ``executors=`` argument of ``idempotent`` for an asyncpg pool.
+
+    :func:`asyncpg_executors` for the worker path, and the same arrangement:
+    ``claim`` plain, from ``claim_pool`` when one is given, ``work`` with a
+    transaction begun, committed when the handler finishes cleanly and rolled
+    back when anything passes through. The sizing rule and ``acquire_timeout``
+    are the route factory's -- two connections per event in flight, one held
+    while waiting for the other, so a single pool needs twice the worker's
+    concurrency, and an acquire that runs out of time is ``HEPH-DB-503``.
+
+    It takes the event rather than a request, and hands the work connection to
+    the handler through :func:`asyncpg_event_work_connection` instead of
+    ``request.state``. **Write through that connection**: it is the one whose
+    transaction holds the stored record, so the work and the record commit
+    together or neither does. A write on any other connection commits on its
+    own and outlives a rolled-back delivery.
+
+    The route factory's body is not shared with this one: the two differ in
+    where the work connection goes, and this one must not touch
+    ``request.state``, which an event has none of.
+    """
+    claims = claim_pool if claim_pool is not None else pool
+
+    @asynccontextmanager
+    async def executors(event: Any) -> AsyncIterator[Executors]:
+        async with (
+            _acquired(claims, "claim", acquire_timeout) as claim_conn,
+            _acquired(pool, "work", acquire_timeout) as work_conn,
+        ):
+            tx = work_conn.transaction()
+            await tx.start()
+            token = _EVENT_WORK_CONNECTION.set(work_conn)
+            try:
+                try:
+                    yield Executors(AsyncpgExecutor(claim_conn), AsyncpgExecutor(work_conn))
+                except BaseException:
+                    await tx.rollback()
+                    raise
+                else:
+                    await tx.commit()
+            finally:
+                _EVENT_WORK_CONNECTION.reset(token)
+
+    return executors
 
 
 def asyncpg_executors(

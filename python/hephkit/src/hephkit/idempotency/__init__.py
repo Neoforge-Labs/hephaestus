@@ -20,7 +20,9 @@ the record store, which needs SQL transactions and constraints (CLAUDE.md rule
 * ``AsyncpgExecutor``, ``SQLAlchemyExecutor``, the ``*_executors`` factories and
   the ``*_work_connection`` accessors are the adapters for the two driver
   stacks. Drivers are imported lazily, so importing this module requires
-  neither of them.
+  neither of them. ``asyncpg_executors`` is for a route and
+  ``asyncpg_event_executors`` for an event handler; they differ only in where
+  the work connection goes, because an event has no ``request.state``.
 * ``SCHEMA_SQL`` is the table: the text of ``schema.sql``, safe to run
   repeatedly. There is deliberately no ``create_schema``: the DDL is a
   multi-statement script while the port runs one parameterised statement at a
@@ -63,6 +65,8 @@ from hephkit.idempotency._sql import DDL as SCHEMA_SQL
 from hephkit.idempotency.adapters import (
     AsyncpgExecutor,
     SQLAlchemyExecutor,
+    asyncpg_event_executors,
+    asyncpg_event_work_connection,
     asyncpg_executors,
     asyncpg_work_connection,
     sqlalchemy_executors,
@@ -89,6 +93,8 @@ __all__ = [
     "RecordReleased",
     "Replay",
     "SQLAlchemyExecutor",
+    "asyncpg_event_executors",
+    "asyncpg_event_work_connection",
     "asyncpg_executors",
     "asyncpg_work_connection",
     "fingerprint",
