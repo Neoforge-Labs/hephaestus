@@ -127,6 +127,13 @@ explicit_package_bases = true
 # `--strict`, the ignore becomes an unused-ignore error in any environment where
 # the ml extra IS installed, so the typecheck would pass or fail depending on
 # what the developer happened to have.
+#
+# What this does NOT do is check the call names: under `ignore_missing_imports`
+# every attribute of either library is `Any`, so a misspelled `manual_seed`
+# would typecheck. The recording stubs in `tests/test_repro.py` are what guards
+# those names -- each is a `types.ModuleType` carrying exactly the attributes
+# the seeding is allowed to touch, so a call this module invents raises
+# `AttributeError` there rather than passing silently.
 [[tool.mypy.overrides]]
 # A bare name and a dotted pattern are separate matches in mypy, so each
 # library needs both.

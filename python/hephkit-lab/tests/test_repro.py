@@ -40,10 +40,12 @@ from typing import Any
 
 import env_rules
 import pytest
+from hephkit.lab import repro as repro_module
 from hephkit.lab.repro import (
     DEFAULT_FRAMEWORKS,
     LOCKFILE_NAME,
     Accelerator,
+    Environment,
     ProvenanceRecord,
     capture,
     describe_environment,
@@ -259,16 +261,74 @@ def test_a_detached_head_resolves_to_a_commit_and_is_an_ordinary_case(tmp_path: 
     assert record.run_class == "deterministic"
 
 
-def test_git_missing_from_the_path_is_provenance_only_not_an_error(
+def test_a_git_that_cannot_be_found_is_provenance_only_not_an_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A machine with no git at all: the capture degrades, it does not raise."""
+    """A machine with no git at all: the capture degrades, it does not raise.
+
+    The failure is injected rather than arranged, because what a missing binary
+    *is* at this layer is a `FileNotFoundError` out of `subprocess.run`, and
+    that is what the test hands the module. Emptying `PATH` would instead
+    depend on how a path lookup treats an empty `PATH`, which POSIX leaves
+    implementation-defined; the test below keeps that as a smoke test and says
+    so, so that this one is the guarantee.
+
+    The argv is recorded, so a version of this that degraded by never invoking
+    git at all would fail here rather than pass quietly.
+    """
+    repo = a_repository(tmp_path)
+    attempted: list[list[str]] = []
+
+    def no_such_binary(args: Sequence[str], **kwargs: Any) -> None:
+        attempted.append(list(args))
+        raise FileNotFoundError(2, "No such file or directory", args[0])
+
+    monkeypatch.setattr(repro_module.subprocess, "run", no_such_binary)
+    record = captured(repo)
+    assert ["git", "-C", str(repo), "rev-parse", "HEAD"] in attempted
+    assert record.code_sha is None
+    assert record.deps_hash == EMPTY_OBJECT_HASH, "the lockfile does not need git"
+    assert record.run_class == "provenance-only"
+
+
+def test_an_empty_path_degrades_the_same_way_smoke_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same degradation reached through a path lookup rather than injection.
+
+    A smoke test, deliberately named one. It holds because CPython does its own
+    `PATH` search for a bare program name and falls back to `os.defpath` only
+    when `PATH` is *absent*, so a `PATH` that is present and empty yields the
+    bare name as the one candidate and the exec fails. That is CPython's
+    behaviour, not something section 7 guarantees, and
+    `test_a_git_that_cannot_be_found_is_provenance_only_not_an_error` is the
+    test that pins the guarantee.
+    """
     repo = a_repository(tmp_path)
     monkeypatch.setenv("PATH", "")
     record = captured(repo)
     assert record.code_sha is None
-    assert record.deps_hash == EMPTY_OBJECT_HASH, "the lockfile does not need git"
     assert record.run_class == "provenance-only"
+
+
+def test_output_that_is_not_valid_utf8_does_not_raise_out_of_a_probe() -> None:
+    """A probe's output is decoded with replacement, never strictly.
+
+    `text=True` decodes strictly, and `UnicodeDecodeError` is a `ValueError`,
+    so it would escape the `OSError`/`SubprocessError` guard and make a capture
+    raise. It is reachable through git: non-ASCII paths are escaped only while
+    `core.quotePath` is true, and this module runs with the machine's own git
+    config.
+
+    Tested at `_run` with an interpreter that writes an invalid byte, because
+    the real trigger -- a tracked filename that is not valid UTF-8 -- cannot be
+    created portably: APFS rejects one outright.
+    """
+    out = repro_module._run(  # noqa: SLF001 - the decode is this function's business
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'\\xff\\n')"]
+    )
+    assert out is not None
+    assert "\ufffd" in out
 
 
 def test_a_subdirectory_of_a_repository_carries_that_repositorys_commit(
@@ -407,6 +467,45 @@ def test_an_accelerator_records_its_model_and_driver() -> None:
     assert environment.as_document()["accelerator"] == {
         "model": "NVIDIA RTX 4090",
         "driver": "550.54.14",
+    }
+
+
+def test_a_member_7_4_does_not_name_serialises_after_the_ones_it_does() -> None:
+    """The convention `conformance/lab/record.json` states, pinned here too.
+
+    7.4 permits further members and says nothing about their order, so this is
+    a convention of this implementation rather than a clause of the spec.
+    """
+    environment = Environment.model_validate(
+        {"go": "1.23.4", "platform": "Linux-6.8.0-x86_64", "accelerator": None}
+    )
+    assert list(environment.as_document()) == ["platform", "accelerator", "go"]
+
+
+def test_an_environment_member_that_was_never_set_is_omitted_not_nulled() -> None:
+    """7.4 makes each member optional, so an absent one is absent, not null.
+
+    A record from a runtime that is not Python has no `python` to record, and
+    writing `python: null` would state a fact 7.4 does not define.
+    """
+    document = Environment.model_validate({"platform": "Linux-6.8.0-x86_64"}).as_document()
+    assert document == {"platform": "Linux-6.8.0-x86_64"}
+
+
+def test_every_member_of_the_7_1_table_is_written_even_though_it_is_nullable(
+    tmp_path: Path,
+) -> None:
+    """7.1: a record MUST carry every member, so none may be dropped as unset."""
+    document = captured(a_repository(tmp_path, lockfile=None)).as_document()
+    assert document["deps_hash"] is None
+    assert set(document) == {
+        "run_id",
+        "config_hash",
+        "data_hash",
+        "deps_hash",
+        "code_sha",
+        "class",
+        "environment",
     }
 
 
@@ -642,12 +741,26 @@ def test_anything_that_is_not_two_fields_is_no_accelerator(reported: str | None)
     assert parse_accelerator(reported) is None
 
 
-def test_the_accelerator_probe_answers_null_on_a_machine_with_no_nvidia_tooling(
+def test_the_accelerator_probe_answers_null_when_nvidia_smi_is_not_installed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`nvidia-smi` missing is "no accelerator", not a failed capture."""
-    monkeypatch.setenv("PATH", "")
+    """`nvidia-smi` missing is "no accelerator", not a failed capture.
+
+    Injected, for the reason given on the git equivalent: a missing binary is a
+    `FileNotFoundError` out of `subprocess.run`, and that is what this hands
+    the probe. Emptying `PATH` would answer `None` on this machine whatever the
+    lookup did -- there is no `nvidia-smi` to find -- so it would not be
+    testing the degradation on a machine that has one.
+    """
+    attempted: list[list[str]] = []
+
+    def no_such_binary(args: Sequence[str], **kwargs: Any) -> None:
+        attempted.append(list(args))
+        raise FileNotFoundError(2, "No such file or directory", args[0])
+
+    monkeypatch.setattr(repro_module.subprocess, "run", no_such_binary)
     assert detect_accelerator() is None
+    assert attempted == [list(repro_module._NVIDIA_SMI)]  # noqa: SLF001 - the argv is the point
 
 
 # --- the spine stays a spine ----------------------------------------------------

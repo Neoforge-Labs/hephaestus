@@ -165,6 +165,24 @@ def run_capture(case: Case, tmp_path: Path) -> None:
         assert env_rules.CHECKS[fact](environment) == [], fact
 
 
+def assert_member_order(
+    actual: Mapping[str, Any], expected: Mapping[str, Any], where: str = "<root>"
+) -> None:
+    """Assert `actual` carries `expected`'s members in `expected`'s order, at every depth.
+
+    Equality is not enough and the difference bites: a case that differs from
+    its input in nothing but the order of a nested object's members -- which is
+    exactly what the non-Python-runtime case pins, since a member 7.4 does not
+    name serialises after the ones it does -- passes a top-level order check
+    whatever order the nested object came out in.
+    """
+    assert list(actual) == list(expected), f"member order at {where}"
+    for key, value in expected.items():
+        nested = actual.get(key)
+        if isinstance(value, Mapping) and isinstance(nested, Mapping):
+            assert_member_order(nested, value, f"{where}.{key}")
+
+
 def run_record(case: Case, _tmp_path: Path) -> None:
     document = case["input"]["record"]
     expect = case["expect"]
@@ -175,7 +193,7 @@ def run_record(case: Case, _tmp_path: Path) -> None:
     record = ProvenanceRecord.model_validate(document)
     serialised = record.as_document()
     assert serialised == expect["serialised"]
-    assert list(serialised) == list(expect["serialised"]), "member order"
+    assert_member_order(serialised, expect["serialised"])
 
 
 def run_record_case(case: Case, tmp_path: Path) -> None:
@@ -223,6 +241,14 @@ def test_vector_files_are_found() -> None:
 def test_every_lab_vector_file_has_a_runner() -> None:
     unknown = runnerless_vector_files()
     assert not unknown, f"lab vector files with no Python runner: {unknown}"
+
+
+def test_the_member_order_check_reaches_a_nested_object() -> None:
+    """The check biting below the top level, demonstrated rather than assumed."""
+    document = {"a": 1, "environment": {"platform": "p", "go": "1.23"}}
+    assert_member_order(document, {"a": 1, "environment": {"platform": "p", "go": "1.23"}})
+    with pytest.raises(AssertionError, match=r"member order at <root>\.environment"):
+        assert_member_order(document, {"a": 1, "environment": {"go": "1.23", "platform": "p"}})
 
 
 def test_a_runnerless_lab_file_fails(tmp_path: Path) -> None:

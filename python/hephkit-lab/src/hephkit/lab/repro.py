@@ -156,12 +156,24 @@ def _run(args: Sequence[str]) -> str | None:
     a non-zero exit, a hang, a working directory that is not there -- into the
     same `None`, because section 7 classifies all of them identically and none
     of them may raise out of a capture.
+
+    `errors="replace"` is load-bearing, not tidiness. `text=True` decodes
+    strictly, and a strict decode raises `UnicodeDecodeError`, which is a
+    `ValueError` and so escapes both excepts above -- the one way out of this
+    function that would contradict the paragraph above. It is reachable: git
+    escapes non-ASCII paths only while `core.quotePath` is true, this module
+    runs with whatever git config the machine has, and a repository holding a
+    filename that is not valid UTF-8 would otherwise make a capture raise.
+    Nothing here parses the output byte for byte, so a replacement character in
+    a `git status` line costs nothing: the line is still non-empty, which is the
+    only thing 7.3 asks of it.
     """
     try:
         done = subprocess.run(  # noqa: S603 - fixed argv, no shell
             list(args),
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
             timeout=_COMMAND_TIMEOUT,
         )
@@ -303,8 +315,20 @@ class ProvenanceRecord(BaseModel):
         return self
 
     def as_document(self) -> dict[str, Any]:
-        """This record as JSON-ready members, in the order of 7.1's table."""
-        return self.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        """This record as JSON-ready members, in the order of 7.1's table.
+
+        No `exclude_unset` at this level: 7.1 says a record MUST carry every
+        member of its table, so if one of the seven ever gained a default, an
+        `exclude_unset` dump would quietly start omitting it. `environment` is
+        replaced rather than left to the nested dump, because it is the one
+        member whose own members are individually optional (7.4) and must
+        therefore keep the `exclude_unset` that :meth:`Environment.as_document`
+        applies -- a plain nested dump would write `python: null` into a record
+        from a runtime that never had a `python` to record.
+        """
+        document: dict[str, Any] = self.model_dump(mode="json", by_alias=True)
+        document["environment"] = self.environment.as_document()
+        return document
 
 
 def parse_accelerator(reported: str | None) -> Accelerator | None:
