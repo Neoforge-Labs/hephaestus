@@ -31,6 +31,7 @@
 - {name: lab.repro, home: python, status: shipped, maturity: experimental, spec_section: "7"}
 - {name: lab.record, home: python, status: shipped, maturity: experimental, spec_section: "8"}
 - {name: lab.replay, home: python, status: shipped, maturity: experimental, spec_section: "9"}
+- {name: lab.gates, home: python, status: shipped, maturity: experimental, spec_section: null}
 
 # Rust core
 - {name: hephkit-core, home: rust, status: shipped, maturity: experimental, spec_section: null}

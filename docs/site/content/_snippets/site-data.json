@@ -95,6 +95,11 @@
       "maturity": "experimental"
     },
     {
+      "name": "lab.gates",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
       "name": "lab.record",
       "home": "python",
       "maturity": "experimental"
