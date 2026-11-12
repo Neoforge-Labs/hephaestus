@@ -19,8 +19,9 @@ that do not exist contribute no required entries.
 A ``shipped`` rust, python or go module must also carry ``Maturity: <level>`` in
 its source documentation, matching its entry: the crate's ``//!`` doc comment
 (``src/lib.rs``, else ``src/main.rs``), the module docstring (``<name>.py`` or
-``<name>/__init__.py``), or a Go package comment (the comment block directly
-above ``package`` in any non-test file, as in ``go/internal/ingot/config.go``).
+``<name>/__init__.py``; a dotted name such as ``lab.config`` is looked up in the
+``python/hephkit-lab`` tree as ``lab/config.py``), or a Go package comment (the
+comment block directly above ``package`` in any non-test file, as in ``go/internal/ingot/config.go``).
 ``docker`` images are not checked: a Dockerfile has no doc-comment convention
 and none has been decided.
 """
@@ -57,21 +58,41 @@ NOT_MODULES = {
 NOT_FRAGMENTS = {"moon.yml": "moon project config, not a Compose fragment"}
 # Generated, not a module of its own.
 PYTHON_EXCLUDED_FILES = {"conventions.py"}
+# Python source trees. A row name with no ``.`` lives in the core tree; a dotted name such as
+# ``lab.config`` lives in the tree of the same name, at ``<tree>/hephkit/lab/config.py``.
+PYTHON_CORE_TREE = ("python", "hephkit", "src", "hephkit")
+PYTHON_LAB_TREE = ("python", "hephkit-lab", "src", "hephkit")
+
+
+def _python_module_candidates(repo_root: Path, name: str) -> list[Path]:
+    """Where a python row's source may live: ``<name>.py``, else ``<name>/__init__.py``."""
+    if "." in name:
+        base = repo_root.joinpath(*PYTHON_LAB_TREE)
+        rel = Path(*name.split("."))
+        return [base / rel.with_suffix(".py"), base / rel / "__init__.py"]
+    base = repo_root.joinpath(*PYTHON_CORE_TREE)
+    return [base / f"{name}.py", base / name / "__init__.py"]
 
 
 def _scan(repo_root: Path) -> set[tuple[str, str]]:
     """Return the (home, name) of every module present on disk."""
     found: set[tuple[str, str]] = set()
 
-    py = repo_root / "python" / "hephkit" / "src" / "hephkit"
-    if py.is_dir():
+    # (directory to list, prefix its modules carry in spec/modules.yaml)
+    python_roots = [
+        (repo_root.joinpath(*PYTHON_CORE_TREE), ""),
+        (repo_root.joinpath(*PYTHON_LAB_TREE, "lab"), "lab."),
+    ]
+    for py, prefix in python_roots:
+        if not py.is_dir():
+            continue
         for p in py.iterdir():
             if p.name.startswith("_") or p.name in PYTHON_EXCLUDED_FILES:
                 continue
             if p.is_dir():
-                found.add(("python", p.name))
+                found.add(("python", prefix + p.name))
             elif p.suffix == ".py":
-                found.add(("python", p.stem))
+                found.add(("python", prefix + p.stem))
 
     def dirs(rel: str, home: str, key: str | None = None) -> None:
         base = repo_root / rel
@@ -206,8 +227,7 @@ def _source_docs(repo_root: Path, home: str, name: str) -> tuple[list[tuple[str,
         candidates = [repo_root / "core" / name / "src" / "lib.rs", repo_root / "core" / name / "src" / "main.rs"]
         files = [c for c in candidates if c.is_file()][:1]
     elif home == "python":
-        base = repo_root / "python" / "hephkit" / "src" / "hephkit"
-        files = [c for c in (base / f"{name}.py", base / name / "__init__.py") if c.is_file()][:1]
+        files = [c for c in _python_module_candidates(repo_root, name) if c.is_file()][:1]
     else:
         files = []
         for d in (repo_root / "go" / "internal" / name, repo_root / "go" / "cmd" / name):

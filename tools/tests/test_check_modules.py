@@ -358,3 +358,82 @@ def test_removing_the_label_from_a_real_module_fails_the_check(tmp_path, home, n
     assert stripped, f"no label found to strip for {home}/{name}"
     errors = check_modules(tmp_path)
     assert any(name in e and "no Maturity label" in e for e in errors), errors
+
+
+# --- dotted names resolve in the second python tree (hephkit-lab) ------------------------------
+
+LAB_SRC = "python/hephkit-lab/src/hephkit/lab"
+
+
+def test_dotted_python_name_resolves_in_lab_tree(tmp_path):
+    root = make_tree(
+        tmp_path,
+        [shipped("lab.config", "python"), planned()],
+        files=[(f"{LAB_SRC}/config.py", '"""Config. Maturity: experimental."""\n')],
+    )
+    assert check_modules(root) == []
+
+
+def test_dotted_python_package_resolves_via_init(tmp_path):
+    root = make_tree(
+        tmp_path,
+        [shipped("lab.record", "python"), planned()],
+        files=[(f"{LAB_SRC}/record/__init__.py", '"""Record. Maturity: experimental."""\n')],
+    )
+    assert check_modules(root) == []
+
+
+def test_dotted_name_missing_maturity_label_is_an_error(tmp_path):
+    root = make_tree(
+        tmp_path,
+        [shipped("lab.config", "python"), planned()],
+        files=[(f"{LAB_SRC}/config.py", '"""Config."""\n')],
+    )
+    assert any("lab.config" in e and "no Maturity label" in e for e in check_modules(root))
+
+
+def test_dotted_name_label_mismatch_is_an_error(tmp_path):
+    root = make_tree(
+        tmp_path,
+        [shipped("lab.config", "python"), planned()],
+        files=[(f"{LAB_SRC}/config.py", '"""Config. Maturity: beta."""\n')],
+    )
+    assert any("lab.config" in e and "mismatch" in e for e in check_modules(root))
+
+
+def test_dotted_name_does_not_resolve_in_the_core_tree(tmp_path):
+    root = make_tree(
+        tmp_path,
+        [shipped("lab.config", "python"), planned()],
+        files=[("python/hephkit/src/hephkit/lab/config.py", '"""Config. Maturity: experimental."""\n')],
+    )
+    assert any("lab.config" in e and "no source" in e for e in check_modules(root))
+
+
+def test_undotted_name_does_not_resolve_in_the_lab_tree(tmp_path):
+    root = make_tree(
+        tmp_path,
+        [shipped("config", "python"), planned()],
+        files=[(f"{LAB_SRC}/config.py", '"""Config. Maturity: experimental."""\n')],
+    )
+    assert any("config" in e and "no source" in e for e in check_modules(root))
+
+
+def test_module_on_disk_without_a_row_is_still_caught_in_lab_tree(tmp_path):
+    root = make_tree(tmp_path, [planned()], files=[(f"{LAB_SRC}/orphan.py", "")])
+    assert any("python/lab.orphan" in e and "no shipped entry" in e for e in check_modules(root))
+
+
+def test_lab_package_directory_without_a_row_is_caught(tmp_path):
+    root = make_tree(tmp_path, [planned()], files=[(f"{LAB_SRC}/pkg/__init__.py", "")])
+    assert any("python/lab.pkg" in e for e in check_modules(root))
+
+
+def test_lab_tree_private_files_are_not_required(tmp_path):
+    root = make_tree(
+        tmp_path,
+        [planned()],
+        dirs=[f"{LAB_SRC}/__pycache__"],
+        files=[(f"{LAB_SRC}/__init__.py", ""), (f"{LAB_SRC}/_internal.py", "")],
+    )
+    assert check_modules(root) == []
