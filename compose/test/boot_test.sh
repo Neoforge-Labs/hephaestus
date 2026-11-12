@@ -127,10 +127,12 @@ check "mlflow: experiments/search answers (postgres backend store)" mlflow_backe
 # `uv run` does not remove an extra it was not asked for, only `uv sync --exact`
 # does -- and that is the environment `hephkit-lab:test-fast` runs in, where
 # `tests/test_track.py` drives a stub and asserts on what an import of mlflow
-# pulls in. Measured: running this check with `--extra track` and then the lab
-# suite failed `test_the_import_probe_sees_an_import_it_should_catch`. `--with`
-# layers an ephemeral environment and leaves the project one alone. The floor
-# below is a loose guard only; the `track` extra in
+# pulls in. That assertion is a membership check, so the lab suite now stays
+# green with the extra installed -- it used to assert equality and went red,
+# which is how this coupling was found -- but `--with` is still what belongs
+# here: it layers an ephemeral environment and leaves the project one alone,
+# rather than leaving mlflow in a venv the fast lab suite then runs in. The
+# floor below is a loose guard only; the `track` extra in
 # `python/hephkit-lab/pyproject.toml` is the authoritative one.
 mlflow_provenance_class() {
   local out rc _ recorded tagged recorded_id tagged_id

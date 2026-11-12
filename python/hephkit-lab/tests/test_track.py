@@ -799,7 +799,12 @@ def test_the_import_probe_sees_an_import_it_should_catch() -> None:
         check=False,
     )
     assert done.returncode == 0, done.stderr
-    assert json.loads(done.stdout)["attempted"] == ["mlflow"]
+    # Membership, not equality: with the declared `track` extra actually
+    # installed the finder records mlflow's own submodule imports as well, so an
+    # equality assertion makes this suite red in any environment that has an
+    # extra the distribution ships. What the probe has to prove is that the
+    # attempt was seen at all.
+    assert "mlflow" in json.loads(done.stdout)["attempted"]
 
 
 def imports_outside_a_function(source: str) -> list[str]:

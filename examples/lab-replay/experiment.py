@@ -156,12 +156,17 @@ def self_test_block() -> list[str]:
         else:
             print(f"      {name}: NOT blocked, the call returned", file=sys.stderr)
 
+    # 54999 is deliberately a port nothing in the 54xxx block allocates. The
+    # probe only has to reach the blocking layer, never a server, and pointing
+    # it at a port we do own -- MLflow's 54500, say -- would couple this
+    # self-test to whether that service happens to be up and read as though the
+    # block were being tested against it.
     probe("getaddrinfo", lambda: socket.getaddrinfo("localhost", 80))
-    probe("create_connection", lambda: socket.create_connection(("127.0.0.1", 54500), 1))
-    probe("socket.connect", lambda: socket.socket().connect(("127.0.0.1", 54500)))
+    probe("create_connection", lambda: socket.create_connection(("127.0.0.1", 54999), 1))
+    probe("socket.connect", lambda: socket.socket().connect(("127.0.0.1", 54999)))
     probe(
         "urlopen",
-        lambda: urllib.request.urlopen("http://127.0.0.1:54500/health", timeout=1),
+        lambda: urllib.request.urlopen("http://127.0.0.1:54999/health", timeout=1),
     )
     return proved
 

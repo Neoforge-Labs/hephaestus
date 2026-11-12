@@ -81,6 +81,24 @@ check "the record is finished and holds both cells" \
 check "the record holds the evaluation metrics it produced" \
   says '^VALUE cell=evaluate key=rmse value=[0-9.e+-]+$' record
 
+# The assertion above accepts either class, which is a claim about the record's
+# shape and not about which class it earned. On a CLEAN checkout -- which is
+# what CI runs -- 7.3's three conditions all hold, so the run MUST come out
+# `deterministic`: accepting `provenance-only` there would let this gate pass
+# identically with a lockfile it could not find or a repo path git could not
+# read, which is a hole big enough to drive the whole claim through. A dirty
+# worktree (a developer running the gate mid-edit) classifies `provenance-only`
+# legitimately, so there either class is accepted -- and this check still runs
+# and can still fail, rather than quietly skipping itself.
+earned_class() {
+  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    says '^RECORD run_id=fixture-baseline class=(deterministic|provenance-only) complete=yes' record
+  else
+    says '^RECORD run_id=fixture-baseline class=deterministic complete=yes' record
+  fi
+}
+check "a clean checkout earns class=deterministic" earned_class
+
 # --- 3. the replay, with the network blocked ---------------------------------
 say "the replay, with the network blocked"
 check "the replay step runs" step replay
