@@ -795,6 +795,12 @@ Create one `.mdx` page per module under `docs/site/content/modules/`, named for 
 Run: `bun install --frozen-lockfile && bun run --cwd docs/site build && bun test --cwd docs/site && uv run tools/check_site_links.py`
 Expected: PASS. A broken link to a spec section is the likely failure here.
 
+- [ ] **Step 4c: Give the orphaned MLflow claim an owner (Ruling 35)**
+
+A Task 13 review found that the design's phase-3 claim — that runs "appear in MLflow with their provenance class" — currently has **no owner**: `compose/test/boot_test.sh` asserts only `/health` and `experiments/search` on 54500, and this task's replay gate never mentions MLflow. Nothing anywhere exercises `lab.track`'s tags against the real fragment.
+
+Close it in **`boot_test.sh`'s merged-stack section**, not in the replay gate: Docker is already there, the fragment is already booted, and the replay gate must stay Docker-free so it can run on every PR. Add one tracked run with `MLFLOW_TRACKING_URI` pointed at the booted fragment, and assert the run appears carrying its provenance-class tag. That is the one claim in the design's gate that nothing else covers.
+
 - [ ] **Step 5: Wire the gate into CI**
 
 Add `examples-lab-replay: 'examples/lab-replay'` to `.moon/workspace.yml` and a step in `.github/workflows/ci.yml` that runs the gate, beside the existing five-minute path.
