@@ -13,7 +13,6 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
-from unittest.mock import ANY
 
 import asyncpg
 import pytest
@@ -23,7 +22,7 @@ from hephkit.errors import HephError
 from hephkit.idempotency import _sql
 from hephkit.idempotency.adapters import AsyncpgExecutor, SQLAlchemyExecutor
 from hephkit.idempotency.ports import Executor, Proceed, Replay
-from hephkit.idempotency.store import IdempotencyStore
+from hephkit.idempotency.store import IdempotencyStateError, IdempotencyStore
 
 
 def _normalise(sql: str) -> str:
@@ -259,6 +258,31 @@ def test_a_missing_driver_names_the_extra(monkeypatch, module):
 # record that is still invisible protects nothing, and several tests below claim
 # the same key from a second connection to prove the record is really there.
 
+_UUID7 = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
+
+
+class a_proceed:  # noqa: N801  (reads as a constructor at the call site)
+    """Equal to a ``Proceed`` whose ``attempt_id`` is a lowercase UUIDv7 string.
+
+    ``attempt_id=ANY`` would also accept ``None`` or any string, and the id is
+    the one thing complete() and release() are guarded on.
+    """
+
+    def __init__(self, *, taken_over: bool) -> None:
+        self._taken_over = taken_over
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, Proceed)
+            and other.taken_over is self._taken_over
+            and isinstance(other.attempt_id, str)
+            and _UUID7.fullmatch(other.attempt_id) is not None
+        )
+
+    def __repr__(self) -> str:
+        return f"Proceed(taken_over={self._taken_over}, attempt_id=<uuid7>)"
+
+
 FP = "sha256:" + "a" * 64
 OTHER_FP = "sha256:" + "b" * 64
 
@@ -370,9 +394,7 @@ def claimer(request, pg_conn: asyncpg.Connection, postgres_dsn: str) -> _Claimer
 @pytest.mark.parametrize("kind", ["http", "event"])
 async def test_a_free_key_proceeds_and_leaves_a_leased_in_flight_record(claimer, kind):
     """Spec 2.3: no live record, so the operation runs."""
-    assert await claimer.claim(scope="t1", key="k", fingerprint=FP, kind=kind) == Proceed(
-        taken_over=False, attempt_id=ANY
-    )
+    assert await claimer.claim(scope="t1", key="k", fingerprint=FP, kind=kind) == a_proceed(taken_over=False)
     row = await claimer.row("t1", "k")
     assert row is not None
     assert (row["fingerprint"], row["kind"], row["state"]) == (FP, kind, "in_flight")
@@ -424,7 +446,7 @@ async def test_a_live_lease_is_409(claimer):
 async def test_an_expired_lease_is_taken_over_with_a_new_lease(claimer):
     """Spec 2.8: a crashed worker must not wedge a key for the retention window."""
     await claimer.seed(age=timedelta(hours=1), lease=timedelta(seconds=-5))
-    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=True, attempt_id=ANY)
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == a_proceed(taken_over=True)
     row = await claimer.row()
     assert row is not None
     assert timedelta(seconds=50) < row["lease_left"] <= timedelta(seconds=60)
@@ -446,7 +468,7 @@ async def test_a_record_past_retention_is_treated_as_new(claimer):
         body=b"old",
         media_type="application/json",
     )
-    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=False, attempt_id=ANY)
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == a_proceed(taken_over=False)
     row = await claimer.row()
     assert row is not None
     assert (row["fingerprint"], row["kind"], row["state"]) == (FP, "http", "in_flight")
@@ -488,7 +510,7 @@ async def test_an_in_flight_record_past_retention_with_a_dead_lease_is_new(claim
     await claimer.seed(
         fingerprint=OTHER_FP, age=timedelta(hours=25), lease=timedelta(seconds=-5)
     )
-    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=False, attempt_id=ANY)
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == a_proceed(taken_over=False)
     row = await claimer.row()
     assert row is not None
     assert row["fingerprint"] == FP
@@ -506,7 +528,7 @@ async def test_exactly_one_of_two_concurrent_first_requests_proceeds(claimer):
         claimer.claim(barrier=barrier, scope="", key="k", fingerprint=FP),
         return_exceptions=True,
     )
-    assert [o for o in outcomes if isinstance(o, Proceed)] == [Proceed(taken_over=False, attempt_id=ANY)]
+    assert [o for o in outcomes if isinstance(o, Proceed)] == [a_proceed(taken_over=False)]
     assert [o.code for o in outcomes if isinstance(o, HephError)] == ["HEPH-IDEMP-409"]
     assert await claimer.count_keys() == 1
 
@@ -520,7 +542,7 @@ async def test_exactly_one_of_two_concurrent_takeovers_proceeds(claimer):
         claimer.claim(barrier=barrier, scope="", key="k", fingerprint=FP),
         return_exceptions=True,
     )
-    assert [o for o in outcomes if isinstance(o, Proceed)] == [Proceed(taken_over=True, attempt_id=ANY)]
+    assert [o for o in outcomes if isinstance(o, Proceed)] == [a_proceed(taken_over=True)]
     assert [o.code for o in outcomes if isinstance(o, HephError)] == ["HEPH-IDEMP-409"]
 
 
@@ -563,7 +585,7 @@ async def test_none_is_a_type_error_not_an_empty_string(claimer, field):
 async def test_the_configured_lease_is_the_one_stored(claimer):
     store = IdempotencyStore(lease=timedelta(minutes=10))
     outcome = await claimer.claim(scope="", key="k", fingerprint=FP, store=store)
-    assert outcome == Proceed(taken_over=False, attempt_id=ANY)
+    assert outcome == a_proceed(taken_over=False)
     row = await claimer.row()
     assert row is not None
     assert timedelta(minutes=9) < row["lease_left"] <= timedelta(minutes=10)
@@ -630,7 +652,7 @@ async def test_a_record_that_vanishes_before_the_read_is_claimed_again(claimer):
     async with claimer.executor() as inner:
         churn = _ChurnsTheRecord(inner, claimer.reader, once=True)
         outcome = await claimer.store.claim(churn, scope="", key="k", fingerprint=FP)
-    assert outcome == Proceed(taken_over=False, attempt_id=ANY)
+    assert outcome == a_proceed(taken_over=False)
     assert churn.churns == 2
 
 
@@ -641,3 +663,183 @@ async def test_a_key_that_keeps_vanishing_is_409_rather_than_a_loop(claimer):
             await claimer.store.claim(churn, scope="", key="k", fingerprint=FP)
     assert exc.value.code == "HEPH-IDEMP-409"
     assert churn.churns == 4  # two passes, and no more
+
+
+# --- idempotent_record(): the default way out is release --------------------
+#
+# Two executors, because the boundaries differ: `claimer.executor()` has no
+# transaction open (claim and release), `adapter.transaction()` is the handler's
+# own, rolled back when an exception passes through it, as a real handler's is.
+
+
+@asynccontextmanager
+async def _record(claimer, adapter, *, key: str = "k", fingerprint: str = FP):
+    async with claimer.executor() as claim_ex, adapter.transaction() as work_ex:
+        async with claimer.store.idempotent_record(
+            claim_ex=claim_ex, work_ex=work_ex, scope="", key=key, fingerprint=fingerprint
+        ) as rec:
+            yield rec
+
+
+async def test_a_finished_block_stores_its_response_with_the_work_and_replays_it(claimer, adapter):
+    async with _record(claimer, adapter) as rec:
+        assert rec.replay is None and rec.taken_over is False
+        rec.finish(201, b'{"id":1}', "application/json")
+    row = await claimer.row()
+    assert row is not None and row["state"] == "completed"
+    assert (row["response_status"], bytes(row["response_body"])) == (201, b'{"id":1}')
+    assert row["response_media_type"] == "application/json"
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Replay(
+        201, b'{"id":1}', "application/json"
+    )
+
+
+async def test_the_stored_response_commits_and_rolls_back_with_the_handlers_work(claimer, adapter):
+    """finish() is written to work_ex: if the caller then rolls back, the record is not completed."""
+    async with claimer.executor() as claim_ex, adapter.transaction() as work_ex:
+        async with claimer.store.idempotent_record(
+            claim_ex=claim_ex, work_ex=work_ex, scope="", key="k", fingerprint=FP
+        ) as rec:
+            rec.finish(201, b"{}")
+        await adapter.rollback()
+    row = await claimer.row()
+    assert row is not None and row["state"] == "in_flight" and row["response_status"] is None
+
+
+async def test_a_block_that_never_finishes_releases_rather_than_wedging(claimer, adapter):
+    async with _record(claimer, adapter):
+        pass
+    assert await claimer.count_keys() == 0
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == a_proceed(taken_over=False)
+
+
+@pytest.mark.parametrize("status", [500, 503])
+async def test_a_finish_at_500_or_above_releases(claimer, adapter, status):
+    async with _record(claimer, adapter) as rec:
+        rec.finish(status, b"boom")
+    assert await claimer.count_keys() == 0
+
+
+async def test_an_exception_inside_the_block_releases_the_record(claimer, adapter):
+    with pytest.raises(RuntimeError, match="boom"):
+        async with _record(claimer, adapter):
+            raise RuntimeError("boom")
+    assert await claimer.count_keys() == 0
+
+
+async def test_an_exception_after_finish_releases_rather_than_storing(claimer, adapter):
+    """A stated outcome does not survive the handler failing afterwards."""
+    with pytest.raises(RuntimeError):
+        async with _record(claimer, adapter) as rec:
+            rec.finish(201, b"{}")
+            raise RuntimeError("failed after finishing")
+    assert await claimer.count_keys() == 0
+
+
+async def test_a_cancellation_releases_the_record(claimer, adapter):
+    with pytest.raises(asyncio.CancelledError):
+        async with _record(claimer, adapter):
+            raise asyncio.CancelledError
+    assert await claimer.count_keys() == 0
+
+
+async def test_a_sub_500_HephError_is_stored_not_released(claimer, adapter):
+    """Review Focus 2. A raised 422 is still a real outcome of the operation (2.8).
+
+    `except Exception: release` is the obvious implementation and it is wrong.
+    The exception also rolls the handler's transaction back, so the record has
+    to reach the table through the executor that is not in it.
+    """
+    with pytest.raises(HephError) as exc:
+        async with _record(claimer, adapter):
+            raise HephError("HEPH-VAL-422", "bad field")
+    assert exc.value.code == "HEPH-VAL-422"
+    row = await claimer.row()
+    assert row is not None
+    assert (row["state"], row["response_status"]) == ("completed", 422)
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Replay(422, b"", None)
+
+
+async def test_a_HephError_of_500_or_above_releases(claimer, adapter):
+    with pytest.raises(HephError):
+        async with _record(claimer, adapter):
+            raise HephError("HEPH-GEN-500")
+    assert await claimer.count_keys() == 0
+
+
+async def test_a_replay_is_handed_to_the_caller_and_the_work_is_skipped(claimer, adapter):
+    async with _record(claimer, adapter) as first:
+        first.finish(201, b"{}", "application/json")
+    ran: list[str] = []
+    async with _record(claimer, adapter) as rec:
+        assert rec.replay == Replay(201, b"{}", "application/json")
+        if rec.replay is None:
+            ran.append("work")
+    assert ran == []
+    with pytest.raises(RuntimeError, match="replay"):
+        rec.finish(200, b"")
+    row = await claimer.row()
+    assert row is not None and row["state"] == "completed" and row["response_status"] == 201
+
+
+async def test_a_block_over_a_replay_that_raises_leaves_the_stored_record(claimer, adapter):
+    await claimer.seed(state="completed", lease=None, status=200, body=b"ok")
+    with pytest.raises(RuntimeError):
+        async with _record(claimer, adapter) as rec:
+            assert rec.replay is not None
+            raise RuntimeError("after replay")
+    row = await claimer.row()
+    assert row is not None and row["state"] == "completed"
+
+
+async def test_a_claim_that_refuses_raises_from_the_context_and_the_block_never_runs(claimer, adapter):
+    await claimer.seed()  # a live lease
+    ran = False
+    with pytest.raises(HephError) as exc:
+        async with _record(claimer, adapter):
+            ran = True
+    assert exc.value.code == "HEPH-IDEMP-409" and ran is False
+    row = await claimer.row()
+    assert row is not None and row["state"] == "in_flight"  # the owner's record, untouched
+
+    with pytest.raises(HephError) as exc:
+        async with _record(claimer, adapter, fingerprint=OTHER_FP):
+            ran = True
+    assert exc.value.code == "HEPH-IDEMP-422" and ran is False
+
+
+async def test_a_takeover_is_reported_and_the_superseded_attempt_cannot_finish(claimer, adapter):
+    """The attempt token flows through the context, so callers never see it."""
+    await claimer.seed(age=timedelta(hours=1), lease=timedelta(seconds=-5))
+    with pytest.raises(IdempotencyStateError):
+        async with _record(claimer, adapter) as a:
+            assert a.taken_over is True
+            # A's lease lapses while it works, and B takes the record over.
+            await claimer.reader.execute(
+                "UPDATE heph_idempotency SET lease_expires_at = now() - interval '1 second'"
+            )
+            assert await claimer.claim(scope="", key="k", fingerprint=FP) == a_proceed(taken_over=True)
+            a.finish(201, b"from A")
+    row = await claimer.row()
+    # B's record is neither completed with A's response nor released by A.
+    assert row is not None and row["state"] == "in_flight" and row["response_body"] is None
+
+
+class _Fails:
+    """An executor whose every write fails, standing in for a broken work connection."""
+
+    async def fetch_one(self, sql, params):
+        raise AssertionError("not used")
+
+    async def execute(self, sql, params):
+        raise ConnectionError("work connection lost")
+
+
+async def test_a_record_that_cannot_be_written_is_released_and_the_error_propagates(claimer):
+    with pytest.raises(ConnectionError):
+        async with claimer.executor() as claim_ex:
+            async with claimer.store.idempotent_record(
+                claim_ex=claim_ex, work_ex=_Fails(), scope="", key="k", fingerprint=FP
+            ) as rec:
+                rec.finish(201, b"{}")
+    assert await claimer.count_keys() == 0

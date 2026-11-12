@@ -15,13 +15,12 @@ age one, because the store refuses anything under 24 hours (spec 2.7).
 from __future__ import annotations
 
 from datetime import timedelta
-from unittest.mock import ANY
 
 import asyncpg
 import pytest
 
 # The claimer machinery lives in the claim tests; importing it keeps one copy.
-from test_idempotency_store import _SEED, FP, claimer  # noqa: F401
+from test_idempotency_store import _SEED, FP, a_proceed, claimer  # noqa: F401
 
 from hephkit.errors import HephError
 from hephkit.idempotency.adapters import AsyncpgExecutor
@@ -57,6 +56,36 @@ async def _claim(dsn: str) -> Proceed | Replay:
 
 
 # complete(): in the caller's transaction.
+
+
+async def _claim_then_complete(claimer, adapter) -> None:
+    claimed = await claimer.claim(scope="", key="k", fingerprint=FP)
+    assert isinstance(claimed, Proceed)
+    async with adapter.transaction() as ex:
+        await STORE.complete(
+            ex, scope="", key="k", attempt_id=claimed.attempt_id, status=201, body=b"{}"
+        )
+    row = await claimer.row()
+    assert row is not None
+    assert (row["state"], row["response_status"]) == ("completed", 201)
+
+
+async def test_the_id_a_fresh_claim_returns_is_the_one_that_completes_it(claimer, adapter):
+    """The happy path, which nothing else exercised.
+
+    If CLAIM_INSERT dropped attempt_id and fell back to the column's
+    gen_random_uuid() default, the id claim returns would match no row and every
+    first-attempt complete() would raise in production, with no other test red.
+    """
+    await _claim_then_complete(claimer, adapter)
+
+
+async def test_the_id_a_retention_reset_claim_returns_is_the_one_that_completes_it(claimer, adapter):
+    """The same for the DO UPDATE arm, which sets attempt_id separately from the insert."""
+    await claimer.seed(
+        fingerprint=FP, age=timedelta(hours=25), state="completed", lease=None, status=200, body=b"old"
+    )
+    await _claim_then_complete(claimer, adapter)
 
 
 async def test_completing_stores_the_response_and_a_claim_replays_it(
@@ -164,7 +193,7 @@ async def test_a_released_record_can_be_claimed_again(claimer):
     async with claimer.executor() as ex:
         await claimer.store.release(ex, scope="", key="k", attempt_id=aid)
     assert await claimer.count_keys() == 0  # read from another connection: it committed
-    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=False, attempt_id=ANY)
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == a_proceed(taken_over=False)
 
 
 async def test_release_never_removes_a_completed_record(claimer):

@@ -12,7 +12,8 @@ both are explained on :meth:`IdempotencyStore.claim`.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Any, Final, Literal
 
@@ -21,7 +22,7 @@ from hephkit.hashing import new_uuid7
 from hephkit.idempotency import _sql
 from hephkit.idempotency.ports import Executor, Proceed, Replay
 
-__all__ = ["IdempotencyStateError", "IdempotencyStore"]
+__all__ = ["IdempotencyStateError", "IdempotencyStore", "Record"]
 
 
 class IdempotencyStateError(RuntimeError):
@@ -32,6 +33,35 @@ class IdempotencyStateError(RuntimeError):
     already completed, or is held by another attempt, which after a 2.8
     takeover means this attempt has been superseded.
     """
+
+
+class Record:
+    """What ``idempotent_record()`` hands the block: whether to run, and how to say how it went.
+
+    ``replay`` is not ``None`` when a completed record already answers the
+    request: the block did not claim anything, so it returns that response and
+    does the work no further. ``taken_over`` is the claim's flag, for telemetry.
+
+    The attempt token (2.8) lives inside, so the caller never threads it by hand.
+    """
+
+    def __init__(self, *, replay: Replay | None, taken_over: bool, attempt_id: str | None) -> None:
+        self.replay = replay
+        self.taken_over = taken_over
+        self._attempt_id = attempt_id
+        self._outcome: tuple[int, bytes, str | None] | None = None
+
+    def finish(self, status: int, body: bytes, media_type: str | None = None) -> None:
+        """State the outcome. It is written when the block exits cleanly.
+
+        A ``status`` of 500 or above is an outcome that releases the record
+        rather than storing it (2.8), so the client can retry. A later call
+        replaces an earlier one.
+        """
+        if self.replay is not None:
+            raise RuntimeError("this record is a replay: return the stored response, do not finish it")
+        self._outcome = (status, body, media_type)
+
 
 # The defaults of 2.7, which also fix the floor: retention MAY be configured
 # longer, so anything shorter is not a setting but a hole in the guarantee.
@@ -278,3 +308,103 @@ class IdempotencyStore:
         because retention expiry applies only when no attempt holds the key.
         """
         return await ex.execute(_sql.PURGE_EXPIRED, [self._retention])
+
+    @asynccontextmanager
+    async def idempotent_record(
+        self,
+        *,
+        claim_ex: Executor,
+        work_ex: Executor,
+        scope: str,
+        key: str,
+        fingerprint: str,
+        kind: Literal["http", "event"] = "http",
+    ) -> AsyncIterator[Record]:
+        """Claim a key around a block, so that finishing the record cannot be forgotten.
+
+        Python cannot make a forgotten ``finish`` a type error, so the way out
+        is made safe instead: **the default is release, never leave-in-flight.**
+        A record whose outcome nobody stated is an unknown outcome, and 2.8 says
+        unknown means removed.
+
+        Two executors, because the boundaries differ (see
+        :mod:`hephkit.idempotency.ports`). ``claim_ex`` has no transaction open:
+        it claims, and it releases. ``work_ex`` is the handler's own transaction,
+        still open when the block exits, and a ``finish`` is written to it so the
+        stored response and the work commit together. Open this inside that
+        transaction.
+
+        A claim that answers :class:`Replay` still enters the block, once, with
+        ``record.replay`` set and nothing held; the caller returns that response.
+        A claim that raises (2.5, 2.6) raises from here and the block never runs.
+
+        On the way out:
+
+        * clean exit after ``finish`` below 500: ``complete()`` on ``work_ex``;
+        * clean exit with no ``finish``, or ``finish`` at 500 or above: release;
+        * a raised ``HephError`` **below 500**: stored, as a 4xx the operation
+          really produced (2.8), with that status and an empty body, because
+          building a body is the layer above's job. This is the exception to
+          "an exception releases", and the rule is the registry's status, not
+          the exception type. It goes through ``claim_ex`` rather than
+          ``work_ex``: the exception is about to roll the handler's transaction
+          back, which would take a record written there with it and leave the
+          key in flight. A 4xx has no work to keep, so committing it alone is
+          right;
+        * any other exception, a ``HephError`` of 500 or above, or a cancellation:
+          release, and the exception propagates.
+
+        If writing the record fails, the record is released and that error
+        propagates. A raised :class:`IdempotencyStateError` there means this
+        attempt was superseded; its release is a no-op by the attempt guard.
+        """
+        proceed = await self.claim(
+            claim_ex, scope=scope, key=key, fingerprint=fingerprint, kind=kind
+        )
+        if isinstance(proceed, Replay):
+            yield Record(replay=proceed, taken_over=False, attempt_id=None)
+            return
+        record = Record(replay=None, taken_over=proceed.taken_over, attempt_id=proceed.attempt_id)
+        attempt = proceed.attempt_id
+        try:
+            yield record
+        except HephError as exc:
+            if exc.status >= 500:
+                await self.release(claim_ex, scope=scope, key=key, attempt_id=attempt)
+                raise
+            await self._store_or_release(
+                claim_ex, claim_ex, scope, key, attempt, (exc.status, b"", None)
+            )
+            raise
+        except BaseException:
+            await self.release(claim_ex, scope=scope, key=key, attempt_id=attempt)
+            raise
+        outcome = record._outcome
+        if outcome is None or outcome[0] >= 500:
+            await self.release(claim_ex, scope=scope, key=key, attempt_id=attempt)
+            return
+        await self._store_or_release(work_ex, claim_ex, scope, key, attempt, outcome)
+
+    async def _store_or_release(
+        self,
+        write_ex: Executor,
+        claim_ex: Executor,
+        scope: str,
+        key: str,
+        attempt_id: str,
+        outcome: tuple[int, bytes, str | None],
+    ) -> None:
+        status, body, media_type = outcome
+        try:
+            await self.complete(
+                write_ex,
+                scope=scope,
+                key=key,
+                attempt_id=attempt_id,
+                status=status,
+                body=body,
+                media_type=media_type,
+            )
+        except BaseException:
+            await self.release(claim_ex, scope=scope, key=key, attempt_id=attempt_id)
+            raise
