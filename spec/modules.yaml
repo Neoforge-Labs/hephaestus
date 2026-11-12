@@ -47,6 +47,7 @@
 - {name: telemetry, home: compose, status: shipped, maturity: experimental, spec_section: null}
 
 # Base images
+- {name: mlflow, home: docker, status: shipped, maturity: experimental, spec_section: null}
 - {name: node, home: docker, status: shipped, maturity: experimental, spec_section: null}
 - {name: python, home: docker, status: shipped, maturity: experimental, spec_section: null}
 

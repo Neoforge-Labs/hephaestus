@@ -10,6 +10,11 @@
       "maturity": "experimental"
     },
     {
+      "name": "mlflow",
+      "home": "compose",
+      "maturity": "experimental"
+    },
+    {
       "name": "objects",
       "home": "compose",
       "maturity": "experimental"
@@ -32,6 +37,11 @@
     {
       "name": "telemetry",
       "home": "compose",
+      "maturity": "experimental"
+    },
+    {
+      "name": "mlflow",
+      "home": "docker",
       "maturity": "experimental"
     },
     {

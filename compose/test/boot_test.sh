@@ -43,6 +43,11 @@ check "stripe refuses to start without STRIPE_API_KEY" stripe_needs_key
 check "stripe config valid with a key" \
   env STRIPE_API_KEY=sk_test_dummy docker compose -p "$P" -f "$DIR/stripe.yaml" config -q
 
+# mlflow: depends_on postgres and objects, so it cannot run alone; assert the
+# wiring resolves when it sits beside them.
+check "mlflow config valid beside postgres and objects" \
+  docker compose -p "$P" -f "$DIR/postgres.yaml" -f "$DIR/objects.yaml" -f "$DIR/mlflow.yaml" config -q
+
 # --- 2. everything except stripe, merged --------------------------------------
 MERGED=()
 for f in postgres objects telemetry mail redis mlflow; do MERGED+=(-f "$DIR/$f.yaml"); done
