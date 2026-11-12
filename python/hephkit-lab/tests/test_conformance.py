@@ -24,6 +24,8 @@ import test_repro
 from pydantic import ValidationError, create_model
 
 from hephkit.lab.config import ConfigError, ExperimentConfig, config_hash, resolve
+from hephkit.lab.record import NONFINITE, NONFINITE_MEMBER, RunRecord, open_record, read_record
+from hephkit.lab.replay import compare
 from hephkit.lab.repro import Accelerator, ProvenanceRecord, capture
 
 ROOT = Path(__file__).resolve().parents[3] / "conformance"
@@ -231,9 +233,48 @@ def run_record_case(case: Case, tmp_path: Path) -> None:
         run_record(case, tmp_path)
 
 
+def a_row_value(value: Any) -> float | str:
+    """A vector's row value as spec 8.2 reads it, undoing the non-finite wrapper.
+
+    The three spellings come from `lab.record`, so the vectors and the writer
+    cannot disagree about which value `{"nonfinite": "NaN"}` names.
+    """
+    if isinstance(value, dict):
+        return NONFINITE[value[NONFINITE_MEMBER]]
+    return value  # type: ignore[no-any-return]
+
+
+def build_side(side: Mapping[str, Any], directory: Path) -> RunRecord:
+    """Write the record a `lab.diff` case describes, and read it back.
+
+    Written with `open_record` and read with `read_record` rather than
+    assembled in memory: a replay compares records that came off a disk, so
+    the non-finite wrapper and the canonical-JSON round trip are exercised by
+    the code that owns them instead of being reimplemented here.
+    """
+    provenance = ProvenanceRecord.model_validate(side["provenance"])
+    with open_record(directory, provenance) as record:
+        for row in side["rows"]:
+            record.append_row(
+                row["cell"], {name: a_row_value(v) for name, v in row["values"].items()}
+            )
+    return read_record(directory)
+
+
+def run_diff(case: Case, tmp_path: Path) -> None:
+    """One `lab.diff` case: two records in, one difference report out (spec 9)."""
+    recorded = build_side(case["input"]["recorded"], tmp_path / "recorded")
+    replayed = build_side(case["input"]["replayed"], tmp_path / "replayed")
+    report = compare(recorded, replayed).as_document()
+    expect = case["expect"]
+    assert report == expect
+    assert_member_order(report, expect)
+
+
 RUNNERS: dict[str, Callable[[Case, Path], None]] = {
     "lab.config": run_config,
     "lab.record": run_record_case,
+    "lab.diff": run_diff,
 }
 
 
@@ -281,8 +322,9 @@ def test_the_member_order_check_reaches_a_nested_object() -> None:
 def test_the_member_order_check_descends_into_an_array_of_objects() -> None:
     """Arrays are descended into, with the index in the path.
 
-    Nothing in `record.json` is shaped like this; the suites after it may be,
-    and a helper that skipped arrays would hand them a case that cannot fail.
+    Nothing in `record.json` is shaped like this; `diff.json` is -- its
+    `expect.differences` is an array of objects -- and a helper that skipped
+    arrays would hand that suite a case that cannot fail.
     """
     document = {"cases": [{"a": 1}, {"b": 2, "c": 3}]}
     assert_member_order(document, {"cases": [{"a": 1}, {"b": 2, "c": 3}]})
@@ -290,6 +332,23 @@ def test_the_member_order_check_descends_into_an_array_of_objects() -> None:
         assert_member_order(document, {"cases": [{"a": 1}, {"c": 3, "b": 2}]})
     with pytest.raises(AssertionError, match=r"array length at <root>\.cases"):
         assert_member_order(document, {"cases": [{"a": 1}]})
+
+
+def test_the_member_order_check_descends_into_an_object_inside_an_array_element() -> None:
+    """One more level than the test above, which `lab.diff` reaches.
+
+    A difference whose `recorded` is 8.2's `{"nonfinite": ...}` wrapper is an
+    object nested inside an array element, so the recursion has to keep going
+    rather than stop at the element itself. The path names both steps.
+    """
+    document = {"differences": [{"key": "loss", "recorded": {"nonfinite": "NaN"}}]}
+    assert_member_order(document, {"differences": [{"key": "loss", "recorded": {"nonfinite": "NaN"}}]})
+    with pytest.raises(
+        AssertionError, match=r"member order at <root>\.differences\[0\]\.recorded"
+    ):
+        assert_member_order(
+            document, {"differences": [{"key": "loss", "recorded": {"NaN": "nonfinite"}}]}
+        )
 
 
 def test_the_member_order_check_refuses_a_value_of_the_wrong_kind() -> None:

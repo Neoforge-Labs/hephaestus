@@ -85,6 +85,7 @@ from hephkit.lab.repro import ProvenanceRecord
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
+    "NONFINITE",
     "NONFINITE_MEMBER",
     "PROVENANCE_NAME",
     "ROWS_NAME",
@@ -94,6 +95,7 @@ __all__ = [
     "Row",
     "RunRecord",
     "Summary",
+    "encode_value",
     "open_record",
     "read_record",
     "register",
@@ -154,7 +156,7 @@ class Row(BaseModel):
         """This row as the JSON-ready document 8.2 defines."""
         return {
             "cell": self.cell,
-            "values": {name: _encode_value(value) for name, value in self.values.items()},
+            "values": {name: encode_value(value) for name, value in self.values.items()},
         }
 
 
@@ -204,8 +206,14 @@ def _write_durably(handle: TextIO, text: str) -> None:
     os.fsync(handle.fileno())
 
 
-def _encode_value(value: float | str) -> Any:
-    """A row value as 8.2 writes it: a string, a finite number, or the wrapper."""
+def encode_value(value: float | str) -> Any:
+    """A row value as 8.2 writes it: a string, a finite number, or the wrapper.
+
+    Public because section 9's difference report carries row values too, and a
+    report is read: a non-finite one has to leave this package as 8.2's wrapper
+    rather than as a token no conforming JSON parser accepts. One encoder, so
+    the record and the report cannot drift apart.
+    """
     if isinstance(value, str):
         return value
     if math.isfinite(value):
