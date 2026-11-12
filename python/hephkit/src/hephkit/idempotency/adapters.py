@@ -141,10 +141,11 @@ def _pool_timeout(role: str) -> HephError:
     """
     error = HephError(DB_503)
     error.args = (
-        f"timed out acquiring the {role} connection: the pool had none free. An idempotent "
-        "request holds two connections and waits for the second while holding the first, so a "
-        "single pool needs twice the route's peak concurrency. Pass claim_pool= to take the "
-        "claim connections from a pool of their own, or raise the pool's size.",
+        f"timed out acquiring the {role} connection: the pool had none free. Every idempotent "
+        "request or delivery holds two connections and waits for the second while holding the "
+        "first, so a single pool needs twice the peak concurrency of whatever uses it. Pass "
+        "claim_pool= to take the claim connections from a pool of their own, or raise the "
+        "pool's size.",
     )
     return error
 
