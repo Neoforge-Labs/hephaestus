@@ -29,6 +29,7 @@
 # Python research core (the hephkit-lab distribution, ADR 0021)
 - {name: lab.config, home: python, status: shipped, maturity: experimental, spec_section: null}
 - {name: lab.repro, home: python, status: shipped, maturity: experimental, spec_section: "7"}
+- {name: lab.record, home: python, status: shipped, maturity: experimental, spec_section: "8"}
 
 # Rust core
 - {name: hephkit-core, home: rust, status: shipped, maturity: experimental, spec_section: null}
