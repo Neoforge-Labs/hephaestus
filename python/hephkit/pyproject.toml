@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "hephkit"
-version = "0.3.0"
+version = "0.2.0"
 description = "Hephaestus correctness kit: money, canonical JSON, content hashing and webhook signatures over the Rust core (experimental)"
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -80,7 +80,7 @@ python_version = "3.12"
 # `src/hephkit` as a package base too and reach the same file under two module
 # names -- "Source file found twice under different module names". Naming `src`
 # as the one explicit base resolves every file to `hephkit.*` and nothing else.
-mypy_path = "src"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
 explicit_package_bases = true
 
 # asyncpg ships no stubs and no py.typed marker.
