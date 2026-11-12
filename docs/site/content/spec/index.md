@@ -4,11 +4,11 @@
 title: "heph-spec"
 ---
 
-> **Two version numbers.** This page is version 0.3.0 of the specification. The packages (`hephkit`, `hephkit-core` and the Go module) are versioned independently: a change to the specification bumps the spec version, while package releases follow their own commit history, so the two numbers need not match. Package versions are published with the project's releases.
+> **Two version numbers.** This page is version 0.4.0 of the specification. The packages (`hephkit`, `hephkit-core` and the Go module) are versioned independently: a change to the specification bumps the spec version, while package releases follow their own commit history, so the two numbers need not match. Package versions are published with the project's releases.
 
 # heph-spec
 
-- **Version:** 0.3.0
+- **Version:** 0.4.0
 - **Status:** Draft for implementation in Phase 1; every module implementing it is `experimental`.
 - **Registries:** `spec/errors.yaml` (error codes), `conventions/attributes.yaml` (telemetry attributes), `spec/currencies.yaml` (ISO 4217 minor units, with its publication pinned by `spec/currencies.source.yaml`).
 
@@ -21,7 +21,9 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 - A fingerprint mismatch returns `HEPH-IDEMP-422` even while the original is in flight (2.6).
 - Fingerprint `path` is the raw request target including the query string, never normalised (2.2).
 - Fingerprint `body` is `null` when empty, and `sha256:` plus the hex of the raw bytes for non-JSON media types (2.2).
-- Idempotency records carry a 60 second default lease; 5xx and raised errors release the record, status below 500 is stored and replayed (2.7, 2.8).
+- Idempotency records carry a 60 second default lease. A response with status below 500 is stored and replayed; a response of 500 or above, or a handler that raises, releases the record. A raised error that is itself the sub-500 response the client receives, as on an HTTP route, is stored like any other 4xx; an event handler answers no client, so a raised error there always releases and the broker redelivers (2.7, 2.8).
+- A record whose `in_flight` lease is still live is never treated as new, however old it is: retention expiry applies only when no attempt holds the key (2.7).
+- Taking over an expired lease transfers ownership of the record, and an attempt that has been superseded may neither complete nor release it (2.8).
 - Integer literals above 2^53-1 are rejected with `HEPH-VAL-422`, never rounded; literals with a fraction or exponent follow RFC 8785 number serialisation (4.3).
 - Money `amount` is a string matching `^(0|-?[1-9][0-9]*)$`; JSON numbers are rejected (3.2, 3.4).
 - Fractional digits beyond a currency's exponent are accepted when every one of them is zero, because the value is preserved exactly; a non-zero digit beyond the exponent still needs a rounding mode (3.6, ADR 0016).

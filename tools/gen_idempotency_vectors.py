@@ -42,7 +42,7 @@ from typing import Any
 
 import rfc8785
 
-SPEC_VERSION = "0.3.0"
+SPEC_VERSION = "0.4.0"
 OUT_DIR = Path("conformance/idempotency")
 
 # The example written into spec 2.2. If this stops matching, either the spec or
