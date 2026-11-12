@@ -15,17 +15,25 @@ if TYPE_CHECKING:
     import asyncpg
     from sqlalchemy.ext.asyncio import AsyncConnection
 
+from hephkit.idempotency.ports import Executor
+
 __all__ = ["AsyncpgExecutor", "SQLAlchemyExecutor"]
 
-# `$1` -> `:p1`. A `::` cast straight after a placeholder gets a space first,
-# because SQLAlchemy's bind-name scanner would otherwise read `:p1::text` as
-# the bind `:p` followed by `1::text`.
-_PLACEHOLDER: Final = re.compile(r"\$(\d+)(::)?")
+# `$1` -> ` :p1 `, always padded with a space on both sides. SQLAlchemy's bind-name scanner
+# reads `:p1::text` as the bind `:p` and `arr[:p1:p2]` likewise, so a placeholder
+# must never touch a neighbouring colon (`$1:$2` would otherwise become `:p1::p2`); the space is harmless to Postgres.
+#
+# PRECONDITION: this is a plain regex over the statement. It is safe only
+# because every statement is one of hephkit's own module constants. A `$n`
+# inside a quoted string literal WOULD be rewritten (`WHERE note = 'owes $1'`
+# becomes `'owes  :p1 '`, which `text()` then treats as a bind). Never pass a
+# statement that contains `$n` in a literal, and never one built from input.
+_PLACEHOLDER: Final = re.compile(r"\$(\d+)")
 _AFFECTED: Final = re.compile(r"(\d+)\s*$")
 
 
 def _rewrite(sql: str) -> str:
-    return _PLACEHOLDER.sub(lambda m: f":p{m.group(1)}" + (" ::" if m.group(2) else ""), sql)
+    return _PLACEHOLDER.sub(lambda m: f" :p{m.group(1)} ", sql)
 
 
 class AsyncpgExecutor:
@@ -47,7 +55,9 @@ class AsyncpgExecutor:
     async def execute(self, sql: str, params: Sequence[Any]) -> int:
         status = await self._conn.execute(sql, *params)
         match = _AFFECTED.search(status)
-        return int(match.group(1)) if match else 0
+        if match is None:
+            raise ValueError(f"cannot read a row count from the command status {status!r}")
+        return int(match.group(1))
 
 
 class SQLAlchemyExecutor:
@@ -87,3 +97,8 @@ class SQLAlchemyExecutor:
     @staticmethod
     def _bind(params: Sequence[Any]) -> dict[str, Any]:
         return {f"p{i}": v for i, v in enumerate(params, start=1)}
+
+
+# Static check that both adapters satisfy the port; signature drift fails mypy.
+_ASYNCPG_IS_AN_EXECUTOR: Final[type[Executor]] = AsyncpgExecutor
+_SQLALCHEMY_IS_AN_EXECUTOR: Final[type[Executor]] = SQLAlchemyExecutor

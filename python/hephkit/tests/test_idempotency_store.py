@@ -123,7 +123,8 @@ async def test_a_committed_transaction_keeps_them(adapter):
         await ex.execute(INSERT_SQL, ["", "committed", "sha256:x"])
         await adapter.commit()
     assert await adapter.count_keys() == 1
-    assert (await adapter.fetch_key("", "committed"))["fingerprint"] == "sha256:x"
+    row = await adapter.fetch_key("", "committed")
+    assert row is not None and row["fingerprint"] == "sha256:x"
 
 
 async def test_the_executors_writes_are_invisible_to_others_until_commit(adapter):
@@ -138,7 +139,8 @@ async def test_a_key_containing_a_colon_and_a_percent_is_a_value_not_a_template(
     key = "urn:uuid:7b%2Dff:name"  # every character is VCHAR, so 2.1 allows it
     async with adapter.transaction() as ex:
         await ex.execute(INSERT_SQL, ["", key, "sha256:x"])
-    assert (await adapter.fetch_key("", key))["key"] == key
+    row = await adapter.fetch_key("", key)
+    assert row is not None and row["key"] == key
 
 
 async def test_execute_returns_the_number_of_rows_affected(adapter):
@@ -180,6 +182,23 @@ async def test_a_cast_directly_after_a_placeholder_survives_the_rewrite(adapter)
         assert row is not None and row["v"] == "a:b"
 
 
+async def test_a_colon_after_a_placeholder_is_not_read_as_a_bind(adapter):
+    async with adapter.transaction() as ex:
+        row = await ex.fetch_one("SELECT (ARRAY[10, 20, 30, 40])[$1:$2] AS v", [2, 3])
+        assert row is not None and list(row["v"]) == [20, 30]
+
+
+async def test_an_unreadable_command_status_is_an_error_not_zero_rows():
+    from hephkit.idempotency.adapters import AsyncpgExecutor
+
+    class Conn:
+        async def execute(self, sql, *params):
+            return "BOGUS"
+
+    with pytest.raises(ValueError, match="BOGUS"):
+        await AsyncpgExecutor(Conn()).execute("x", [])  # type: ignore[arg-type]
+
+
 async def test_response_body_round_trips_bytes_that_are_not_utf8(adapter):
     body = bytes(range(256))  # not valid UTF-8, so jsonb or text would reject or alter it
     async with adapter.transaction() as ex:
@@ -194,7 +213,8 @@ async def test_response_body_round_trips_bytes_that_are_not_utf8(adapter):
             ["", "bin"],
         )
         assert row is not None and bytes(row["response_body"]) == body
-    assert bytes((await adapter.fetch_key("", "bin"))["response_body"]) == body
+    stored = await adapter.fetch_key("", "bin")
+    assert stored is not None and bytes(stored["response_body"]) == body
 
 
 @pytest.mark.parametrize("module", ["asyncpg", "sqlalchemy"])

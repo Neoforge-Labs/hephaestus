@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 import asyncpg
 import pytest
@@ -49,6 +49,15 @@ class _Harness:
     def __init__(self, pg_conn: asyncpg.Connection) -> None:
         self._reader = pg_conn
         self._finish: str | None = None
+
+    def transaction(self) -> AbstractAsyncContextManager[Executor]:
+        raise NotImplementedError
+
+    async def rollback(self) -> None:
+        raise NotImplementedError
+
+    async def commit(self) -> None:
+        raise NotImplementedError
 
     async def count_keys(self) -> int:
         return int(await self._reader.fetchval("SELECT count(*) FROM heph_idempotency"))

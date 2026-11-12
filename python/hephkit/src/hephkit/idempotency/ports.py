@@ -29,5 +29,9 @@ class Executor(Protocol):
         ...
 
     async def execute(self, sql: str, params: Sequence[Any]) -> int:
-        """Run a statement and return the number of rows it affected."""
+        """Run an INSERT, UPDATE or DELETE and return the number of rows it affected.
+
+        DML only. On a SELECT the adapters disagree (asyncpg's status yields the
+        row count, SQLAlchemy's ``rowcount`` is typically -1); use ``fetch_one``.
+        """
         ...
