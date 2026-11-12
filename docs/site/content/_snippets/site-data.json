@@ -40,11 +40,6 @@
       "maturity": "experimental"
     },
     {
-      "name": "mlflow",
-      "home": "docker",
-      "maturity": "experimental"
-    },
-    {
       "name": "node",
       "home": "docker",
       "maturity": "experimental"

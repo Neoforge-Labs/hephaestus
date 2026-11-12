@@ -3,20 +3,28 @@
 # credentials and a throwaway artifact bucket. Never deploy this fragment.
 # REQUIRES the `postgres` and `objects` fragments in dev.fragments: it has
 # depends_on on both, so on its own it fails with an undefined-service error.
+# Needs Docker Compose 2.17+ (dockerfile_inline).
 # Host port 54500. Backend store: the `mlflow` database in the postgres
 # fragment. Artifacts: the `mlflow` bucket in the objects (SeaweedFS) fragment,
 # proxied through the server, so clients need no S3 credentials. Credentials
 # are the dev ones from postgres.yaml and seaweedfs-s3.json.
 services:
   mlflow:
-    # The official image ships neither a Postgres driver nor boto3, so this is
-    # docker/mlflow: that image plus both, pinned and baked in at build time. The
-    # command creates the database and bucket if absent. A separate database (not
-    # `heph`) keeps MLflow's own `alembic_version` table away from Hephaestus
-    # migrations.
+    # The official image ships neither a Postgres driver nor boto3, so it is
+    # extended here, inline, so the build travels with the fragment when `heph
+    # dev` materialises it (a path into the repo would not exist there). Base
+    # pinned by digest (tag: v3.1.1); to bump, resolve the new digest with
+    # `docker buildx imagetools inspect` and bump the image tag below, or
+    # Compose reuses the old local image. The command creates the database and
+    # bucket if absent. A separate database (not `heph`) keeps MLflow's own
+    # `alembic_version` table away from Hephaestus migrations.
     build:
-      context: ../docker/mlflow
-    image: heph-mlflow:dev
+      context: .
+      dockerfile_inline: |
+        FROM ghcr.io/mlflow/mlflow@sha256:e8c9caf0615dd18a766091a3c37a41ecca2a00d663bc9a6d8b7417950d828114
+        RUN pip install --no-cache-dir --disable-pip-version-check --root-user-action=ignore \
+            psycopg2-binary==2.9.10 boto3==1.38.46
+    image: heph-mlflow:3.1.1-1
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,7 +62,8 @@ services:
       # /health is static liveness: it does not touch the backend store, so a
       # healthy container is not evidence Postgres works (boot_test.sh checks
       # that through the API). A future condition: service_healthy on mlflow
-      # is weaker than it looks. Probed from inside, against loopback (the server binds 0.0.0.0). The
+      # is weaker than it looks.
+      # Probed from inside, against loopback (the server binds 0.0.0.0). The
       # image has no curl or wget, hence python. Slow first boot: database
       # and bucket creation, then the server's own migrations against Postgres,
       # so the budget is generous (start_period + 30 x 5 s).
