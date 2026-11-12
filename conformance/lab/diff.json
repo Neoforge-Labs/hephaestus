@@ -811,21 +811,21 @@
             }
           ]
         },
-        "derivation": "9.2: a cell only one side holds appears as one difference per value it holds, so every unaccounted-for value is named; the `null` says the position is absent, since a row value is never null (8.2). The order is the record's rows and each row's `values`."
+        "derivation": "9.2: a cell only one side holds appears as one difference per value it holds, so every unaccounted-for value is named; the `null` says the position is absent, since a row value is never null (8.2). The order is each row's `values` order, and 8.1 makes every document in a record canonical JSON, so 4.1 sorts `grad_norm` before `loss` however the run produced them."
       },
       "expect": {
         "matched": false,
         "differences": [
           {
             "cell": "cell-b",
-            "key": "loss",
-            "recorded": 0.25,
+            "key": "grad_norm",
+            "recorded": 1.5,
             "replayed": null
           },
           {
             "cell": "cell-b",
-            "key": "grad_norm",
-            "recorded": 1.5,
+            "key": "loss",
+            "recorded": 0.25,
             "replayed": null
           }
         ]
