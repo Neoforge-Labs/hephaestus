@@ -4,10 +4,14 @@ layer: 'library'
 tasks:
   check:
     command: 'uv run ../tools/check_vectors.py'
+    # Every conformance/<suite>/ directory needs its own glob here, or moon
+    # caches this task through edits to that suite and check_vectors.py never
+    # re-runs. tools/tests/test_conformance_inputs.py holds the two equal.
     inputs:
       - 'schema/*.json'
       - 'money/*.json'
       - 'hashing/*.json'
       - 'signatures/*.json'
+      - 'idempotency/*.json'
       - '/spec/errors.yaml'
       - '/tools/check_vectors.py'
