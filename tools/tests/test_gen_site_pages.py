@@ -23,9 +23,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DESIGN = REPO_ROOT / "docs/superpowers/specs/2026-11-04-hephaestus-design.md"
 
 # What `rewrite_adr_links` turns an `_ADR_LINK` match into. Kept here rather
-# than in the generator: it exists only so a test can mask both sides of the
-# rewrite and compare the prose around them.
-_SITE_LINK = re.compile(r"\]\(/adrs/\d{4}-[a-z0-9-]+(?:#[^)\s]*)?\)")
+# than in the generator: it exists only so a test can find both sides of the
+# rewrite. `_ADR_LINK` is imported from the generator, private name and all,
+# on purpose -- defining a second copy here would stop the test tracking which
+# link prefixes the generator actually accepts, which is the whole point.
+_SITE_LINK = re.compile(r"\]\(/adrs/(\d{4}-[a-z0-9-]+)(#[^)\s]*)?\)")
 
 
 def _page(pages: dict[Path, str], rel: str) -> str:
@@ -89,15 +91,29 @@ def test_adr_pages_match_sources() -> None:
         original = src.read_text(encoding="utf-8")
         rewritten = rewrite_adr_links(original)
         assert _body(adr_pages[adr_dir / src.name]) == rewritten
-        # Nothing but a cross-ADR link target may change. Masking every link on
-        # both sides says that without pinning a link style: `_ADR_LINK` accepts
-        # `./`, `../adr/`, `docs/adr/` and `/docs/adr/` prefixes as well as the
-        # bare form, so an ADR written `](../adr/0015-maturity-levels.md)` is
-        # legal and a reversal of the rewrite could not reconstruct it.
+        # Two properties, because either alone leaves a hole.
+        #
+        # Masking every link on both sides says "nothing but link targets
+        # changed" without pinning a link style: `_ADR_LINK` accepts `./`,
+        # `../adr/`, `docs/adr/` and `/docs/adr/` prefixes as well as the bare
+        # form, so an ADR written `](../adr/0015-maturity-levels.md)` is legal
+        # and reversing the rewrite could not reconstruct it. But masking hides
+        # the targets, so a rewrite that sent 0015 to the wrong slug would pass.
+        #
+        # Comparing the captured (slug, anchor) pairs in order closes that: it
+        # checks each link points where its source said, and says nothing about
+        # the prefix the source used. A source already containing a literal
+        # `](/adrs/...)` link -- none does today -- would be matched by
+        # `_SITE_LINK` on the rewritten side and not by `_ADR_LINK` on the
+        # source side, so the pair lists would differ in length and the pair
+        # comparison would fail loudly rather than mask it.
         #
         # ADR 0021 is the first in the corpus to link to another ADR; before it
-        # this assertion read `rewrite_adr_links(original) == original`, on the
-        # premise that the rewrite never fires, which that link falsified.
+        # this read `rewrite_adr_links(original) == original`, on the premise
+        # that the rewrite never fires, which that link falsified.
+        assert [m.groups() for m in _ADR_LINK.finditer(original)] == [
+            m.groups() for m in _SITE_LINK.finditer(rewritten)
+        ], f"{src.name}: a cross-ADR link was rewritten to a different target"
         assert _ADR_LINK.sub("]<LINK>", original) == _SITE_LINK.sub("]<LINK>", rewritten)
     order = re.findall(r'"(\d{4}-[^"]+)":', _page(pages, "adrs/_meta.ts"))
     assert order == [s.stem for s in sources]

@@ -17,19 +17,30 @@ license = { text = "MIT" }
 # Do not "tidy" it upwards without reading this.
 #
 # `hephkit.lab` needs a `hephkit` that is a PEP 420 namespace package (ADR 0021),
-# and the published 0.2.0 is not one: it still ships `src/hephkit/__init__.py`,
-# so it is the regular-package build and cannot host this portion at all. The
-# version that first contains the namespace package does not exist yet --
-# `release-please-config.json` binds five packages with a `linked-versions`
-# plugin and `tools/tests/test_release_config.py` asserts the manifest holds one
-# shared version, so the number is release-please's to assign and cannot be
-# hand-picked here. Until it does, the floor exists only to let
+# and the published 0.2.0 is not one: it still ships `src/hephkit/__init__.py`.
+# What that costs depends on the install shape, and only one of them is benign:
+#
+#   * Merged, as a plain non-editable `pip install` produces: `hephkit/lab/`
+#     lands inside the existing `site-packages/hephkit/`, the regular package's
+#     `__init__.py` runs, and `import hephkit.lab` works. Verified.
+#   * Split path -- an editable install, `pip install --target`, `PYTHONPATH`:
+#     the two portions sit on separate `sys.path` entries, the regular package's
+#     `__path__` is the first `hephkit/` directory found, and the other portion
+#     is unimportable. Verified: `ModuleNotFoundError: No module named
+#     'hephkit.lab'`.
+#
+# So a published 0.2.0 offers no composition guarantee; it happens to work in
+# one shape. The version that first ships the namespace package does not exist
+# yet -- `release-please-config.json` binds five packages with a
+# `linked-versions` plugin and `tools/tests/test_release_config.py` asserts the
+# manifest holds one shared version, so the number is release-please's to assign
+# and cannot be hand-picked here. Until it does, the floor exists only to let
 # `[tool.uv.sources]` resolve the portion in this repository.
 #
 # Raising this floor to the first RELEASED `hephkit` containing the namespace
-# package is a hard precondition on ever publishing `hephkit-lab`: a wheel built
-# with `>=0.2` would install against a regular-package `hephkit` and fail at
-# import with no useful message.
+# package is a hard precondition on ever publishing `hephkit-lab`. "Works in one
+# install shape by accident" is not a dependency contract, and the shape it
+# fails in is the one every developer of a consumer uses.
 dependencies = ["hephkit>=0.2", "pydantic>=2.9"]
 classifiers = [
     "Development Status :: 3 - Alpha",
