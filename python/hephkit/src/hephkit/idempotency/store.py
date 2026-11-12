@@ -178,3 +178,70 @@ class IdempotencyStore:
             # request took the record over first. That is 2.5 for this one.
             raise HephError("HEPH-IDEMP-409")
         return Proceed(taken_over=True)  # 2.8
+
+    async def complete(
+        self,
+        ex: Executor,
+        *,
+        scope: str,
+        key: str,
+        status: int,
+        body: bytes,
+        media_type: str | None = None,
+    ) -> None:
+        """Store the response and mark the record ``completed`` (spec 2.8).
+
+        **``ex`` must be on the connection the handler's own writes went through,
+        with its transaction still open, and the caller commits.** That is the
+        point of the call: the stored response and the work it describes commit
+        together or not at all, so a replay can never describe work that was
+        rolled back. ``claim()`` is the opposite, and the difference is
+        deliberate (see :mod:`hephkit.idempotency.ports`).
+
+        Always stores a status. A record for an event has no HTTP response, and
+        a caller with nothing to say stores ``204`` and ``b""``. A 4xx is stored
+        like any other outcome. ``status`` of 500 or above is refused, because
+        2.8 answers that with :meth:`release`.
+
+        Writes only an ``in_flight`` record. When there is none to write (it was
+        released, purged, or an earlier attempt already completed it) nothing is
+        stored and nothing is raised: a late second attempt must not replace the
+        first one's response, and a record that is gone cannot be completed.
+        """
+        for name, value in (("scope", scope), ("key", key)):
+            if not isinstance(value, str):
+                raise TypeError(f"{name} must be a str, not {type(value).__name__}")
+        if not isinstance(body, bytes):
+            raise TypeError(f"body must be bytes, not {type(body).__name__}")
+        if not 100 <= status < 500:
+            raise ValueError(
+                f"status {status} is not stored: 2.8 stores below 500 and releases at 500 "
+                "and above, so call release() for a failed attempt"
+            )
+        await ex.execute(_sql.COMPLETE, [scope, key, status, body, media_type])
+
+    async def release(self, ex: Executor, *, scope: str, key: str) -> None:
+        """Remove an ``in_flight`` record so the client can retry (spec 2.8).
+
+        For a 5xx or a handler that raised. **Like ``claim()``, ``ex`` must be on
+        a connection with no transaction open**, so the delete commits on its
+        own: the handler's transaction has been rolled back or abandoned, and a
+        release that joined it would be undone with it and leave the key wedged
+        until the lease ran out.
+
+        A ``completed`` record is never removed, and a key with no record is not
+        an error.
+        """
+        for name, value in (("scope", scope), ("key", key)):
+            if not isinstance(value, str):
+                raise TypeError(f"{name} must be a str, not {type(value).__name__}")
+        await ex.execute(_sql.RELEASE, [scope, key])
+
+    async def purge_expired(self, ex: Executor) -> int:
+        """Delete records past retention and return how many were removed (spec 2.7).
+
+        A function for the consumer to schedule: hephkit starts no task. A record
+        whose ``in_flight`` lease is still live is left alone however old it is,
+        because retention expiry applies only when no attempt holds the key.
+        """
+        return await ex.execute(_sql.PURGE_EXPIRED, [self._retention])

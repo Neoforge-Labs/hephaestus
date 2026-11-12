@@ -12,7 +12,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final
 
-__all__ = ["CLAIM_INSERT", "CLAIM_READ", "CLAIM_TAKE_OVER", "DDL"]
+__all__ = [
+    "CLAIM_INSERT",
+    "CLAIM_READ",
+    "CLAIM_TAKE_OVER",
+    "COMPLETE",
+    "DDL",
+    "PURGE_EXPIRED",
+    "RELEASE",
+]
 
 DDL: Final = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
 
@@ -105,4 +113,43 @@ WHERE scope = $1
   AND state = 'in_flight'
   AND lease_expires_at <= now()
 RETURNING scope, key
+"""
+
+
+# --- complete(), release() and purge_expired() (2.7, 2.8) --------------------
+
+# 2.8: a response below 500 makes the record `completed` and stores it. It runs
+# in the caller's transaction, so the response commits with the work it
+# describes or not at all. Only an `in_flight` record is written: a completed
+# one already holds the outcome of an attempt that got there first, and a late
+# second attempt must not replace what a client may already have been replayed.
+# The lease is cleared because a completed record has nothing to protect.
+COMPLETE: Final = """
+UPDATE heph_idempotency
+SET state               = 'completed',
+    lease_expires_at    = NULL,
+    response_status     = $3,
+    response_body       = $4,
+    response_media_type = $5
+WHERE scope = $1 AND key = $2 AND state = 'in_flight'
+"""
+
+# 2.8: a 5xx or a raised handler removes the record so the client can retry. It
+# runs in a transaction of its own, because the handler's has been abandoned.
+# `in_flight` only: a completed record is a stored outcome, never a retry slot.
+RELEASE: Final = """
+DELETE FROM heph_idempotency
+WHERE scope = $1 AND key = $2 AND state = 'in_flight'
+"""
+
+# 2.7's sweep. **It carries the same live-lease conjunct as CLAIM_INSERT, and for
+# the same reason:** 2.8's takeover leaves created_at alone, so a record taken
+# over near the retention boundary is past retention while its handler still
+# holds a live lease. A bare `created_at < ...` would delete it from under that
+# handler, whose complete() would then find no row. Retention expiry applies
+# only when no attempt holds the key.
+PURGE_EXPIRED: Final = """
+DELETE FROM heph_idempotency
+WHERE created_at < now() - $1::interval
+  AND (state <> 'in_flight' OR lease_expires_at <= now())
 """

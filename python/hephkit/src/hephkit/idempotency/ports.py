@@ -11,11 +11,14 @@ interchangeable** (design findings 1 and 2):
   so its statements commit as they run. A record that is still invisible
   protects nothing: 2.5's 409, the lease and 2.8's takeover all need the record
   to be readable by the next request.
-* ``complete()`` and ``release()`` (not in this module yet) take an executor on
-  a connection the caller **has a transaction open on**, so a stored response
-  and the work it describes commit together, or neither does.
+* ``complete()`` takes an executor on a connection the caller **has a
+  transaction open on**, so a stored response and the work it describes commit
+  together, or neither does.
+* ``release()`` takes one with **no outer transaction**, like ``claim()``: the
+  handler's transaction has been abandoned, and a release inside it would be
+  abandoned too.
 
-Either way the store never begins, commits or rolls back a transaction itself:
+Whichever it is, the store never begins, commits or rolls back a transaction itself:
 there is nothing on this port that could, which is deliberate, because a
 connection's transaction state belongs to whoever owns the connection.
 """
