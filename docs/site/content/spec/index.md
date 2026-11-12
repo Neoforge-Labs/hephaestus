@@ -12,7 +12,7 @@ title: "heph-spec"
 - **Status:** Draft for implementation in Phase 1; every module implementing it is `experimental`.
 - **Registries:** `spec/errors.yaml` (error codes), `conventions/attributes.yaml` (telemetry attributes), `spec/currencies.yaml` (ISO 4217 minor units, with its publication pinned by `spec/currencies.source.yaml`).
 
-The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119 and RFC 8174. Where this document profiles a standard, the standard governs everything this document does not restate. Five parts are original: the error-code registry (section 1), idempotency storage and replay (section 2), money on the wire (section 3), the provenance record (section 7) and the run record (section 8).
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119 and RFC 8174. Where this document profiles a standard, the standard governs everything this document does not restate. Six parts are original: the error-code registry (section 1), idempotency storage and replay (section 2), money on the wire (section 3), the provenance record (section 7), the run record (section 8) and the replay and diff of a run (section 9).
 
 ## Decisions this version settles
 
@@ -36,6 +36,12 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 - The summary is an index derived from the rows, a reader recomputes it and refuses a record whose stored summary disagrees, and a record with no summary is unfinished rather than invalid (8.4).
 - A record carries no wall-clock time in any of its documents, because a clock reading in a compared position would make every replay diverge (8.1).
 - A non-finite value is recorded as `{"nonfinite": "NaN"}`, `{"nonfinite": "Infinity"}` or `{"nonfinite": "-Infinity"}`, never as a bare `NaN` or `Infinity` token, which 4.3 rejects and no conforming parser accepts (8.2).
+- A replay compares the four determinism-contract members of the provenance record and the rows, by cell name and value name. It compares `environment`, `run_id`, `class`, the summary and the order of the rows not at all, each for a reason of its own (9.1).
+- A difference names a position — a cell and a value name, or a determinism-contract member — and the two values found there; a `null` says the position is absent, since a row value is never null, and a report matched exactly when it carries no difference (9.2).
+- `NaN` compares **equal** to `NaN` for the purposes of a replay, because 8.2's wrapper is compared by the value it names and a record must compare equal to itself (9.3).
+- Two finite numbers are equal exactly when `|a - b| <= max(1e-9 * max(|a|, |b|), 1e-12)`: relative so that 7.2's second machine can satisfy the contract, absolute so that a value near zero is comparable at all, symmetric, and not loosenable per run, cell or value (9.3).
+- A divergence is reported, never raised: a replay produces its difference report, and a caller that needs a refusal derives one from it under `HEPH-LAB-409` (9.1, 9.4).
+- Section 10 is reserved: dataset manifests, and with them the digest scope of `data_hash`, are not yet specified, and an implementation chooses no scope of its own meanwhile (10, 7.1).
 
 ## 1. Errors
 
@@ -307,3 +313,81 @@ An implementation MUST NOT, on such a failure: warn and continue; log it and ret
 8.6. An implementation MAY offer a **registry of experiments**, and one that does MUST shape it so that an experiment cannot choose where its results go. An experiment is a function of one argument, the open record. It MUST NOT be passed a directory, a path or any other destination, and an implementation MUST refuse at registration a function that takes one rather than discovering the problem when the function runs. Opening the record, choosing where it goes and closing it belong to the runner.
 
 This is what 8.1 rests on: no destination reaches an experiment through its signature, so the record it was handed is the only one it was given. The rule is about what an implementation passes, and it is deliberately not a claim that an experiment cannot write a file by other means — nothing in a general-purpose language could enforce that, and a section that pretended otherwise would be describing a guarantee no implementation can keep.
+
+## 9. Replay and diff
+
+9.1. A **replay** re-executes the run that a record (section 8) describes and compares the result against that record. Its product is a **difference report** (9.2). A replay that differs is not a failure of the tool: it names which values moved, and that naming is the finding. An implementation MUST produce the report, and MUST NOT refuse in place of producing one.
+
+A replay compares exactly two things:
+
+- **The determinism contract of the record's provenance record**: `config_hash`, `data_hash`, `deps_hash` and `code_sha` (7.1). These are the members that decide whether a re-execution is the same run. A replay whose values for them differ from the record's has not re-executed the recorded run; it has run against different configuration, different data, different dependencies or different code, and the report says which rather than leaving the reader to infer it from a differing result.
+- **The rows** (8.2), by cell name and, within a cell, by value name.
+
+It compares nothing else. Each of the three members of 7.1 that is not in the determinism contract is excluded for a reason of its own:
+
+- `environment` MUST NOT be compared, and two records differing only in `environment` MUST NOT be reported as a divergence. 7.2 requires this and says why: a contract that compared the platform, the runtime version and the accelerator would be satisfiable by no two machines.
+- `run_id` MUST NOT be compared. 7.1 makes it opaque and says that two records differing only in `run_id` describe the same re-execution; a replay is a new run with a new identifier, so comparing it would make every replay of every run diverge.
+- `class` MUST NOT be compared. It classifies how a run was made rather than what it produced, and the same commit replayed from a tree that has since been edited is classified `provenance-only` while reproducing the record's rows exactly. The report says whether the run reproduced; the recorded `class` says what the record claimed, and a reader weighs the two together, since a `provenance-only` run never promised a match (7.2).
+
+A replay does not compare `summary.json`. Every member of the summary is derived from the rows (8.4), and a reader has already refused a record whose stored summary disagrees with them, so comparing it would compare the rows a second time under another name.
+
+The **order of the rows is not compared**. 8.2 writes the rows in completion order, which is not a result: a run whose cells complete concurrently does not fix it, and a replay that called a reordering a divergence would report one against a run that reproduced every value it holds. Cells are matched by name, which 8.2 makes unique within a record.
+
+This section does not define how a run's external inputs are made available to a re-execution; freezing them is settled in a later version of this specification. A replay re-executes the experiment (8.6) and compares what this section says to compare. A replay whose inputs were not frozen and that matches is evidence that the experiment reproduced under the inputs the replay met; what carries the identity of those inputs is `data_hash`, which is compared like every other member of the determinism contract.
+
+9.2. A **difference report** carries whether the replay matched and the differences it found. A report **matched** if and only if it carries no difference: an implementation MUST NOT report a match alongside a difference, nor a divergence with none.
+
+Each **difference** names one **position** and the two values found there:
+
+| Member | Meaning |
+| --- | --- |
+| `cell` | Name of the cell the position is in, or `null` when the position is a member of the determinism contract |
+| `key` | Name of the value within that cell, or the name of the determinism-contract member when `cell` is `null` |
+| `recorded` | The value the record holds at that position, or `null` when it holds none |
+| `replayed` | The value the re-execution produced at that position, or `null` when it produced none |
+
+The positions compared are the four determinism-contract members and every `(cell, key)` pair that either side's rows hold. A position both sides hold, whose values differ under 9.3, is one difference carrying both values. A position only one side holds is one difference carrying that side's value with `null` on the other: a row value is never `null` (8.2), so a `null` at a row position says the position is absent rather than that the value recorded there was null.
+
+Both sides always hold all four determinism-contract positions, since 7.1 requires every record to carry every member. A `null` at one of those four is therefore the member's **value**, which 7.1 permits for `deps_hash` and for `code_sha`, and never an absence: a difference reading `deps_hash`, a hash, `null` says the re-execution had no lockfile.
+
+A cell only one side holds therefore appears as one difference per value it holds, which names every value that is unaccounted for. A cell holding no values — 8.2 permits an empty `values` — has no `(cell, key)` position at all, and MUST still be reported: it is one difference naming the cell, with `key`, `recorded` and `replayed` all `null`. A difference whose `recorded` and `replayed` are both `null` is exactly that case and no other.
+
+The differences are **ordered**, so that one replay reported twice reads the same way: the determinism-contract members first, in the order of 7.1's table; then the positions of the record's rows, in the order the rows and each row's `values` give them; then the positions only the re-execution holds, in the order its own rows give them.
+
+A report says which values moved and no more. An implementation MUST NOT put a conclusion in it — a ranking, a cause, a verdict on whether the run is flaky — because the report is read by someone deciding exactly that, and the values are what they need.
+
+9.3. Two values at a position are compared **by kind first**. A string, a finite number and a non-finite value (8.2) are three kinds, and two values of different kinds differ whatever they look like: the string `"1.0"` and the number `1.0` are a difference, and so are `NaN` and any number.
+
+- Two **strings** are equal if and only if they are the same sequence of code points. Nothing is normalised, trimmed or case-folded.
+- Two **non-finite values** are compared **by the value their wrapper names** (8.2). `{"nonfinite": "NaN"}` is therefore **equal to** `{"nonfinite": "NaN"}`, so **`NaN` compares equal to `NaN` for the purposes of a replay**, which is what IEEE 754 equality does not do. `Infinity` equals `Infinity`, `-Infinity` equals `-Infinity`, and `Infinity` and `-Infinity` differ. 8.2 carries a non-finite value so that a diverged loss can be recorded; a record exists to be compared against, and a value that did not compare equal to itself would make a replay report a difference between a run and that same run. This is the one comparison an implementation is all but guaranteed to get wrong by reaching for its language's `==`.
+- Two **finite numbers** are equal within the tolerance below, and only within it.
+
+**The float tolerance.** Two finite numbers `a` and `b` are equal if and only if
+
+```
+|a - b| <= max(1e-9 * max(|a|, |b|), 1e-12)
+```
+
+The tolerance is **both relative and absolute**, and the formula is symmetric in `a` and `b`, so a comparison does not depend on which side of it the record is.
+
+- The **relative** part, `1e-9`, is what makes 7.2's contract satisfiable. Binary64 carries about 15.95 decimal digits, so `1e-9` is roughly seven orders of magnitude looser than the representation: it absorbs the reassociation that a different BLAS, a different thread count or a fused multiply-add introduces across a long reduction, which is exactly the difference 7.2 says a second machine may have while running the same run. It is at the same time far tighter than the precision a result is reported to; a number quoted to four significant figures cannot hide a change beneath `1e-9`, so the tolerance never conceals a moved value a reader would otherwise have seen.
+- The **absolute** part, `1e-12`, is there because a relative comparison is useless near zero. `0.0` against `1e-300` is an infinite relative error, so a loss that reached zero in one run and a denormal in the next would diverge forever. `1e-12` is below the precision of any number a result is reported to and above the scale at which a difference is arithmetic noise rather than a finding.
+- The two combine with `max`, so a pair is equal if it passes on either. Where both values are zero the relative part is zero and the absolute part decides; `0.0` and `-0.0` are equal, their difference being zero.
+
+An implementation MUST NOT loosen this tolerance per run, per cell or per value, and MUST NOT offer a mode in which a pair this clause calls different is reported as a match. A quantity whose reproduction needs a looser comparison than this is not a quantity a replay can speak about, and an experiment that produces one records alongside it something that can be.
+
+9.4. **What a match means, and what it does not.** Two things section 7 leaves open are discovered by a replay rather than by reading a record. They are named here rather than left silent, because a replay is the operation that meets them.
+
+First, **a record does not witness its own cleanliness.** 7.3's conditions hold *when the run starts*, and none of the seven members of 7.1 records that the working tree was clean, so a reader of a record cannot check that `deterministic` was assigned honestly. This is deliberate rather than an omission. A member saying "the tree was clean" would be one more self-assertion by the same implementation, with exactly the standing of the `class` it would be vouching for; a record cannot witness its own honesty. What tests the claim is a replay, which re-executes and compares, so that its report is evidence about the world rather than a restatement of what the record says about itself. An implementation MUST NOT present a recorded `deterministic` as a verified fact. A replay that matched is the nearest thing to one.
+
+Second, **a run that starts clean and is edited while it runs still qualifies.** 7.3 is checked when the run starts, so such a run is classified `deterministic` while its `code_sha` names a commit that is not the code that finished it. A replay is what finds this: all four determinism-contract members can match — the commit is the same, the lockfile is the same — while the rows differ, and a report of exactly that shape is the signature of a tree edited mid-run. An implementation MAY re-check the tree when a run ends. One that does MUST NOT rewrite the record's `class`, since 8.3 forbids rewriting a record, and records what it found as a run of its own rather than as an amendment to one that has finished.
+
+A **caller that needs a refusal** rather than a report — a continuous-integration gate asking whether a cited run still reproduces — derives it from the report, and `HEPH-LAB-409` is the registry code for it. That is a decision about what to do with a finding, and this section's requirement that a replay produce the report stands either way.
+
+## 10. Dataset manifests
+
+**Reserved. This section is not yet specified.**
+
+The digest scope of `data_hash` (7.1) — whether the hash is taken over raw bytes or over canonical JSON (4.1), and how the inputs of a multi-file dataset combine into one value — is settled here, together with the manifest a dataset carries.
+
+Until this section is written, an implementation records the `data_hash` it is given and MUST NOT choose a digest scope of its own (7.1).
