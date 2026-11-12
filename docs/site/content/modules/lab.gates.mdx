@@ -1,0 +1,132 @@
+---
+title: "lab.gates"
+---
+
+# lab.gates
+
+`hephkit.lab.gates` is the CI side of research integrity: three checks a project
+runs over its own repository. The **figures** gate flags float literals bound to
+metric names in figure and table code, because a transcribed number is the
+defect a manuscript audit finds first. The **records** gate refuses a run record
+that is not the record of what it claims. The **citations** gate refuses a
+manuscript that cites a run with no finished record — and, given a replay
+callable, one that cites a run which no longer reproduces.
+
+Maturity: **`experimental`**. The API may change, and per
+[ADR 0015](/adrs/0015-maturity-levels) nothing below `stable` may sit in a
+production money path. Why integrity is the spine rather than a feature is
+[ADR 0022](/adrs/0022-research-integrity-is-the-spine).
+
+## Installing
+
+`hephkit-lab` is not on PyPI yet — [ADR 0023](/adrs/0023-hephkit-lab-ships-separately)
+records the precondition on publishing it — so install both portions of the
+`hephkit` namespace package out of a checkout of this repository:
+
+```bash
+uv add --editable ./python/hephkit ./python/hephkit-lab
+```
+
+## An example
+
+Save this as `demo.py`, put the two files it writes where it puts them, and run
+`uv run python demo.py`. It is the call CI makes, run against a repository that
+has something wrong with it.
+
+```python
+from pathlib import Path
+
+from hephkit.lab.gates import GateError, check_all, names_a_metric
+
+Path("figures").mkdir(exist_ok=True)
+Path("figures/panel.py").write_text(
+    "f1 = 0.474\n"                  # transcribed from a results table
+    "f1_ylim = 1.0\n"               # an axis limit: not a finding
+)
+Path("paper.md").write_text("Table 2 reports run:never-ran.\n")
+Path("runs").mkdir(exist_ok=True)
+
+try:
+    check_all(
+        figures=[Path("figures")],   # a directory, walked for *.py
+        records=Path("runs"),        # a tree of run records
+        manuscript=Path("paper.md"), # cites runs as run:<id>
+    )
+except GateError as exc:
+    print(f"{exc.code}: {len(exc.violations)} violation(s)")
+    for violation in exc.violations:
+        print(" ", violation)
+
+print("names_a_metric('f1_macro'):", names_a_metric("f1_macro"))
+print("names_a_metric('f1_ylim'):", names_a_metric("f1_ylim"))
+print("names_a_metric('learning_rate'):", names_a_metric("learning_rate"))
+```
+
+It refuses with [HEPH-LAB-412](/errors/HEPH-LAB-412) and prints two findings:
+the transcribed `f1 = 0.474`, and the cited run with no record. The axis limit is
+not among them, and the three `names_a_metric` calls show why — `f1_ylim` carries
+a presentation word, so the veto wins.
+
+## What the figures gate reads, and where to point it
+
+Point it at figure and table code, not at a repository root: the walk follows
+every subdirectory and nothing here excludes a vendored `.venv`, generated code
+or your test suite.
+
+The source is **parsed, not matched**, so a comment never reaches the scan and a
+docstring is never an assignment target. What is flagged is a float literal
+reached from a name the gate recognises as a metric — through an assignment, an
+annotated assignment, an attribute, a string subscript, an unpacking element or
+a string key of a dict literal, including one nested in a list, tuple, set or
+dict. An integer is never flagged: in research code it is a count, an epoch or a
+seed.
+
+A name is a metric when one of its words is a known metric word (`f1`, `auroc`,
+`rmse`, `loss`, `p_value`, …) and **no** word of it is a veto word. The veto
+wins, because a name carrying a tuning or presentation word is an input however
+much it looks like a result: `loss_weight` is a knob, `f1_ylim` is an axis
+limit, `score_thresh` is a cutoff. Words split on separators and camel-case
+boundaries, so `f1_macro`, `finalF1` and `ROC_AUC` all match and
+`learning_rate` does not.
+
+## A gate with no subject does not pass
+
+That is the failure mode this module is built against, and it is enforced rather
+than documented:
+
+- `check_all()` with nothing to check is a `ValueError`, not a pass.
+- A gate pointed at a file or directory that is not there raises
+  `MissingSubjectError` ([HEPH-LAB-424](/errors/HEPH-LAB-424)), because a gate
+  with no subject would pass by checking nothing.
+- A file the figures gate cannot parse is itself a violation: a file the gate
+  could not read is not a file the gate passed.
+- `record_directories` and `cited_runs` are public so your own test can assert
+  the scan has subjects at all.
+
+One consequence to know about: a `HEPH-LAB-424` from a record missing one of its
+documents stops the call, and **findings already collected are lost**. A 424
+about one absent `rows.jsonl` is not evidence the figures gate passed, only that
+the records gate could not finish. Produce the artefact and run again.
+
+## The replay check is yours to supply
+
+The citations gate's four checks — no record, a malformed record, an unfinished
+record, a record filed under another run's name — are everything that must hold
+before a replay could be attempted at all. The reproduction itself is
+`replay_check`, a callable the project passes, because a gate has nowhere honest
+to get the re-execution's provenance and a record does not name the experiment
+that produced it:
+
+```python
+from hephkit.lab.replay import replay
+
+def replay_check(run_id: str, directory: Path):
+    return replay(directory, experiment="demo", into=Path(f"replays/{run_id}"),
+                  provenance=provenance(f"{run_id}-replay"))
+
+check_all(records=Path("runs"), manuscript=Path("paper.md"), replay_check=replay_check)
+```
+
+A report that did not match becomes a violation naming the positions that moved.
+`examples/lab-replay/` in this repository is a worked version of exactly this,
+and it is the gate CI runs on every pull request.
