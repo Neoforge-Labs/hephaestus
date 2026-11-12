@@ -554,11 +554,16 @@ def test_a_summary_that_cannot_be_written_raises_rather_than_warning(tmp_path: P
     assert not record.complete, "8.4: nothing was summarised, so nothing is finished"
 
 
+#: In the `OSError` the stand-in handle raises, so a chain assertion can say it
+#: found *that* error rather than any `OSError` that happened to be there.
+FAILING_CLOSE = "the stand-in handle refused to close"
+
+
 class FailingHandle:
     """A rows file whose final flush fails, which is the one write `close` does."""
 
     def close(self) -> None:
-        raise OSError(5, "Input/output error")
+        raise OSError(5, FAILING_CLOSE)
 
 
 def substitute_a_failing_handle(record: RunRecord) -> None:
@@ -601,8 +606,41 @@ def test_a_failure_to_close_a_failed_run_is_raised_and_keeps_the_original(
         raise ZeroDivisionError
     cause = exc.value.__cause__
     assert isinstance(cause, OSError), cause
+    assert FAILING_CLOSE in str(cause), cause
     assert isinstance(cause.__context__, ZeroDivisionError), cause.__context__
     assert not (record.path / SUMMARY_NAME).exists()
+
+
+def test_a_failure_to_close_does_not_absorb_a_keyboard_interrupt(tmp_path: Path) -> None:
+    """A Ctrl-C stays a Ctrl-C, and still carries the record failure (8.5).
+
+    `KeyboardInterrupt` and `SystemExit` sit outside `Exception` precisely so
+    that interpreter-level signals are not absorbed by ordinary error handling.
+    Replacing one with a `RecordError` would stop every
+    `except KeyboardInterrupt` upstream -- the interpreter's own included --
+    from matching it, so the record failure is attached as a note instead.
+    8.5 asks that the failure reach the caller, and a note does: the traceback
+    prints it.
+    """
+    record = open_record(tmp_path / "record", a_provenance())
+    record.append_row("first", {"loss": 1.0})
+    substitute_a_failing_handle(record)
+    with pytest.raises(KeyboardInterrupt) as exc, record:
+        raise KeyboardInterrupt
+    notes = getattr(exc.value, "__notes__", [])
+    assert any(FAILING_CLOSE in note for note in notes), notes
+    assert any(ROWS_NAME in note and "8.5" in note for note in notes), notes
+    assert not (record.path / SUMMARY_NAME).exists()
+
+
+def test_a_system_exit_is_not_absorbed_either(tmp_path: Path) -> None:
+    """The rule is about `BaseException`, not about `KeyboardInterrupt` alone."""
+    record = open_record(tmp_path / "record", a_provenance())
+    substitute_a_failing_handle(record)
+    with pytest.raises(SystemExit) as exit_exc, record:
+        raise SystemExit(3)
+    assert exit_exc.value.code == 3
+    assert any(FAILING_CLOSE in note for note in getattr(exit_exc.value, "__notes__", []))
 
 
 def test_a_write_failure_mid_run_raises_and_keeps_no_row(

@@ -464,20 +464,40 @@ class RunRecord:
                 f"{exc}; a record that cannot be written is a failed run (spec 8.5)"
             ) from exc
 
-    def _abandon(self) -> None:
+    def _abandon(self, error: BaseException | None = None) -> None:
         """Stop writing without finishing: the run failed, so 8.4 leaves no summary.
 
-        A failure to close is still raised (8.5), and raising here replaces the
-        exception the run was already leaving by -- which Python records as the
-        new one's ``__context__``, so neither is lost. Reporting a record that
-        could not be written is worth that: a run whose rows may be incomplete
-        and whose caller was told only about the experiment's own error is the
-        quiet failure 8.5 forbids.
+        A failure to close is surfaced either way (8.5), by one of two routes,
+        and the asymmetry is deliberate rather than an oversight.
+
+        *The run is leaving by an ordinary* :class:`Exception`, *or by nothing.*
+        The :class:`RecordError` is raised and replaces it. Python keeps the
+        original in the chain, so neither is lost, and a run whose rows may be
+        incomplete must not leave its caller told only about the experiment's
+        own error -- that is the quiet failure 8.5 forbids.
+
+        *The run is leaving by a* :class:`BaseException` *that is not an*
+        :class:`Exception` -- :class:`KeyboardInterrupt`,
+        :class:`SystemExit`, :class:`GeneratorExit`. The original propagates
+        and the record failure is attached to it as a note. Those exceptions
+        sit outside :class:`Exception` precisely so that interpreter-level
+        signals are not absorbed by ordinary error handling, and replacing one
+        with a ``RuntimeError`` subclass would stop every
+        ``except KeyboardInterrupt`` upstream -- the interpreter's own included
+        -- from matching it. A researcher's Ctrl-C must stay a Ctrl-C. 8.5 asks
+        that the failure reach the caller, not that it displace a signal, and a
+        note reaches the caller: the traceback prints it.
         """
         if self._handle is None:
             return
         handle, self._handle = self._handle, None
-        self._close_handle(handle)
+        try:
+            self._close_handle(handle)
+        except RecordError as failure:
+            if error is not None and not isinstance(error, Exception):
+                error.add_note(str(failure))
+                return
+            raise
 
     def __enter__(self) -> RunRecord:
         return self
@@ -491,13 +511,14 @@ class RunRecord:
         """Close the record, or abandon it when the run is leaving by an exception.
 
         A run that ends by failing has not finished, so no summary is written
-        and the record stays unfinished (8.4). The exception is not touched:
-        nothing in this module swallows one (8.5).
+        and the record stays unfinished (8.4). The exception is never swallowed
+        (8.5); :meth:`_abandon` says what happens to it when closing the record
+        fails as well, which depends on what the run is leaving by.
         """
         if kind is None:
             self.close()
         else:
-            self._abandon()
+            self._abandon(error)
 
 
 def open_record(directory: Path, provenance: ProvenanceRecord) -> RunRecord:
