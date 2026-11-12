@@ -115,6 +115,11 @@
       "maturity": "experimental"
     },
     {
+      "name": "lab.track",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
       "name": "money",
       "home": "python",
       "maturity": "experimental"

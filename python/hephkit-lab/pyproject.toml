@@ -139,3 +139,19 @@ explicit_package_bases = true
 # library needs both.
 module = ["numpy", "numpy.*", "torch", "torch.*"]
 ignore_missing_imports = true
+
+# `lab.track` imports mlflow inside the function `tracked_run` starts a run
+# with, behind the `track` extra and behind `except ImportError`, for the same
+# reason as above and with the same consequence: the spine does not install it
+# (ADR 0023), so `mypy --strict` would fail on the guarded import for want of
+# the distribution. An inline ignore would become an unused-ignore error
+# wherever the extra IS installed.
+#
+# And with the same caveat: every mlflow attribute is `Any` here, so a
+# misspelled `log_metrics` would typecheck. The recording stub in
+# `tests/test_track.py` is what guards those names -- a `types.ModuleType`
+# carrying exactly the attributes the wrapper is allowed to touch, where a call
+# this module invents raises `AttributeError` instead of passing silently.
+[[tool.mypy.overrides]]
+module = ["mlflow", "mlflow.*"]
+ignore_missing_imports = true
