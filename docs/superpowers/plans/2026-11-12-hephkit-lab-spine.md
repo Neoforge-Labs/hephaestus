@@ -14,6 +14,18 @@
 
 ## Global Constraints
 
+> **Correction (Ruling 12).** The conformance suites are named `lab.config`,
+> `lab.record` and `lab.diff` — two segments, matching every existing suite
+> (`money.parse`, `hashing.jcs`, `idempotency.key`). An earlier draft of this
+> plan used three (`lab.config.resolve`, `lab.provenance.record`,
+> `lab.provenance.diff`), which `tools/check_vectors.py` cannot accept:
+> line 82 derives the expected suite as `f"{path.parent.name}.{path.stem}"`,
+> and line 105 maps a missing suite back to a path with `suite.replace('.', '/')`.
+> Task 1 committed the three-segment names into the schema `suite` enum before
+> this was caught; **Task 7 corrects those three enum entries** as it adds the
+> first suite file.
+
+
 - Python `>=3.12`. `mypy --strict` passes on all source.
 - Coverage gate: `--cov-fail-under=90`, same as `hephkit`.
 - No new hashing. Content hashes come from `hephkit.hashing.content_hash` (RFC 8785 JCS + SHA-256, spec §4.2).
@@ -50,9 +62,9 @@ Input classes the spec implies that no task's happy path exercises, most likely 
 | `.../lab/replay.py` | Re-execute against frozen inputs, produce a diff report |
 | `.../lab/gates.py` | Integrity checks runnable from CI |
 | `.../lab/track.py` | MLflow adapter that no-ops when unconfigured |
-| `conformance/lab/config.json` | `lab.config.resolve` vectors |
-| `conformance/lab/record.json` | `lab.provenance.record` vectors |
-| `conformance/lab/diff.json` | `lab.provenance.diff` vectors |
+| `conformance/lab/config.json` | `lab.config` vectors |
+| `conformance/lab/record.json` | `lab.record` vectors |
+| `conformance/lab/diff.json` | `lab.diff` vectors |
 | `compose/mlflow.yaml` | MLflow on Postgres with SeaweedFS artifacts, port 54500 |
 | `examples/lab-replay/` | The in-repo gate fixture: records, replays, diffs |
 | `docs/adr/0021`–`0024` | The four wave-1 decisions |
@@ -98,7 +110,7 @@ belongs to Task 10, which is the task that adds those sections.
 - Modify: `conformance/moon.yml` (inputs)
 
 **Interfaces:**
-- Produces: the suite names `lab.config.resolve`, `lab.provenance.record`, `lab.provenance.diff` accepted by the schema.
+- Produces: the suite names `lab.config`, `lab.record`, `lab.diff` accepted by the schema.
 
 - [ ] **Step 1: Confirm PR #22 has merged and rebase onto it**
 
@@ -107,13 +119,13 @@ Expected: #22's merge commit is on `origin/main`, the branch is rebased onto it,
 
 - [ ] **Step 2: Add the three `lab.*` suites to the schema enum**
 
-In `conformance/schema/vector-file.schema.json`, extend the `suite` enum with `lab.config.resolve`, `lab.provenance.record`, `lab.provenance.diff`. Leave the `spec` const alone.
+In `conformance/schema/vector-file.schema.json`, extend the `suite` enum with `lab.config`, `lab.record`, `lab.diff`. Leave the `spec` const alone.
 
 - [ ] **Step 4: Add the moon input glob only — NOT the `MIN_CASES` entries**
 
 In `conformance/moon.yml`, add `'lab/*.json'` to `check`'s inputs.
 
-Do **not** add `MIN_CASES` entries here. `tools/check_vectors.py:53-56` iterates `MIN_CASES` and reports `missing suite file` for any suite it has not seen, so an entry added before its vector file exists fails `conformance:check` on every commit until that file lands. Each `MIN_CASES` entry is therefore added by the task that creates its suite: `lab.config.resolve: 10` in Task 7, `lab.provenance.record: 12` in Task 8, `lab.provenance.diff: 8` in Task 10.
+Do **not** add `MIN_CASES` entries here. `tools/check_vectors.py:53-56` iterates `MIN_CASES` and reports `missing suite file` for any suite it has not seen, so an entry added before its vector file exists fails `conformance:check` on every commit until that file lands. Each `MIN_CASES` entry is therefore added by the task that creates its suite: `lab.config: 10` in Task 7, `lab.record: 12` in Task 8, `lab.diff: 8` in Task 10.
 
 - [ ] **Step 5: Verify the checker still passes**
 
@@ -385,7 +397,7 @@ git commit -m "spec(provenance): split normative hashes from descriptive environ
 
 - [ ] **Step 1: Write the vectors**
 
-`conformance/lab/config.json`, suite `lab.config.resolve`, at least 10 cases, hand-derived — never produced by running this code. Cover: each layer alone; full precedence chain defaults < file < env < CLI; a CLI override of a nested field; an unknown CLI key rejected; a type coercion that must fail; and two cases pinning `config_hash` for a config whose hash is derivable from the existing `hashing.content` vectors.
+`conformance/lab/config.json`, suite `lab.config`, at least 10 cases, hand-derived — never produced by running this code. Cover: each layer alone; full precedence chain defaults < file < env < CLI; a CLI override of a nested field; an unknown CLI key rejected; a type coercion that must fail; and two cases pinning `config_hash` for a config whose hash is derivable from the existing `hashing.content` vectors.
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -408,7 +420,7 @@ Layered resolution in the order above. `config_hash` delegates to `content_hash(
 
 - [ ] **Step 4a: Add this suite's `MIN_CASES` entry**
 
-In `tools/check_vectors.py`, add `"lab.config.resolve": 10`. It lands with the suite file, never before it (see Task 1 Step 4).
+In `tools/check_vectors.py`, add `"lab.config": 10`. It lands with the suite file, never before it (see Task 1 Step 4).
 
 - [ ] **Step 5: Add the conformance runner**
 
@@ -439,7 +451,7 @@ git commit -m "feat(lab): typed experiment configs with layered overrides"
 
 - [ ] **Step 1: Write the vectors**
 
-`conformance/lab/record.json`, suite `lab.provenance.record`, at least 12 cases, hand-derived from spec §7 as revised. Cover: serialisation field order and types; `class` assignment for clean-tree-with-lockfile, dirty tree, missing lockfile, and both missing; `environment.frameworks` recording a `null` for an absent framework; `environment.accelerator` as `null`; and rejection of a record missing a normative field.
+`conformance/lab/record.json`, suite `lab.record`, at least 12 cases, hand-derived from spec §7 as revised. Cover: serialisation field order and types; `class` assignment for clean-tree-with-lockfile, dirty tree, missing lockfile, and both missing; `environment.frameworks` recording a `null` for an absent framework; `environment.accelerator` as `null`; and rejection of a record missing a normative field.
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -465,7 +477,7 @@ Expected: FAIL
 
 - [ ] **Step 4a: Add this suite's `MIN_CASES` entry**
 
-In `tools/check_vectors.py`, add `"lab.provenance.record": 12`.
+In `tools/check_vectors.py`, add `"lab.record": 12`.
 
 - [ ] **Step 5: Run tests, typecheck and the vector checker**
 
@@ -548,7 +560,7 @@ Expected: PASS with every vector file at 0.5.0.
 
 - [ ] **Step 2: Write the vectors**
 
-`conformance/lab/diff.json`, suite `lab.provenance.diff`, at least 8 cases, hand-derived: identical records match; one changed metric names exactly that cell and key; a changed `environment` does **not** produce a difference; a changed `deps_hash` does; NaN against NaN matches; NaN against a number differs; a missing cell; an extra cell.
+`conformance/lab/diff.json`, suite `lab.diff`, at least 8 cases, hand-derived: identical records match; one changed metric names exactly that cell and key; a changed `environment` does **not** produce a difference; a changed `deps_hash` does; NaN against NaN matches; NaN against a number differs; a missing cell; an extra cell.
 
 - [ ] **Step 3: Write the failing tests**
 
@@ -572,7 +584,7 @@ Re-run the named registered experiment against the record's frozen inputs and co
 
 - [ ] **Step 5a: Add this suite's `MIN_CASES` entry**
 
-In `tools/check_vectors.py`, add `"lab.provenance.diff": 8`.
+In `tools/check_vectors.py`, add `"lab.diff": 8`.
 
 - [ ] **Step 6: Run tests, typecheck and the vector checker**
 
