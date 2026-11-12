@@ -192,6 +192,16 @@ the record it conflicted with can find nothing at all. Nothing retries a
 you. If you set `default_transaction_isolation` on the role or the session,
 leave these connections out of it.
 
+**A 5xx your handler *returns* is a 5xx, exactly like one it raises.** Spec
+2.8 keys on the status, so either way the record is released and your retry
+runs the handler again — and that means the first attempt's writes must not be
+committed. The store therefore raises `RecordReleased` on its way out of that
+exit, which rolls your transaction back through the same `executors` arm an
+exception would take; `idempotent_route` catches it and returns the response
+your handler built, so the client still sees your `503` and not a generic 500.
+If you call `idempotent_record` yourself, catch it where you would have
+returned, and never treat it as an error to report.
+
 **`IdempotencyStateError` is yours to see, never your client's.** `complete()`
 raises it when the record is no longer this attempt's — gone, already completed,
 or taken over by a retry after the lease expired (spec 2.8). The raise is the

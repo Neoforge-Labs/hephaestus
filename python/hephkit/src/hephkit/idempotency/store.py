@@ -30,7 +30,7 @@ from hephkit.hashing import new_uuid7
 from hephkit.idempotency import _sql
 from hephkit.idempotency.ports import Executor, Proceed, Replay
 
-__all__ = ["IdempotencyStateError", "IdempotencyStore", "Record"]
+__all__ = ["IdempotencyStateError", "IdempotencyStore", "Record", "RecordReleased"]
 
 
 class IdempotencyStateError(RuntimeError):
@@ -40,6 +40,33 @@ class IdempotencyStateError(RuntimeError):
     ``HephError`` and has no registry code. Raised when the record is gone, is
     already completed, or is held by another attempt, which after a 2.8
     takeover means this attempt has been superseded.
+    """
+
+
+class RecordReleased(Exception):
+    """The block exited cleanly but the record was released, so the work must not commit.
+
+    Raised out of :meth:`IdempotencyStore.idempotent_record` when the block
+    returns normally and 2.8's answer is to remove the record rather than store
+    it: a ``finish()`` of 500 or above, or no ``finish()`` at all. The handler
+    did nothing wrong; what would be wrong is committing its writes, because the
+    record that would have described them is gone and the client's retry runs
+    the handler again -- against committed state, which is the double execution
+    this module exists to prevent.
+
+    **It is raised rather than returned because an exception is the only thing
+    every consumer already reacts to.** An ``executors`` context manager rolls
+    back when one passes through its ``yield`` and commits when none does: the
+    shape both shipped factories have, and the shape a consumer writes by hand.
+    Raising here therefore makes this exit indistinguishable from a *raised*
+    5xx, which is what 2.8 says the two are -- "the operation produces a
+    response with status 500 or above" covers both -- without the store knowing
+    anything about the consumer's transaction.
+
+    A consumer whose handler built that 5xx response catches it and returns the
+    response, as :func:`hephkit.idempotency.fastapi.idempotent_route` does. One
+    that does not catch it answers 500 instead of the handler's own status, on a
+    released key: less precise, still safe, and never a commit.
     """
 
 
@@ -355,7 +382,13 @@ class IdempotencyStore:
         On the way out:
 
         * clean exit after ``finish`` below 500: ``complete()`` on ``work_ex``;
-        * clean exit with no ``finish``, or ``finish`` at 500 or above: release;
+        * clean exit with no ``finish``, or ``finish`` at 500 or above: release,
+          and :class:`RecordReleased` is raised so that the exit reaches the
+          caller's ``executors`` as an exception and the work rolls back with
+          the record. A released record means the work did not commit, and 2.8
+          makes a *returned* 5xx and a *raised* one the same outcome, so the two
+          exits must be indistinguishable to the consumer. Catch it to return
+          the handler's own 5xx response;
         * a raised ``HephError`` **below 500**, for ``kind="http"``: stored, as a 4xx the operation
           really produced (2.8), with that status and an empty body, because
           building a body is the layer above's job. This is the exception to
@@ -435,7 +468,15 @@ class IdempotencyStore:
         outcome = record._outcome
         if outcome is None or outcome[0] >= 500:
             await self.release(claim_ex, scope=scope, key=key, attempt_id=attempt)
-            return
+            why = (
+                "the block stated no outcome"
+                if outcome is None
+                else f"its outcome was {outcome[0]}, which 2.8 releases rather than stores"
+            )
+            raise RecordReleased(
+                f"the record for key {key!r} in scope {scope!r} was released because {why}; "
+                "the work must not commit"
+            )
         await self._store_or_release(work_ex, claim_ex, scope, key, attempt, outcome)
 
     async def _store_or_release(

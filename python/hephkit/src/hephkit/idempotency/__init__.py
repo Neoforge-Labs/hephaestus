@@ -9,7 +9,9 @@ the record store, which needs SQL transactions and constraints (CLAUDE.md rule
 * ``IdempotencyStore`` is the decision of 2.3 to 2.8 -- proceed, replay, 409 or
   422 -- together with ``complete``, ``release``, ``purge_expired`` and the
   ``idempotent_record`` context manager, whose default way out is release.
-  ``Record`` is what that context manager yields and ``IdempotencyStateError``
+  ``Record`` is what that context manager yields, ``RecordReleased`` what it
+  raises on the way out when 2.8 releases the record instead of storing it, so
+  that the caller's transaction rolls back with it, and ``IdempotencyStateError``
   what ``complete`` raises when the record is not this attempt's to complete.
 * ``Executor`` is the port every statement runs through. It is "run my
   statements in your transaction", never "give me a connection"; ``Executors``
@@ -67,7 +69,12 @@ from hephkit.idempotency.adapters import (
     sqlalchemy_work_connection,
 )
 from hephkit.idempotency.ports import Executor, Executors, Proceed, Replay
-from hephkit.idempotency.store import IdempotencyStateError, IdempotencyStore, Record
+from hephkit.idempotency.store import (
+    IdempotencyStateError,
+    IdempotencyStore,
+    Record,
+    RecordReleased,
+)
 
 __all__ = [
     "MAX_KEY_LENGTH",
@@ -79,6 +86,7 @@ __all__ = [
     "IdempotencyStore",
     "Proceed",
     "Record",
+    "RecordReleased",
     "Replay",
     "SQLAlchemyExecutor",
     "asyncpg_executors",

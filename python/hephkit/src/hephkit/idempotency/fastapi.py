@@ -80,6 +80,15 @@ problem+json body ``problem_response`` renders for it, so a replaying client
 gets the same bytes as the first. It still propagates to
 ``install_error_handlers`` for the first caller. 5xx and other exceptions
 release the record.
+
+**A 5xx the handler *returns* is the same outcome as one it raises**, which is
+why the wrapper catches ``RecordReleased``. The store releases the record on
+that exit and raises, so the exit reaches ``executors`` as an exception and the
+handler's own writes roll back with the record; the wrapper then returns the
+response the handler built. Without the catch the client would get a 500 instead
+of the handler's status; without the raise, ``executors`` would see a clean exit
+and **commit the work of a request whose record has just been deleted**, so the
+client's retry would run the handler again over committed rows.
 """
 
 from __future__ import annotations
@@ -99,7 +108,7 @@ from hephkit.errors import HephError
 from hephkit.errors.fastapi import problem_response
 from hephkit.idempotency import fingerprint, validate_key
 from hephkit.idempotency.ports import Executors
-from hephkit.idempotency.store import IdempotencyStore
+from hephkit.idempotency.store import IdempotencyStore, RecordReleased
 
 try:
     from opentelemetry import trace
@@ -256,26 +265,36 @@ def idempotent_route(
             fp = fingerprint(
                 request.method, _raw_target(request), body, request.headers.get("content-type")
             )
-            async with (
-                executors(request) as ex,
-                store.idempotent_record(
-                    claim_ex=ex.claim,
-                    work_ex=ex.work,
-                    scope=scope(request),
-                    key=key,
-                    fingerprint=fp,
-                    render_error=_render_error,
-                ) as record,
-            ):
-                if record.replay is not None:
-                    replay = record.replay
-                    headers = {REPLAYED_HEADER: "true"}
-                    if replay.media_type is not None:
-                        headers["content-type"] = replay.media_type
-                    return Response(replay.body, status_code=replay.status, headers=headers)
-                result = await handler(*args, **kwargs)
-                record.finish(*_capture(result))
-                return result
+            # Bound before the block, so the handler's own 5xx survives the
+            # RecordReleased that replaces the `return` below.
+            returned: Any = None
+            try:
+                async with (
+                    executors(request) as ex,
+                    store.idempotent_record(
+                        claim_ex=ex.claim,
+                        work_ex=ex.work,
+                        scope=scope(request),
+                        key=key,
+                        fingerprint=fp,
+                        render_error=_render_error,
+                    ) as record,
+                ):
+                    if record.replay is not None:
+                        replay = record.replay
+                        headers = {REPLAYED_HEADER: "true"}
+                        if replay.media_type is not None:
+                            headers["content-type"] = replay.media_type
+                        return Response(replay.body, status_code=replay.status, headers=headers)
+                    result = await handler(*args, **kwargs)
+                    record.finish(*_capture(result))
+                    returned = result
+                    return result
+            except RecordReleased:
+                # The handler returned 500 or above, so the record was released
+                # and `executors` rolled the handler's writes back with it
+                # (2.8). The response it built is still this client's answer.
+                return returned
 
         wrapper.__signature__ = signature  # type: ignore[attr-defined]
         return wrapper

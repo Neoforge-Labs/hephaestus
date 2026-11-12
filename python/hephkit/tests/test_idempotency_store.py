@@ -22,7 +22,11 @@ from hephkit.errors import HephError
 from hephkit.idempotency import _sql
 from hephkit.idempotency.adapters import AsyncpgExecutor, SQLAlchemyExecutor
 from hephkit.idempotency.ports import Executor, Proceed, Replay
-from hephkit.idempotency.store import IdempotencyStateError, IdempotencyStore
+from hephkit.idempotency.store import (
+    IdempotencyStateError,
+    IdempotencyStore,
+    RecordReleased,
+)
 
 
 def _normalise(sql: str) -> str:
@@ -712,17 +716,49 @@ async def test_the_stored_response_commits_and_rolls_back_with_the_handlers_work
 
 
 async def test_a_block_that_never_finishes_releases_rather_than_wedging(claimer, adapter):
-    async with _record(claimer, adapter):
-        pass
+    """An unknown outcome is a removed record (2.8), reported as RecordReleased.
+
+    The report is not decoration: this exit must reach the caller's `executors`
+    as an exception, or a factory that commits on a clean exit would commit the
+    handler's work with nothing recording it.
+    """
+    with pytest.raises(RecordReleased, match="no outcome"):
+        async with _record(claimer, adapter):
+            pass
     assert await claimer.count_keys() == 0
     assert await claimer.claim(scope="", key="k", fingerprint=FP) == a_proceed(taken_over=False)
 
 
 @pytest.mark.parametrize("status", [500, 503])
 async def test_a_finish_at_500_or_above_releases(claimer, adapter, status):
-    async with _record(claimer, adapter) as rec:
-        rec.finish(status, b"boom")
+    with pytest.raises(RecordReleased, match=str(status)):
+        async with _record(claimer, adapter) as rec:
+            rec.finish(status, b"boom")
     assert await claimer.count_keys() == 0
+
+
+@pytest.mark.parametrize("outcome", [None, 503], ids=["no-finish", "finish-503"])
+async def test_a_release_on_the_way_out_takes_the_handlers_write_with_it(
+    claimer, adapter, outcome
+):
+    """Both driver stacks: the released record and the handler's row go together.
+
+    The write goes through work_ex, the handler's own executor, so this is the
+    guarantee from the other side of `complete()`: if the record is released,
+    nothing it would have described may survive. `adapter.transaction()` commits
+    on a clean exit, which is why the release has to raise.
+    """
+    # The raises sits outside the work transaction on purpose: it is the
+    # exception passing through that context manager that rolls the write back.
+    with pytest.raises(RecordReleased):
+        async with claimer.executor() as claim_ex, adapter.transaction() as work_ex:
+            async with claimer.store.idempotent_record(
+                claim_ex=claim_ex, work_ex=work_ex, scope="", key="k", fingerprint=FP
+            ) as rec:
+                await work_ex.execute(INSERT_SQL, ["", "the-handlers-row", FP])
+                if outcome is not None:
+                    rec.finish(outcome, b"boom")
+    assert await claimer.count_keys() == 0  # neither the record nor the row
 
 
 async def test_an_exception_inside_the_block_releases_the_record(claimer, adapter):

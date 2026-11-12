@@ -33,7 +33,11 @@ A concurrent duplicate delivery of an event still in flight raises
 JSON-compatible raises from ``content_hash`` before any connection is opened.
 
 Records are written with ``kind="event"``; completion stores status 204 and an
-empty body, because there is no response.
+empty body, because there is no response. That is also why nothing here catches
+``RecordReleased``: an event handler that returns states 204, never a status of
+500 or above and never no outcome at all, so the store's two release-on-a-clean-
+exit paths are unreachable from this decorator. A handler that fails raises, and
+the exception rolls the work back on its way out, as it does on a route.
 """
 
 from __future__ import annotations

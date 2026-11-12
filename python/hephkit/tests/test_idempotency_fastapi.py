@@ -357,6 +357,57 @@ async def test_a_returned_5xx_response_is_released_so_a_retry_runs_again(client,
     assert calls.count == 2
 
 
+async def test_a_returned_5xx_does_not_commit_the_handlers_work(pg_conn, postgres_dsn):
+    """The invariant behind the rule: a released record means the work did not commit.
+
+    `asyncpg_executors` commits when its block exits cleanly and rolls back when
+    an exception passes through it, which is the shape of every executors
+    factory. So a returned 5xx that released the record and then returned
+    normally **committed the handler's rows while deleting the record**, and the
+    client's retry ran the handler again over committed state -- the double
+    execution this module exists to prevent. Deliberately not under a harness
+    that commits on a clean exit by itself: this is the shipped factory, a real
+    pool, and a real write on the work connection.
+    """
+    await pg_conn.execute("CREATE TABLE IF NOT EXISTS heph_test_work (note text PRIMARY KEY)")
+    await pg_conn.execute("TRUNCATE heph_test_work")
+    pool = await asyncpg.create_pool(postgres_dsn, min_size=2, max_size=4)
+    runs = 0
+    app = FastAPI()
+    install_error_handlers(app)
+
+    @app.post("/w")
+    @idempotent_route(IdempotencyStore(), scope=lambda r: "t", executors=asyncpg_executors(pool))
+    async def handler(request: Request) -> Response:
+        nonlocal runs
+        runs += 1
+        conn = asyncpg_work_connection(request)
+        await conn.execute("INSERT INTO heph_test_work (note) VALUES ($1)", f"run-{runs}")
+        if runs == 1:
+            return JSONResponse({"error": "down"}, status_code=503)
+        return JSONResponse({"ok": True}, status_code=201)
+
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            first = await c.post("/w", headers=KEY)
+            assert first.status_code == 503
+            assert first.json() == {"error": "down"}  # the handler's own response
+            assert await pg_conn.fetchval("SELECT count(*) FROM heph_test_work") == 0
+            assert await pg_conn.fetchval("SELECT count(*) FROM heph_idempotency") == 0
+            # The key is free, so the retry really runs, and it commits.
+            again = await c.post("/w", headers=KEY)
+            assert again.status_code == 201
+            assert [r["note"] for r in await pg_conn.fetch("SELECT note FROM heph_test_work")] == [
+                "run-2"
+            ]
+    finally:
+        await pool.close()
+        await pg_conn.execute("DROP TABLE IF EXISTS heph_test_work")
+    assert runs == 2
+
+
 async def test_a_server_without_raw_path_is_refused_not_fingerprinted_decoded(app, calls):
     """Spec 2.2: without raw_path the only path available is percent-decoded, which would
     make /items/%41 and /items/A one request. It must fail loudly, never fall back."""
