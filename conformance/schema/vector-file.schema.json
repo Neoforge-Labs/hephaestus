@@ -24,7 +24,10 @@
         "signatures.sign",
         "signatures.verify",
         "idempotency.key",
-        "idempotency.fingerprint"
+        "idempotency.fingerprint",
+        "lab.config.resolve",
+        "lab.provenance.record",
+        "lab.provenance.diff"
       ]
     },
     "spec": {

@@ -13,5 +13,6 @@ tasks:
       - 'hashing/*.json'
       - 'signatures/*.json'
       - 'idempotency/*.json'
+      - 'lab/*.json'
       - '/spec/errors.yaml'
       - '/tools/check_vectors.py'
