@@ -312,9 +312,18 @@ class _Claimer:
         self.store = store
 
     async def claim(
-        self, *, store: IdempotencyStore | None = None, **kwargs: Any
+        self,
+        *,
+        store: IdempotencyStore | None = None,
+        barrier: asyncio.Barrier | None = None,
+        **kwargs: Any,
     ) -> Proceed | Replay:
+        # A barrier held until every connection is open is what makes two
+        # gathered claims overlap on purpose: without it a run where the first
+        # finishes before the second connects passes just the same.
         async with self.executor() as ex:
+            if barrier is not None:
+                await barrier.wait()
             return await (store or self.store).claim(ex, **kwargs)
 
     async def seed(
@@ -446,14 +455,54 @@ async def test_a_record_past_retention_is_treated_as_new(claimer):
     assert await claimer.count_keys() == 1
 
 
+async def test_a_live_lease_past_retention_is_409_not_a_new_key(claimer):
+    """Spec 2.7: retention expiry applies only when no attempt holds the key.
+
+    2.8's takeover leaves created_at alone, so a record taken over just before
+    the retention boundary is older than retention while a handler still holds
+    a live lease. Treating it as new would hand the key to a second request and
+    leave the first handler's complete() writing into a row it no longer owns.
+    """
+    await claimer.seed(age=timedelta(hours=25), state="in_flight", lease=timedelta(seconds=60))
+    with pytest.raises(HephError) as exc:
+        await claimer.claim(scope="", key="k", fingerprint=OTHER_FP)
+    assert exc.value.code == "HEPH-IDEMP-422"  # 2.6 still comes first
+    with pytest.raises(HephError) as exc:
+        await claimer.claim(scope="", key="k", fingerprint=FP)
+    assert exc.value.code == "HEPH-IDEMP-409"
+    row = await claimer.row()
+    assert row is not None
+    assert row["fingerprint"] == FP  # the record was not reset
+    assert row["age"] > timedelta(hours=24)  # created_at untouched
+    assert timedelta(seconds=50) < row["lease_left"] <= timedelta(seconds=60)
+    assert await claimer.count_keys() == 1
+
+
+async def test_an_in_flight_record_past_retention_with_a_dead_lease_is_new(claimer):
+    """And once no attempt holds the key, 2.7 applies to an in_flight record too.
+
+    Not 2.8: an aged-out record is replaced rather than taken over, so the
+    fingerprint is the new request's and the window starts again.
+    """
+    await claimer.seed(
+        fingerprint=OTHER_FP, age=timedelta(hours=25), lease=timedelta(seconds=-5)
+    )
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=False)
+    row = await claimer.row()
+    assert row is not None
+    assert row["fingerprint"] == FP
+    assert row["age"] < timedelta(minutes=1)
+
+
 # The three that matter most, plus the empty scope.
 
 
 async def test_exactly_one_of_two_concurrent_first_requests_proceeds(claimer):
     """Spec 2.3. Two genuinely concurrent transactions, not two awaits on one."""
+    barrier = asyncio.Barrier(2)
     outcomes = await asyncio.gather(
-        claimer.claim(scope="", key="k", fingerprint=FP),
-        claimer.claim(scope="", key="k", fingerprint=FP),
+        claimer.claim(barrier=barrier, scope="", key="k", fingerprint=FP),
+        claimer.claim(barrier=barrier, scope="", key="k", fingerprint=FP),
         return_exceptions=True,
     )
     assert [o for o in outcomes if isinstance(o, Proceed)] == [Proceed(taken_over=False)]
@@ -464,9 +513,10 @@ async def test_exactly_one_of_two_concurrent_first_requests_proceeds(claimer):
 async def test_exactly_one_of_two_concurrent_takeovers_proceeds(claimer):
     """Spec 2.8: an expired lease is one record to win, not a free-for-all."""
     await claimer.seed(lease=timedelta(seconds=-5))
+    barrier = asyncio.Barrier(2)
     outcomes = await asyncio.gather(
-        claimer.claim(scope="", key="k", fingerprint=FP),
-        claimer.claim(scope="", key="k", fingerprint=FP),
+        claimer.claim(barrier=barrier, scope="", key="k", fingerprint=FP),
+        claimer.claim(barrier=barrier, scope="", key="k", fingerprint=FP),
         return_exceptions=True,
     )
     assert [o for o in outcomes if isinstance(o, Proceed)] == [Proceed(taken_over=True)]
@@ -491,9 +541,15 @@ async def test_the_empty_scope_is_a_scope(claimer):
     assert await claimer.count_keys() == 2
 
 
-@pytest.mark.parametrize("field", ["scope", "key"])
+@pytest.mark.parametrize("field", ["scope", "key", "fingerprint", "kind"])
 async def test_none_is_a_type_error_not_an_empty_string(claimer, field):
-    """``scope=None`` is not "no scope": it would collapse every tenant into one row."""
+    """One caller mistake, one answer: without the guard each column answers differently.
+
+    ``scope`` is the one that matters most -- coerced to ``""`` it would collapse
+    every tenant into one row -- but ``fingerprint=None`` is the nastiest,
+    because it is a driver error on a free key and a client-blaming 422 on a
+    taken one.
+    """
     kwargs: dict[str, Any] = {"scope": "", "key": "k", "fingerprint": FP, field: None}
     with pytest.raises(TypeError, match=field):
         await claimer.claim(**kwargs)

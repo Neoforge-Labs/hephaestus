@@ -36,6 +36,14 @@ DDL: Final = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
 # distinguishes it from a live one. The old record's response is cleared and its
 # fingerprint replaced, because this is a new record in an old row -- which is
 # not 2.8's takeover, where the fingerprint is never replaced.
+#
+# **Both halves of that WHERE are required.** Age alone is not enough: 2.8's
+# takeover deliberately leaves created_at alone, so a record taken over just
+# before the retention boundary is older than retention while its handler still
+# holds a live lease. Resetting it there would hand the key to a second request
+# and leave the first handler's complete() writing into a row it no longer owns.
+# Retention expiry therefore applies only when no attempt holds the key (2.7);
+# a live lease falls through to CLAIM_READ and is answered by 2.5.
 CLAIM_INSERT: Final = """
 INSERT INTO heph_idempotency
     (scope, key, fingerprint, kind, state, created_at, lease_expires_at)
@@ -50,13 +58,26 @@ ON CONFLICT (scope, key) DO UPDATE SET
     response_body       = NULL,
     response_media_type = NULL
 WHERE heph_idempotency.created_at < now() - $6::interval
+  AND (heph_idempotency.state <> 'in_flight' OR heph_idempotency.lease_expires_at <= now())
 RETURNING scope, key
 """
 
 # The live record the insert conflicted with, for the 2.4 to 2.8 decision.
-# `FOR UPDATE` waits for a concurrent transaction that holds the row -- a
-# caller's complete() or release() -- so the decision is made on the record's
-# settled state rather than on one that is about to change.
+#
+# `FOR UPDATE` buys no mutual exclusion across statements here: claim runs on a
+# connection with no transaction open, so the row lock dies with this
+# statement's implicit transaction. What keeps the takeover safe is the
+# re-checked WHERE in CLAIM_TAKE_OVER, not this clause.
+#
+# What it does buy is a wait: while a caller's complete() or release() holds the
+# row in its own transaction, this read blocks until that transaction ends, so
+# the decision is made on the settled state. The trade is deliberate -- a
+# duplicate request waits for the original's commit and then gets a replay,
+# instead of being told 409 and sent away to ask again -- and the cost is that
+# the wait is unbounded on the hot path: it lasts as long as the caller's
+# transaction holds the row. A caller that needs a bound sets `lock_timeout` on
+# its own connection; hephkit does not set one here, because the right bound is
+# a property of the caller's workload rather than of this statement.
 CLAIM_READ: Final = """
 SELECT fingerprint,
        state,

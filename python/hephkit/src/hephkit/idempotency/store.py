@@ -98,10 +98,19 @@ class IdempotencyStore:
         the absence of one. ``kind`` tells an event from an HTTP request, which
         is what lets a completed event record carry no response.
         """
-        # `scope=None` is the mistake worth catching: as a value it would be a
-        # NOT NULL violation from whichever driver got there first, and if it
-        # were ever coerced to "" it would quietly merge every tenant's keys.
-        for name, value in (("scope", scope), ("key", key)):
+        # All four are NOT NULL text columns, and every one of them answers a
+        # `None` differently without this guard: scope and key as a driver's NOT
+        # NULL violation on the insert path, kind as a CHECK violation,
+        # fingerprint as a NOT NULL violation when the key is free but a plain
+        # HEPH-IDEMP-422 when it is not. One caller mistake, four answers, two
+        # of which read as the client's fault. `scope` is the one that matters
+        # most: coerced to "" it would quietly merge every tenant's keys.
+        for name, value in (
+            ("scope", scope),
+            ("key", key),
+            ("fingerprint", fingerprint),
+            ("kind", kind),
+        ):
             if not isinstance(value, str):
                 raise TypeError(f"{name} must be a str, not {type(value).__name__}")
 
@@ -117,10 +126,19 @@ class IdempotencyStore:
             record = await ex.fetch_one(_sql.CLAIM_READ, [scope, key])
             if record is None:
                 continue  # Removed between the two statements; claim it again.
-            return await self._decide(ex, record, scope=scope, key=key, fingerprint=fingerprint)
-        raise HephError("HEPH-IDEMP-409")
+            return await self._answer_existing_record(
+                ex, record, scope=scope, key=key, fingerprint=fingerprint
+            )
+        # Not 2.5: nothing is holding this key, something is removing it as fast
+        # as it is created. 409 is still the answer the client can act on, so
+        # the detail says what actually happened rather than the registry's
+        # "still being processed".
+        raise HephError(
+            "HEPH-IDEMP-409",
+            "The record for this key was removed while it was being claimed. Retry the request.",
+        )
 
-    async def _decide(
+    async def _answer_existing_record(
         self,
         ex: Executor,
         record: Mapping[str, Any],
@@ -130,6 +148,9 @@ class IdempotencyStore:
         fingerprint: str,
     ) -> Proceed | Replay:
         """Answer for a record that already exists, in the spec's order.
+
+        Not a pure decision: the 2.8 branch writes, because taking the record
+        over is part of answering.
 
         **The order of these branches is the spec's order of precedence, not a
         convenience.** 2.6 is tested first because it applies "whatever its
