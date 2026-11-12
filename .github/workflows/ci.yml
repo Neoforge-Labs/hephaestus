@@ -2,6 +2,14 @@ name: ci
 
 on:
   pull_request:
+  # The merge queue tests each PR on top of the others queued ahead of it, which
+  # is the only thing that catches two branches that are green alone and red
+  # together. #14 and #16 were exactly that: #16 moved `idempotency` to shipped
+  # in spec/modules.yaml, #14 added the site-data.json generated from that
+  # registry, and neither branch held both halves. Per-PR CI cannot see such a
+  # pair by construction. Without this trigger a queued PR waits forever for
+  # checks that never run, so it has to land before the queue is turned on.
+  merge_group:
   workflow_dispatch: # pre-merge way to run the slow tests: run this workflow on a branch
   schedule:
     - cron: '43 4 * * 1' # weekly, on main
@@ -47,7 +55,12 @@ jobs:
   python:
     uses: ./.github/workflows/python-ci.yml
     with:
-      include-slow: ${{ github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/heads/work/') || github.event_name == 'workflow_dispatch' }}
+      # A merge_group run is pre-merge, so it belongs with pull_request here:
+      # without the explicit exclusion it would match (its ref is
+      # refs/heads/gh-readonly-queue/..., not refs/heads/work/) and every queued
+      # merge would drag the multi-megabyte tests along. They still run on the
+      # push to main immediately afterwards.
+      include-slow: ${{ github.event_name == 'workflow_dispatch' || (github.event_name != 'pull_request' && github.event_name != 'merge_group' && !startsWith(github.ref, 'refs/heads/work/')) }}
 
   go:
     uses: ./.github/workflows/go-ci.yml
