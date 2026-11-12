@@ -15,9 +15,24 @@ there is no later assignment to it that the hash would not see.
 
 Conventions this module fixes, because the spec does not:
 
-* **Environment.** Only members under the ``HEPH_`` prefix are read, so an
-  unrelated environment variable is never a config value. ``__`` separates
-  nesting levels: ``HEPH_OPTIM__LR`` sets ``optim.lr``.
+* **Environment.** Only members under the ``HEPH_LAB_`` prefix are read. ``__``
+  separates nesting levels: ``HEPH_LAB_OPTIM__LR`` sets ``optim.lr``. The prefix
+  is ``HEPH_LAB_`` and not ``HEPH_`` because :class:`hephkit.settings.HephSettings`
+  owns ``HEPH_`` for service settings (``HEPH_ENV``, ``HEPH_SERVICE_NAME``,
+  ``HEPH_DATABASE_URL``, ``HEPH_LOG_LEVEL``) in this same installed kit. A lab
+  config reading the whole ``HEPH_`` namespace would take those names as config
+  members, and since :func:`resolve` refuses a member the model does not declare,
+  every ``resolve(..., env=os.environ)`` call would be refused with
+  ``HEPH-LAB-422`` in any process that has the kit's own settings set -- a
+  research container in a generated ingot, a dev shell, a CI job exporting
+  ``HEPH_ENV``. Refusing an undeclared member is the behaviour that is right; the
+  prefix is what moves out of the way.
+
+  One residue runs the other way, and it is not a bug: ``HephSettings`` reports
+  any ``HEPH_*`` name matching no setting field in ``SettingsError.unused_env``
+  as "likely a typo", so ``HEPH_LAB_*`` members appear in that list. It is
+  informational, and it is only built on a path where settings construction has
+  already failed for a missing required setting, so it never refuses anything.
 * **Command line.** Options are ``--<dotted.path>=<value>`` or
   ``--<dotted.path> <value>``. There are no implicit booleans; write
   ``--flag=true``. The line is read left to right and a repeated option takes
@@ -45,7 +60,7 @@ Conventions this module fixes, because the spec does not:
   says something wrong.
 * **A later layer that supplies an object where an earlier one gave a scalar
   replaces it**, like any other override. But an ``env`` or ``cli`` member such
-  as ``HEPH_OPTIM__LR`` names ``optim.lr`` and says nothing about ``optim``, so
+  as ``HEPH_LAB_OPTIM__LR`` names ``optim.lr`` and says nothing about ``optim``, so
   where no layer has supplied an object at ``optim`` the override is refused
   (``422``) rather than silently granted an object it never named. The two
   mechanisms differ on purpose; ``conformance/lab/config.json`` pins both.
@@ -101,8 +116,11 @@ CODE = LAB_422
 #: HEPH-LAB-424".
 MISSING_CODE = LAB_424
 
-#: Environment members outside this prefix are not config values.
-ENV_PREFIX = "HEPH_"
+#: Environment members outside this prefix are not config values. It is
+#: ``HEPH_LAB_`` and not ``HEPH_`` because ``hephkit.settings.HephSettings``
+#: owns ``HEPH_`` for service settings in this same kit; see the module
+#: docstring for what reading the whole ``HEPH_`` namespace would cost.
+ENV_PREFIX = "HEPH_LAB_"
 
 #: What separates nesting levels in an environment member name.
 ENV_NESTING = "__"

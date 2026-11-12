@@ -58,14 +58,14 @@ Path("config.json").write_text('{"epochs": 40}')
 cfg = resolve(
     TrainConfig,
     file=Path("config.json"),      # beats the model defaults
-    env={"HEPH_SEED": "20261112"}, # beats the file
+    env={"HEPH_LAB_SEED": "20261112"}, # beats the file
     argv=sys.argv[1:],             # beats the environment
 )
 print(cfg)
 print("config_hash:", config_hash(cfg))
 
 try:
-    resolve(TrainConfig, env={"HEPH_OPTIM__LR": "not-a-number"})
+    resolve(TrainConfig, env={"HEPH_LAB_OPTIM__LR": "not-a-number"})
 except ConfigError as exc:
     print(f"refused: field={exc.field} layer={exc.layer}")
 ```
@@ -80,7 +80,7 @@ The spec does not settle how a layer is spelled, so this module does:
 
 - **Environment.** Only `HEPH_`-prefixed names are read, so an unrelated
   variable is never a config value, and `__` separates nesting levels:
-  `HEPH_OPTIM__LR` sets `optim.lr`.
+  `HEPH_LAB_OPTIM__LR` sets `optim.lr`.
 - **Command line.** `--<dotted.path>=<value>` or `--<dotted.path> <value>`.
   There are no implicit booleans — write `--flag=true` — and a repeated option
   takes its last value, for the same reason a later layer beats an earlier one.

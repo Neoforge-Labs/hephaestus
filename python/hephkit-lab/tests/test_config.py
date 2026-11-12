@@ -72,7 +72,7 @@ def test_precedence_cli_beats_env_beats_file_beats_defaults(tmp_path: Path) -> N
         Train,
         defaults=DEFAULTS,
         file=path,
-        env={"HEPH_SEED": "3"},
+        env={"HEPH_LAB_SEED": "3"},
         argv=["--seed=4"],
     )
     # `seed` is contested by all four layers, `name` by two, `optim` by one.
@@ -103,7 +103,7 @@ def test_unknown_cli_key_raises_config_error_naming_the_key() -> None:
 
 def test_unknown_env_key_raises_config_error_naming_the_key() -> None:
     with pytest.raises(ConfigError) as exc:
-        resolve(Train, defaults=DEFAULTS, env={"HEPH_EPOCHS": "3"})
+        resolve(Train, defaults=DEFAULTS, env={"HEPH_LAB_EPOCHS": "3"})
     assert exc.value.field == "epochs"
     assert exc.value.layer == "env"
 
@@ -127,7 +127,7 @@ def test_unprefixed_env_members_are_ignored() -> None:
 
 
 def test_the_env_prefix_is_the_documented_one() -> None:
-    assert ENV_PREFIX == "HEPH_"
+    assert ENV_PREFIX == "HEPH_LAB_"
 
 
 def test_a_value_of_the_wrong_type_is_refused_naming_the_field() -> None:
