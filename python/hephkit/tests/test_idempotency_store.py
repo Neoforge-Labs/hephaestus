@@ -673,23 +673,28 @@ async def test_a_key_that_keeps_vanishing_is_409_rather_than_a_loop(claimer):
 
 
 @asynccontextmanager
-async def _record(claimer, adapter, *, key: str = "k", fingerprint: str = FP):
+async def _record(
+    claimer, adapter, *, key: str = "k", fingerprint: str = FP, kind: str = "http", **extra: Any
+):
     async with claimer.executor() as claim_ex, adapter.transaction() as work_ex:
         async with claimer.store.idempotent_record(
-            claim_ex=claim_ex, work_ex=work_ex, scope="", key=key, fingerprint=fingerprint
+            claim_ex=claim_ex, work_ex=work_ex, scope="", key=key, fingerprint=fingerprint, kind=kind, **extra
         ) as rec:
             yield rec
 
 
-async def test_a_finished_block_stores_its_response_with_the_work_and_replays_it(claimer, adapter):
-    async with _record(claimer, adapter) as rec:
+@pytest.mark.parametrize("kind", ["http", "event"])
+async def test_a_finished_block_stores_its_response_with_the_work_and_replays_it(
+    claimer, adapter, kind
+):
+    async with _record(claimer, adapter, kind=kind) as rec:
         assert rec.replay is None and rec.taken_over is False
         rec.finish(201, b'{"id":1}', "application/json")
     row = await claimer.row()
     assert row is not None and row["state"] == "completed"
     assert (row["response_status"], bytes(row["response_body"])) == (201, b'{"id":1}')
     assert row["response_media_type"] == "application/json"
-    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Replay(
+    assert await claimer.claim(scope="", key="k", fingerprint=FP, kind=kind) == Replay(
         201, b'{"id":1}', "application/json"
     )
 
@@ -760,6 +765,35 @@ async def test_a_sub_500_HephError_is_stored_not_released(claimer, adapter):
     assert await claimer.claim(scope="", key="k", fingerprint=FP) == Replay(422, b"", None)
 
 
+async def test_a_renderer_supplies_the_body_stored_with_a_raised_4xx(claimer, adapter):
+    """The record is sealed on the way out, so the web layer's body must be handed in."""
+    seen: list[str] = []
+
+    def render(exc: HephError) -> tuple[bytes, str | None]:
+        seen.append(exc.code)
+        return b'{"title":"bad"}', "application/problem+json"
+
+    with pytest.raises(HephError):
+        async with _record(claimer, adapter, render_error=render):
+            raise HephError("HEPH-VAL-422", "bad field")
+    assert seen == ["HEPH-VAL-422"]
+    row = await claimer.row()
+    assert row is not None and bytes(row["response_body"]) == b'{"title":"bad"}'
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Replay(
+        422, b'{"title":"bad"}', "application/problem+json"
+    )
+
+
+async def test_a_renderer_is_not_consulted_for_a_release(claimer, adapter):
+    def render(exc: HephError) -> tuple[bytes, str | None]:
+        raise AssertionError("a 5xx is released, not rendered")
+
+    with pytest.raises(HephError):
+        async with _record(claimer, adapter, render_error=render):
+            raise HephError("HEPH-GEN-500")
+    assert await claimer.count_keys() == 0
+
+
 async def test_a_HephError_of_500_or_above_releases(claimer, adapter):
     with pytest.raises(HephError):
         async with _record(claimer, adapter):
@@ -772,10 +806,11 @@ async def test_a_replay_is_handed_to_the_caller_and_the_work_is_skipped(claimer,
         first.finish(201, b"{}", "application/json")
     ran: list[str] = []
     async with _record(claimer, adapter) as rec:
+        ran.append("entered")
         assert rec.replay == Replay(201, b"{}", "application/json")
         if rec.replay is None:
             ran.append("work")
-    assert ran == []
+    assert ran == ["entered"]  # runs once, with replay set, and does no work
     with pytest.raises(RuntimeError, match="replay"):
         rec.finish(200, b"")
     row = await claimer.row()

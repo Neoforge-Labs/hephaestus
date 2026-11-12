@@ -12,7 +12,7 @@ both are explained on :meth:`IdempotencyStore.claim`.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Any, Final, Literal
@@ -42,13 +42,13 @@ class Record:
     request: the block did not claim anything, so it returns that response and
     does the work no further. ``taken_over`` is the claim's flag, for telemetry.
 
-    The attempt token (2.8) lives inside, so the caller never threads it by hand.
+    The attempt token (2.8) never reaches the caller: ``idempotent_record``
+    holds it between the claim and the finish.
     """
 
-    def __init__(self, *, replay: Replay | None, taken_over: bool, attempt_id: str | None) -> None:
+    def __init__(self, *, replay: Replay | None, taken_over: bool) -> None:
         self.replay = replay
         self.taken_over = taken_over
-        self._attempt_id = attempt_id
         self._outcome: tuple[int, bytes, str | None] | None = None
 
     def finish(self, status: int, body: bytes, media_type: str | None = None) -> None:
@@ -259,6 +259,11 @@ class IdempotencyStore:
         safe direction: the attempt that owns the key does it once.
 
         Contrast :meth:`release`, which does not raise.
+
+        One deliberate exception to the transaction rule above:
+        :meth:`idempotent_record` stores a raised 4xx through the claim
+        executor, outside the handler's transaction, because that transaction is
+        about to roll back and there is no work for the response to describe.
         """
         for name, value in (("scope", scope), ("key", key), ("attempt_id", attempt_id)):
             if not isinstance(value, str):
@@ -319,6 +324,7 @@ class IdempotencyStore:
         key: str,
         fingerprint: str,
         kind: Literal["http", "event"] = "http",
+        render_error: Callable[[HephError], tuple[bytes, str | None]] | None = None,
     ) -> AsyncIterator[Record]:
         """Claim a key around a block, so that finishing the record cannot be forgotten.
 
@@ -354,17 +360,33 @@ class IdempotencyStore:
         * any other exception, a ``HephError`` of 500 or above, or a cancellation:
           release, and the exception propagates.
 
+        ``render_error`` turns a raised sub-500 ``HephError`` into the
+        ``(body, media_type)`` that is stored with its status, so a replay returns
+        what the first client got. The store still builds no response body: it
+        calls a renderer the web layer handed it. It must be supplied here
+        because the record is sealed at this point (``complete()`` refuses a
+        second write), so nothing above can amend it later. ``None`` stores an
+        empty body and no media type, which is right for an event with no HTTP
+        response.
+
+        The rule keys on the exception *type*: a 4xx ``HephError`` raised inside
+        an ``ExceptionGroup`` (a handler using ``asyncio.TaskGroup``) is not
+        recognised and releases. That is the conservative direction, and the
+        limitation is deliberate; there is no ``except*`` arm.
+
         If writing the record fails, the record is released and that error
-        propagates. A raised :class:`IdempotencyStateError` there means this
+        propagates, replacing the 4xx being raised: an outcome that could not be
+        recorded must not reach the client as a settled result, and the retry it
+        gets from the connection or state error is the honest answer. A raised :class:`IdempotencyStateError` there means this
         attempt was superseded; its release is a no-op by the attempt guard.
         """
         proceed = await self.claim(
             claim_ex, scope=scope, key=key, fingerprint=fingerprint, kind=kind
         )
         if isinstance(proceed, Replay):
-            yield Record(replay=proceed, taken_over=False, attempt_id=None)
+            yield Record(replay=proceed, taken_over=False)
             return
-        record = Record(replay=None, taken_over=proceed.taken_over, attempt_id=proceed.attempt_id)
+        record = Record(replay=None, taken_over=proceed.taken_over)
         attempt = proceed.attempt_id
         try:
             yield record
@@ -372,8 +394,9 @@ class IdempotencyStore:
             if exc.status >= 500:
                 await self.release(claim_ex, scope=scope, key=key, attempt_id=attempt)
                 raise
+            body, media_type = render_error(exc) if render_error is not None else (b"", None)
             await self._store_or_release(
-                claim_ex, claim_ex, scope, key, attempt, (exc.status, b"", None)
+                claim_ex, claim_ex, scope, key, attempt, (exc.status, body, media_type)
             )
             raise
         except BaseException:
