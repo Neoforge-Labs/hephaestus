@@ -54,14 +54,15 @@ DDL: Final = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
 # a live lease falls through to CLAIM_READ and is answered by 2.5.
 CLAIM_INSERT: Final = """
 INSERT INTO heph_idempotency
-    (scope, key, fingerprint, kind, state, created_at, lease_expires_at)
-VALUES ($1, $2, $3, $4, 'in_flight', now(), now() + $5::interval)
+    (scope, key, fingerprint, kind, state, created_at, lease_expires_at, attempt_id)
+VALUES ($1, $2, $3, $4, 'in_flight', now(), now() + $5::interval, $7::uuid)
 ON CONFLICT (scope, key) DO UPDATE SET
     fingerprint         = excluded.fingerprint,
     kind                = excluded.kind,
     state               = 'in_flight',
     created_at          = excluded.created_at,
     lease_expires_at    = excluded.lease_expires_at,
+    attempt_id          = excluded.attempt_id,
     response_status     = NULL,
     response_body       = NULL,
     response_media_type = NULL
@@ -103,10 +104,13 @@ FOR UPDATE
 # requests taking over the same expired lease, the second updates no row and is
 # answered by 2.5 instead. The fingerprint is matched, never assigned ("the
 # stored fingerprint is never replaced for the life of the record"), and
-# created_at is left alone so retention keeps running from the original.
+# created_at is left alone so retention keeps running from the original. The
+# attempt_id IS replaced: that is what taking over means, and it is what makes
+# the superseded attempt's complete() and release() match nothing.
 CLAIM_TAKE_OVER: Final = """
 UPDATE heph_idempotency
-SET lease_expires_at = now() + $4::interval
+SET lease_expires_at = now() + $4::interval,
+    attempt_id       = $5::uuid
 WHERE scope = $1
   AND key = $2
   AND fingerprint = $3
@@ -124,6 +128,10 @@ RETURNING scope, key
 # one already holds the outcome of an attempt that got there first, and a late
 # second attempt must not replace what a client may already have been replayed.
 # The lease is cleared because a completed record has nothing to protect.
+#
+# **`attempt_id` ties the write to the attempt that owns the record.** After a
+# 2.8 takeover two attempts are alive for one key; without the guard the
+# superseded one would store its response into the owner's record.
 COMPLETE: Final = """
 UPDATE heph_idempotency
 SET state               = 'completed',
@@ -131,15 +139,17 @@ SET state               = 'completed',
     response_status     = $3,
     response_body       = $4,
     response_media_type = $5
-WHERE scope = $1 AND key = $2 AND state = 'in_flight'
+WHERE scope = $1 AND key = $2 AND state = 'in_flight' AND attempt_id = $6::uuid
 """
 
 # 2.8: a 5xx or a raised handler removes the record so the client can retry. It
 # runs in a transaction of its own, because the handler's has been abandoned.
 # `in_flight` only: a completed record is a stored outcome, never a retry slot.
+# `attempt_id` too: a superseded attempt must not delete the record its
+# successor is running under, or a third request would proceed beside it.
 RELEASE: Final = """
 DELETE FROM heph_idempotency
-WHERE scope = $1 AND key = $2 AND state = 'in_flight'
+WHERE scope = $1 AND key = $2 AND state = 'in_flight' AND attempt_id = $3::uuid
 """
 
 # 2.7's sweep. **It carries the same live-lease conjunct as CLAIM_INSERT, and for

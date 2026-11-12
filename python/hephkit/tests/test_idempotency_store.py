@@ -13,6 +13,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import ANY
 
 import asyncpg
 import pytest
@@ -370,7 +371,7 @@ def claimer(request, pg_conn: asyncpg.Connection, postgres_dsn: str) -> _Claimer
 async def test_a_free_key_proceeds_and_leaves_a_leased_in_flight_record(claimer, kind):
     """Spec 2.3: no live record, so the operation runs."""
     assert await claimer.claim(scope="t1", key="k", fingerprint=FP, kind=kind) == Proceed(
-        taken_over=False
+        taken_over=False, attempt_id=ANY
     )
     row = await claimer.row("t1", "k")
     assert row is not None
@@ -423,7 +424,7 @@ async def test_a_live_lease_is_409(claimer):
 async def test_an_expired_lease_is_taken_over_with_a_new_lease(claimer):
     """Spec 2.8: a crashed worker must not wedge a key for the retention window."""
     await claimer.seed(age=timedelta(hours=1), lease=timedelta(seconds=-5))
-    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=True)
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=True, attempt_id=ANY)
     row = await claimer.row()
     assert row is not None
     assert timedelta(seconds=50) < row["lease_left"] <= timedelta(seconds=60)
@@ -445,7 +446,7 @@ async def test_a_record_past_retention_is_treated_as_new(claimer):
         body=b"old",
         media_type="application/json",
     )
-    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=False)
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=False, attempt_id=ANY)
     row = await claimer.row()
     assert row is not None
     assert (row["fingerprint"], row["kind"], row["state"]) == (FP, "http", "in_flight")
@@ -487,7 +488,7 @@ async def test_an_in_flight_record_past_retention_with_a_dead_lease_is_new(claim
     await claimer.seed(
         fingerprint=OTHER_FP, age=timedelta(hours=25), lease=timedelta(seconds=-5)
     )
-    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=False)
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=False, attempt_id=ANY)
     row = await claimer.row()
     assert row is not None
     assert row["fingerprint"] == FP
@@ -505,7 +506,7 @@ async def test_exactly_one_of_two_concurrent_first_requests_proceeds(claimer):
         claimer.claim(barrier=barrier, scope="", key="k", fingerprint=FP),
         return_exceptions=True,
     )
-    assert [o for o in outcomes if isinstance(o, Proceed)] == [Proceed(taken_over=False)]
+    assert [o for o in outcomes if isinstance(o, Proceed)] == [Proceed(taken_over=False, attempt_id=ANY)]
     assert [o.code for o in outcomes if isinstance(o, HephError)] == ["HEPH-IDEMP-409"]
     assert await claimer.count_keys() == 1
 
@@ -519,7 +520,7 @@ async def test_exactly_one_of_two_concurrent_takeovers_proceeds(claimer):
         claimer.claim(barrier=barrier, scope="", key="k", fingerprint=FP),
         return_exceptions=True,
     )
-    assert [o for o in outcomes if isinstance(o, Proceed)] == [Proceed(taken_over=True)]
+    assert [o for o in outcomes if isinstance(o, Proceed)] == [Proceed(taken_over=True, attempt_id=ANY)]
     assert [o.code for o in outcomes if isinstance(o, HephError)] == ["HEPH-IDEMP-409"]
 
 
@@ -562,7 +563,7 @@ async def test_none_is_a_type_error_not_an_empty_string(claimer, field):
 async def test_the_configured_lease_is_the_one_stored(claimer):
     store = IdempotencyStore(lease=timedelta(minutes=10))
     outcome = await claimer.claim(scope="", key="k", fingerprint=FP, store=store)
-    assert outcome == Proceed(taken_over=False)
+    assert outcome == Proceed(taken_over=False, attempt_id=ANY)
     row = await claimer.row()
     assert row is not None
     assert timedelta(minutes=9) < row["lease_left"] <= timedelta(minutes=10)
@@ -629,7 +630,7 @@ async def test_a_record_that_vanishes_before_the_read_is_claimed_again(claimer):
     async with claimer.executor() as inner:
         churn = _ChurnsTheRecord(inner, claimer.reader, once=True)
         outcome = await claimer.store.claim(churn, scope="", key="k", fingerprint=FP)
-    assert outcome == Proceed(taken_over=False)
+    assert outcome == Proceed(taken_over=False, attempt_id=ANY)
     assert churn.churns == 2
 
 

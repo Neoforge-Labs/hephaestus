@@ -41,9 +41,15 @@ class Proceed:
     expired (2.8). The operation runs either way; the flag is there for the
     caller's telemetry, because a takeover means an earlier attempt's outcome is
     unknown.
+
+    ``attempt_id`` identifies this attempt's hold on the record (spec 2.8). The
+    caller hands it back to ``complete()`` or ``release()``, which act only while
+    it is still the record's current one: a takeover issues a new id, so a
+    superseded attempt can no longer write to the record.
     """
 
     taken_over: bool
+    attempt_id: str
 
 
 @dataclass(frozen=True)

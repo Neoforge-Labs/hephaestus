@@ -8,6 +8,10 @@ CREATE TABLE IF NOT EXISTS heph_idempotency (
     key                 text        NOT NULL,
     fingerprint         text        NOT NULL,
     kind                text        NOT NULL,
+    -- Which attempt holds the record (spec 2.8). Set fresh on creation and
+    -- replaced on takeover, so a superseded attempt's token goes stale. The
+    -- store always supplies it; the default only keeps hand-written rows valid.
+    attempt_id          uuid        NOT NULL DEFAULT gen_random_uuid(),
     state               text        NOT NULL,
     created_at          timestamptz NOT NULL DEFAULT now(),
     lease_expires_at    timestamptz,
@@ -24,6 +28,10 @@ CREATE TABLE IF NOT EXISTS heph_idempotency (
     -- A completed HTTP record must have something to replay.
     CHECK (NOT (state = 'completed' AND kind = 'http') OR response_status IS NOT NULL)
 );
+
+-- A table created before attempt_id existed gains it; a no-op otherwise.
+ALTER TABLE heph_idempotency
+    ADD COLUMN IF NOT EXISTS attempt_id uuid NOT NULL DEFAULT gen_random_uuid();
 
 -- The retention sweep deletes by age.
 CREATE INDEX IF NOT EXISTS heph_idempotency_created_at_idx

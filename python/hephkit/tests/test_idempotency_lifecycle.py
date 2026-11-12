@@ -15,6 +15,7 @@ age one, because the store refuses anything under 24 hours (spec 2.7).
 from __future__ import annotations
 
 from datetime import timedelta
+from unittest.mock import ANY
 
 import asyncpg
 import pytest
@@ -22,11 +23,13 @@ import pytest
 # The claimer machinery lives in the claim tests; importing it keeps one copy.
 from test_idempotency_store import _SEED, FP, claimer  # noqa: F401
 
+from hephkit.errors import HephError
 from hephkit.idempotency.adapters import AsyncpgExecutor
 from hephkit.idempotency.ports import Proceed, Replay
-from hephkit.idempotency.store import IdempotencyStore
+from hephkit.idempotency.store import IdempotencyStateError, IdempotencyStore
 
 STORE = IdempotencyStore()
+SOME_ATTEMPT = "01934f5e-0000-7000-8000-000000000000"
 DAY = timedelta(hours=24)
 
 
@@ -38,8 +41,10 @@ async def _seed(
     lease: timedelta | None = timedelta(seconds=60),
     status: int | None = None,
     body: bytes | None = None,
-) -> None:
+) -> str:
+    """Seed a row and return the attempt id the table gave it."""
     await conn.execute(_SEED, "", key, FP, "http", state, timedelta(0), lease, status, body, None)
+    return str(await conn.fetchval("SELECT attempt_id FROM heph_idempotency WHERE key = $1", key))
 
 
 async def _claim(dsn: str) -> Proceed | Replay:
@@ -57,10 +62,10 @@ async def _claim(dsn: str) -> Proceed | Replay:
 async def test_completing_stores_the_response_and_a_claim_replays_it(
     adapter, pg_conn, postgres_dsn
 ):
-    await _seed(pg_conn)
+    aid = await _seed(pg_conn)
     async with adapter.transaction() as ex:
         await STORE.complete(
-            ex, scope="", key="k", status=201, body=b'{"id":1}', media_type="application/json"
+            ex, scope="", key="k", attempt_id=aid, status=201, body=b'{"id":1}', media_type="application/json"
         )
     row = await adapter.fetch_key("", "k")
     assert row["state"] == "completed"
@@ -72,17 +77,17 @@ async def test_completing_stores_the_response_and_a_claim_replays_it(
 
 async def test_a_4xx_is_stored_and_replayed_like_any_other_outcome(adapter, pg_conn, postgres_dsn):
     """Spec 2.8: a 4xx is a real result of the operation, not a failure to retry."""
-    await _seed(pg_conn)
+    aid = await _seed(pg_conn)
     async with adapter.transaction() as ex:
-        await STORE.complete(ex, scope="", key="k", status=422, body=b'{"detail":"no"}')
+        await STORE.complete(ex, scope="", key="k", attempt_id=aid, status=422, body=b'{"detail":"no"}')
     assert await _claim(postgres_dsn) == Replay(422, b'{"detail":"no"}', None)
 
 
 async def test_an_event_completes_with_status_204_and_no_body(adapter, pg_conn, postgres_dsn):
     """The worker decorator has no response to store, so it stores 204 and nothing."""
-    await _seed(pg_conn)
+    aid = await _seed(pg_conn)
     async with adapter.transaction() as ex:
-        await STORE.complete(ex, scope="", key="k", status=204, body=b"")
+        await STORE.complete(ex, scope="", key="k", attempt_id=aid, status=204, body=b"")
     assert await _claim(postgres_dsn) == Replay(204, b"", None)
 
 
@@ -92,9 +97,9 @@ async def test_completing_in_the_callers_transaction_rolls_back_with_it(adapter,
     ``claim()`` committed the record on its own, so after a rollback it must be
     exactly what claim left: ``in_flight``, nothing stored.
     """
-    await _seed(pg_conn)
+    aid = await _seed(pg_conn)
     async with adapter.transaction() as ex:
-        await STORE.complete(ex, scope="", key="k", status=201, body=b"{}")
+        await STORE.complete(ex, scope="", key="k", attempt_id=aid, status=201, body=b"{}")
         await adapter.rollback()
     row = await adapter.fetch_key("", "k")
     assert row["state"] == "in_flight"
@@ -103,16 +108,20 @@ async def test_completing_in_the_callers_transaction_rolls_back_with_it(adapter,
 
 async def test_a_completed_record_is_not_overwritten(adapter, pg_conn):
     """A second attempt that finishes late must not replace what the first one stored."""
-    await _seed(pg_conn, state="completed", lease=None, status=200, body=b"first")
+    aid = await _seed(pg_conn, state="completed", lease=None, status=200, body=b"first")
     async with adapter.transaction() as ex:
-        await STORE.complete(ex, scope="", key="k", status=201, body=b"second")
+        with pytest.raises(IdempotencyStateError):
+            await STORE.complete(ex, scope="", key="k", attempt_id=aid, status=201, body=b"second")
     row = await adapter.fetch_key("", "k")
     assert (row["response_status"], bytes(row["response_body"])) == (200, b"first")
 
 
-async def test_completing_a_key_that_has_no_record_creates_none(adapter):
+async def test_completing_a_key_that_has_no_record_raises_and_creates_none(adapter):
     async with adapter.transaction() as ex:
-        await STORE.complete(ex, scope="", key="gone", status=201, body=b"{}")
+        with pytest.raises(IdempotencyStateError):
+            await STORE.complete(
+                ex, scope="", key="gone", attempt_id=SOME_ATTEMPT, status=201, body=b"{}"
+            )
     assert await adapter.count_keys() == 0
 
 
@@ -121,19 +130,23 @@ async def test_a_status_that_is_not_stored_is_refused(adapter, status):
     """Spec 2.8 stores below 500; at 500 and above the answer is release()."""
     async with adapter.transaction() as ex:
         with pytest.raises(ValueError, match="release"):
-            await STORE.complete(ex, scope="", key="k", status=status, body=b"")
+            await STORE.complete(
+                ex, scope="", key="k", attempt_id=SOME_ATTEMPT, status=status, body=b""
+            )
 
 
 async def test_a_body_that_is_not_bytes_is_a_type_error(adapter):
     async with adapter.transaction() as ex:
         with pytest.raises(TypeError, match="body"):
-            await STORE.complete(ex, scope="", key="k", status=200, body="text")  # type: ignore[arg-type]
+            await STORE.complete(
+                ex, scope="", key="k", attempt_id=SOME_ATTEMPT, status=200, body="text"
+            )  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("field", ["scope", "key"])
+@pytest.mark.parametrize("field", ["scope", "key", "attempt_id"])
 async def test_none_is_a_type_error_not_an_empty_string_on_complete_and_release(adapter, field):
     """As in claim(): a None scope coerced to "" would quietly merge every tenant's keys."""
-    kwargs = {"scope": "", "key": "k", field: None}
+    kwargs = {"scope": "", "key": "k", "attempt_id": SOME_ATTEMPT, field: None}
     async with adapter.transaction() as ex:
         with pytest.raises(TypeError, match=field):
             await STORE.complete(ex, status=200, body=b"", **kwargs)  # type: ignore[arg-type]
@@ -147,22 +160,24 @@ async def test_none_is_a_type_error_not_an_empty_string_on_complete_and_release(
 async def test_a_released_record_can_be_claimed_again(claimer):
     """A 5xx or a raised handler removes the record so the client can retry."""
     await claimer.seed()
+    aid = str((await claimer.row())["attempt_id"])
     async with claimer.executor() as ex:
-        await claimer.store.release(ex, scope="", key="k")
+        await claimer.store.release(ex, scope="", key="k", attempt_id=aid)
     assert await claimer.count_keys() == 0  # read from another connection: it committed
-    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=False)
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=False, attempt_id=ANY)
 
 
 async def test_release_never_removes_a_completed_record(claimer):
     await claimer.seed(state="completed", lease=None, status=200, body=b"ok")
+    aid = str((await claimer.row())["attempt_id"])
     async with claimer.executor() as ex:
-        await claimer.store.release(ex, scope="", key="k")
+        await claimer.store.release(ex, scope="", key="k", attempt_id=aid)
     assert (await claimer.row())["state"] == "completed"
 
 
 async def test_releasing_a_key_that_has_no_record_is_not_an_error(claimer):
     async with claimer.executor() as ex:
-        await claimer.store.release(ex, scope="", key="gone")
+        await claimer.store.release(ex, scope="", key="gone", attempt_id=SOME_ATTEMPT)
 
 
 # purge_expired(): the consumer schedules it; hephkit starts nothing.
@@ -214,3 +229,56 @@ async def test_purge_honours_a_longer_retention(claimer):
     async with claimer.executor() as ex:
         assert await IdempotencyStore(retention=timedelta(days=2)).purge_expired(ex) == 0
     assert await claimer.count_keys() == 1
+
+
+# Ownership (spec 2.8): a takeover transfers the record, and the superseded
+# attempt may neither complete nor release it.
+
+
+async def _superseded_attempt_and_owner(claimer):
+    """A claims; its lease lapses; B takes over. Returns (A's id, B's id)."""
+    first = await claimer.claim(scope="", key="k", fingerprint=FP)
+    assert isinstance(first, Proceed)
+    await claimer.reader.execute(
+        "UPDATE heph_idempotency SET lease_expires_at = now() - interval '1 second'"
+    )
+    second = await claimer.claim(scope="", key="k", fingerprint=FP)
+    assert second.taken_over
+    assert first.attempt_id != second.attempt_id
+    return first.attempt_id, second.attempt_id
+
+
+async def test_a_takeover_issues_a_new_attempt_id(claimer):
+    a, b = await _superseded_attempt_and_owner(claimer)
+    assert str((await claimer.row())["attempt_id"]) == b != a
+
+
+async def test_a_superseded_attempt_cannot_complete_the_record(claimer):
+    """A's response would otherwise be replayed as the outcome of work B never finished."""
+    a, b = await _superseded_attempt_and_owner(claimer)
+    before = dict(await claimer.row())
+    async with claimer.executor() as ex:
+        with pytest.raises(IdempotencyStateError):
+            await claimer.store.complete(
+                ex, scope="", key="k", attempt_id=a, status=201, body=b"from A"
+            )
+    after = dict(await claimer.row())
+    columns = ("state", "attempt_id", "lease_expires_at", "response_status", "response_body")
+    assert {c: after[c] for c in columns} == {c: before[c] for c in columns}
+    assert after["state"] == "in_flight"
+    # and the owner still can
+    async with claimer.executor() as ex:
+        await claimer.store.complete(ex, scope="", key="k", attempt_id=b, status=200, body=b"from B")
+    assert bytes((await claimer.row())["response_body"]) == b"from B"
+
+
+async def test_a_superseded_attempt_releasing_leaves_the_owners_record(claimer):
+    """Deleting it would let a third request proceed beside B: two handlers, one key."""
+    a, b = await _superseded_attempt_and_owner(claimer)
+    async with claimer.executor() as ex:
+        await claimer.store.release(ex, scope="", key="k", attempt_id=a)  # no raise
+    row = await claimer.row()
+    assert row is not None and row["state"] == "in_flight" and str(row["attempt_id"]) == b
+    with pytest.raises(HephError) as exc:  # B's lease is live again: a third request is told 409
+        await claimer.claim(scope="", key="k", fingerprint=FP)
+    assert exc.value.code == "HEPH-IDEMP-409"

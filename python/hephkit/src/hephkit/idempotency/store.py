@@ -17,10 +17,21 @@ from datetime import timedelta
 from typing import Any, Final, Literal
 
 from hephkit.errors import HephError
+from hephkit.hashing import new_uuid7
 from hephkit.idempotency import _sql
 from hephkit.idempotency.ports import Executor, Proceed, Replay
 
-__all__ = ["IdempotencyStore"]
+__all__ = ["IdempotencyStateError", "IdempotencyStore"]
+
+
+class IdempotencyStateError(RuntimeError):
+    """``complete()`` found the record is not the caller's to complete.
+
+    A server-side invariant failure, not a client-facing one, so it is not a
+    ``HephError`` and has no registry code. Raised when the record is gone, is
+    already completed, or is held by another attempt, which after a 2.8
+    takeover means this attempt has been superseded.
+    """
 
 # The defaults of 2.7, which also fix the floor: retention MAY be configured
 # longer, so anything shorter is not a setting but a hole in the guarantee.
@@ -115,14 +126,15 @@ class IdempotencyStore:
                 raise TypeError(f"{name} must be a str, not {type(value).__name__}")
 
         for _ in range(_PASSES):
+            attempt_id = new_uuid7()
             claimed = await ex.fetch_one(
                 _sql.CLAIM_INSERT,
-                [scope, key, fingerprint, kind, self._lease, self._retention],
+                [scope, key, fingerprint, kind, self._lease, self._retention, attempt_id],
             )
             if claimed is not None:
                 # The key was free (2.3), or the record on it had aged out and
                 # this statement has just replaced it (2.7).
-                return Proceed(taken_over=False)
+                return Proceed(taken_over=False, attempt_id=attempt_id)
             record = await ex.fetch_one(_sql.CLAIM_READ, [scope, key])
             if record is None:
                 continue  # Removed between the two statements; claim it again.
@@ -172,12 +184,15 @@ class IdempotencyStore:
             )
         if not record["lease_expired"]:
             raise HephError("HEPH-IDEMP-409")  # 2.5
-        taken = await ex.fetch_one(_sql.CLAIM_TAKE_OVER, [scope, key, fingerprint, self._lease])
+        attempt_id = new_uuid7()
+        taken = await ex.fetch_one(
+            _sql.CLAIM_TAKE_OVER, [scope, key, fingerprint, self._lease, attempt_id]
+        )
         if taken is None:
             # The lease was live again by the time the update ran, so another
             # request took the record over first. That is 2.5 for this one.
             raise HephError("HEPH-IDEMP-409")
-        return Proceed(taken_over=True)  # 2.8
+        return Proceed(taken_over=True, attempt_id=attempt_id)  # 2.8
 
     async def complete(
         self,
@@ -185,6 +200,7 @@ class IdempotencyStore:
         *,
         scope: str,
         key: str,
+        attempt_id: str,
         status: int,
         body: bytes,
         media_type: str | None = None,
@@ -203,12 +219,18 @@ class IdempotencyStore:
         like any other outcome. ``status`` of 500 or above is refused, because
         2.8 answers that with :meth:`release`.
 
-        Writes only an ``in_flight`` record. When there is none to write (it was
-        released, purged, or an earlier attempt already completed it) nothing is
-        stored and nothing is raised: a late second attempt must not replace the
-        first one's response, and a record that is gone cannot be completed.
+        ``attempt_id`` is the one :class:`Proceed` carried. The record is written
+        only while it is ``in_flight`` and still held by that attempt (2.8: a
+        takeover transfers ownership). **When it is not, this raises
+        :class:`IdempotencyStateError`, and the raise is deliberate:** the
+        caller's transaction rolls back, and with it the handler's work. The
+        alternative, a silent no-op, would commit the work while nothing
+        recorded it, and the next retry would run it again. Undoing it is the
+        safe direction: the attempt that owns the key does it once.
+
+        Contrast :meth:`release`, which does not raise.
         """
-        for name, value in (("scope", scope), ("key", key)):
+        for name, value in (("scope", scope), ("key", key), ("attempt_id", attempt_id)):
             if not isinstance(value, str):
                 raise TypeError(f"{name} must be a str, not {type(value).__name__}")
         if not isinstance(body, bytes):
@@ -218,9 +240,15 @@ class IdempotencyStore:
                 f"status {status} is not stored: 2.8 stores below 500 and releases at 500 "
                 "and above, so call release() for a failed attempt"
             )
-        await ex.execute(_sql.COMPLETE, [scope, key, status, body, media_type])
+        updated = await ex.execute(_sql.COMPLETE, [scope, key, status, body, media_type, attempt_id])
+        if updated != 1:
+            raise IdempotencyStateError(
+                f"cannot complete {key!r} in scope {scope!r}: the record is gone, already "
+                f"completed, or held by another attempt than {attempt_id}. The caller's "
+                "transaction must roll back."
+            )
 
-    async def release(self, ex: Executor, *, scope: str, key: str) -> None:
+    async def release(self, ex: Executor, *, scope: str, key: str, attempt_id: str) -> None:
         """Remove an ``in_flight`` record so the client can retry (spec 2.8).
 
         For a 5xx or a handler that raised. **Like ``claim()``, ``ex`` must be on
@@ -229,13 +257,18 @@ class IdempotencyStore:
         release that joined it would be undone with it and leave the key wedged
         until the lease ran out.
 
-        A ``completed`` record is never removed, and a key with no record is not
-        an error.
+        Removes the record only while it is ``in_flight`` and still held by
+        ``attempt_id`` (2.8). **Unlike** :meth:`complete`, **it does not raise
+        when nothing matches.** This runs on the failure path, where raising
+        would mask the original error, and a no-op is the correct outcome: a
+        superseded attempt's key legitimately belongs to someone else now, and
+        deleting it would let a third request run beside the owner. A completed
+        record is never removed.
         """
-        for name, value in (("scope", scope), ("key", key)):
+        for name, value in (("scope", scope), ("key", key), ("attempt_id", attempt_id)):
             if not isinstance(value, str):
                 raise TypeError(f"{name} must be a str, not {type(value).__name__}")
-        await ex.execute(_sql.RELEASE, [scope, key])
+        await ex.execute(_sql.RELEASE, [scope, key, attempt_id])
 
     async def purge_expired(self, ex: Executor) -> int:
         """Delete records past retention and return how many were removed (spec 2.7).
