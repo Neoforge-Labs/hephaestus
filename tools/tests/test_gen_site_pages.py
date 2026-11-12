@@ -75,9 +75,15 @@ def test_adr_pages_match_sources() -> None:
     assert {p.name for p in adr_pages} == {s.name for s in sources}  # both directions
     for src in sources:
         original = src.read_text(encoding="utf-8")
-        assert _body(adr_pages[adr_dir / src.name]) == rewrite_adr_links(original)
-        # no ADR in the corpus has a link needing a rewrite, so bodies are byte-identical
-        assert rewrite_adr_links(original) == original
+        rewritten = rewrite_adr_links(original)
+        assert _body(adr_pages[adr_dir / src.name]) == rewritten
+        # The only transformation is a cross-ADR link becoming a site path, so
+        # reversing it must give the source back byte for byte. ADR 0021 is the
+        # first in the corpus to link to another ADR; before it this assertion
+        # was written as `rewritten == original`, which the first such link
+        # falsified. Links are written in the bare `NNNN-slug.md` form, which is
+        # what makes the reversal exact.
+        assert re.sub(r"\]\(/adrs/(\d{4}-[a-z0-9-]+)(#[^)\s]*)?\)", r"](\1.md\2)", rewritten) == original
     order = re.findall(r'"(\d{4}-[^"]+)":', _page(pages, "adrs/_meta.ts"))
     assert order == [s.stem for s in sources]
 
