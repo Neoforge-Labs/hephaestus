@@ -327,6 +327,8 @@ def test_the_vocabulary_matches_on_words_rather_than_substrings() -> None:
         "losses",  # an irregular plural, listed explicitly
         "error_rate",  # a rate that is a result rather than a knob
         "max_f1",  # the best of several, which is still a reported number
+        "f1_pos",  # positive-class F1, which a bare `pos` veto would excuse
+        "step_loss",  # the loss at a training step, likewise for `step`
     ):
         assert names_a_metric(name), name
     for name in (
@@ -364,6 +366,24 @@ def test_a_drawing_parameter_qualified_by_its_metric_is_not_flagged() -> None:
     ):
         assert not names_a_metric(name), name
         assert scan_source(f"{name} = 0.5\n") == [], name
+
+
+def test_a_presentation_veto_word_does_not_excuse_a_metric_spelling() -> None:
+    """Why bare `pos` and `step` are absent while `xpos`, `ypos` and `tick` are not.
+
+    `f1_pos` and `pos_f1` are ordinary spellings for positive-class F1, and
+    `step_loss` is the loss at a training step. A bare `pos` or `step` in the
+    veto excused all three, which is the other half of the failure the
+    presentation group exists to fix: a false positive gets a gate switched
+    off, and a false negative is how a transcribed table ships. The three names
+    are in the violating fixture as well, so this clause is pinned twice.
+    """
+    for name in ("f1_pos", "pos_f1", "step_loss"):
+        assert names_a_metric(name), name
+        assert len(scan_source(f"{name} = 0.4812\n")) == 1, name
+    # And the narrower words still do the work the bare ones were not needed for.
+    assert not names_a_metric("f1_xpos")
+    assert not names_a_metric("recall_tick_step")
 
 
 def test_the_presentation_veto_leaves_a_reported_best_of_alone() -> None:

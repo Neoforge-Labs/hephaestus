@@ -68,3 +68,11 @@ p_value = 0.031  # VIOLATION
 
 # One literal under two names: reported once, because the finding is the literal.
 best_f1 = best_f1_macro = 0.5210  # VIOLATION
+
+# Positive-class F1 and the loss at a training step. These are here because a
+# bare `pos` and a bare `step` in the presentation veto silently excused all
+# three, and a word that blocks a metric spelling is how a transcribed table
+# ships. `xpos`, `ypos` and `tick` are what veto the figure idioms.
+f1_pos = 0.4812  # VIOLATION
+pos_f1 = 0.4812  # VIOLATION
+step_loss = 0.0317  # VIOLATION

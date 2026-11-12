@@ -294,9 +294,15 @@ TUNING_WORDS: Final[frozenset[str]] = frozenset(
 #: switched off, and `tests/fixtures/violations/figure_clean.py` holds each of
 #: those names so the veto has a witness rather than an argument.
 #:
-#: Note what is **not** here: bare `min` and `max`. ``max_f1`` and ``min_loss``
-#: are a reported best-of, not geometry, so the axis forms are listed by their
-#: own names (``ymax``, ``vmin``) and the bare words stay outside the veto.
+#: Note what is **not** here, and why the omissions are the load-bearing part.
+#: Bare ``min`` and ``max`` would cost ``max_f1`` and ``min_loss``, which are a
+#: reported best-of rather than geometry, so the axis forms are listed by their
+#: own names (``ymax``, ``vmin``). Bare ``pos`` and ``step`` are absent for the
+#: same reason -- they would cost ``f1_pos``, ``pos_f1`` and ``step_loss`` --
+#: and they are not needed, because every idiom above is caught by a more
+#: specific word: ``xpos``, ``ypos`` and ``tick`` do that work. A veto word
+#: earns its place only when no narrower word already catches the idiom, since
+#: a word that blocks a metric spelling is how a transcribed table ships.
 PRESENTATION_WORDS: Final[frozenset[str]] = frozenset(
     {
         # Axes and limits, in the spellings matplotlib made idiomatic.
@@ -311,7 +317,20 @@ PRESENTATION_WORDS: Final[frozenset[str]] = frozenset(
         "vmin",
         "vmax",
         # Where a mark sits and how big it is.
-        "pos",
+        #
+        # `xpos` and `ypos` are listed individually, and bare `pos` is
+        # deliberately absent: a bare word would not have matched `xpos`
+        # anyway -- that is why these two are here -- and it costs real recall,
+        # because `f1_pos` and `pos_f1` are ordinary spellings for
+        # positive-class F1 and a literal under either must be flagged. `tick`
+        # is here for the same division of labour: it catches
+        # `recall_tick_step`, so bare `step` is not needed and would have cost
+        # `step_loss`, the loss at a training step.
+        #
+        # `size` stays, unlike those two, because it blocks no metric spelling
+        # anybody uses -- `loss_size` names no reported number -- while it is
+        # the only word that catches `f1_size` and `f1_marker_size`, which are
+        # real matplotlib idioms.
         "xpos",
         "ypos",
         "offset",
@@ -321,7 +340,6 @@ PRESENTATION_WORDS: Final[frozenset[str]] = frozenset(
         "fontsize",
         "width",
         "height",
-        "step",
         "tick",
         "bins",
         # How a mark is drawn.
@@ -375,11 +393,21 @@ class GateError(RuntimeError):
 
 
 class MissingSubjectError(GateError):
-    """The gate was pointed at something that is not there (``HEPH-LAB-424``).
+    """The gate has no subject it can check (``HEPH-LAB-424``).
 
-    A gate with no subject would pass by checking nothing, which is the one way
-    a gate fails silently, and 412's own entry says a gate cannot pass on an
-    artefact that does not exist at all. A :class:`GateError` subclass so one
+    Two ways that happens, and the class name only names the first. The subject
+    is **not there**: a figure path that is neither a file nor a directory, a
+    records root or a manuscript that does not exist. Or the subject is there
+    and **cannot be read**: a manuscript that is not UTF-8 text, which leaves
+    the citations gate with no citations to read. Both are the same failure in
+    the sense that matters -- the gate would otherwise pass by checking nothing,
+    which is the one way a gate fails silently -- and 412's own entry says a
+    gate cannot pass on an artefact it cannot use.
+
+    An unreadable figure *file* is deliberately not this: it is one subject
+    among many, so it becomes a violation and the scan goes on (see
+    :func:`_scan_file`). Only the gate's sole subject being unusable is a
+    refusal. A :class:`GateError` subclass so one
     ``except GateError`` still catches every refusal this module makes, with
     ``.code`` telling them apart -- the pairing ``lab.config`` already uses for
     ``MissingConfigError``.
@@ -818,11 +846,15 @@ def check_all(
     The gates run in order and each one's findings are collected, but a gate
     that cannot check at all stops the call: a
     :class:`~hephkit.lab.record.RecordError` (``HEPH-LAB-424``) from a record
-    missing one of its documents propagates, so one absent ``rows.jsonl`` is
-    reported instead of the citations gate's findings. That is deliberate --
-    424 is a refusal to check rather than a finding, and the fix is to produce
-    the artefact and run again -- but it does mean CI's one call has two
-    failure codes, and only the 412 carries a full account.
+    missing one of its documents propagates, as does
+    :class:`MissingSubjectError` from a gate pointed at an absent or unreadable
+    subject. **Findings already collected are lost when that happens**, and
+    gates after it never run: a 424 about one absent ``rows.jsonl`` is NOT
+    evidence that the figures gate passed, only that the records gate could not
+    finish. Produce the artefact and run again to see the full account. That is
+    deliberate -- 424 is a refusal to check rather than a finding -- but it does
+    mean CI's one call has two failure codes and only the 412 carries every
+    violation.
 
     Being asked to check nothing is a :class:`ValueError` rather than a pass: a
     gate run over no subject is the one way a gate fails silently.
