@@ -492,10 +492,16 @@ def test_an_environment_member_that_was_never_set_is_omitted_not_nulled() -> Non
     assert document == {"platform": "Linux-6.8.0-x86_64"}
 
 
-def test_every_member_of_the_7_1_table_is_written_even_though_it_is_nullable(
+def test_a_captured_record_writes_all_seven_members_with_a_null_among_them(
     tmp_path: Path,
 ) -> None:
-    """7.1: a record MUST carry every member, so none may be dropped as unset."""
+    """7.1: a record carries every member of the table, nulls included.
+
+    This pins what `capture` produces. It is **not** the guard against an
+    `exclude_unset` dump -- `capture` passes all seven explicitly, so every one
+    is in `model_fields_set` and an `exclude_unset` dump would emit them
+    anyway. The test below is that guard.
+    """
     document = captured(a_repository(tmp_path, lockfile=None)).as_document()
     assert document["deps_hash"] is None
     assert set(document) == {
@@ -507,6 +513,39 @@ def test_every_member_of_the_7_1_table_is_written_even_though_it_is_nullable(
         "class",
         "environment",
     }
+
+
+def test_a_member_left_to_a_default_is_still_written_into_the_document() -> None:
+    """7.1's "MUST carry every member", against the one way it could be lost.
+
+    `exclude_unset` drops a member only when it has a default *and* was not
+    supplied. None of the seven has a default today, which is why the test
+    above cannot see the difference, and why a future member that acquired one
+    would be dropped silently. This subclass is that future: `deps_hash` with a
+    default, left unsupplied, so the member is genuinely unset. It must still
+    be written.
+
+    The subclass inherits `as_document` unchanged, so what is under test is the
+    real method and not a copy of it.
+    """
+
+    class RecordWithADefaultedMember(ProvenanceRecord):
+        deps_hash: str | None = None
+
+    record = RecordWithADefaultedMember.model_validate(
+        {
+            "run_id": "r",
+            "config_hash": CONFIG_HASH,
+            "data_hash": DATA_HASH,
+            "code_sha": None,
+            "class": "provenance-only",
+            "environment": {},
+        }
+    )
+    assert "deps_hash" not in record.model_fields_set, "the member must be genuinely unset"
+    document = record.as_document()
+    assert "deps_hash" in document, "a defaulted member must not be dropped from a record"
+    assert document["deps_hash"] is None
 
 
 def test_environment_carries_no_hostname_username_or_filesystem_path(tmp_path: Path) -> None:

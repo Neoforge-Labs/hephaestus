@@ -14,7 +14,7 @@ on what "a clean tree" is, and two builders would eventually disagree.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -165,9 +165,12 @@ def run_capture(case: Case, tmp_path: Path) -> None:
         assert env_rules.CHECKS[fact](environment) == [], fact
 
 
-def assert_member_order(
-    actual: Mapping[str, Any], expected: Mapping[str, Any], where: str = "<root>"
-) -> None:
+def _is_array(value: Any) -> bool:
+    """A JSON array, which a string is not, however sequence-like it is."""
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+
+
+def assert_member_order(actual: Any, expected: Any, where: str = "<root>") -> None:
     """Assert `actual` carries `expected`'s members in `expected`'s order, at every depth.
 
     Equality is not enough and the difference bites: a case that differs from
@@ -175,12 +178,36 @@ def assert_member_order(
     exactly what the non-Python-runtime case pins, since a member 7.4 does not
     name serialises after the ones it does -- passes a top-level order check
     whatever order the nested object came out in.
+
+    Total on purpose, because Tasks 9 to 11 drive their suites through this:
+
+    * It descends into **arrays of objects**, with the index in the path, so a
+      later suite whose expectation holds a list of records cannot acquire a
+      case that silently cannot fail. No shape in `record.json` needs it today.
+    * A value of the wrong **kind** -- a scalar where an object was expected --
+      **fails** rather than being skipped. `run_record` happens to be safe
+      because its dict-equality assertion runs first, but shared machinery must
+      not depend on the order its callers assert things in.
+
+    Scalars are left to the caller's equality assertion: this function is about
+    order and shape, and two callers asserting the same equality twice would
+    report the second failure in the less readable way.
     """
-    assert list(actual) == list(expected), f"member order at {where}"
-    for key, value in expected.items():
-        nested = actual.get(key)
-        if isinstance(value, Mapping) and isinstance(nested, Mapping):
-            assert_member_order(nested, value, f"{where}.{key}")
+    if isinstance(expected, Mapping):
+        assert isinstance(actual, Mapping), (
+            f"expected an object at {where}, got {type(actual).__name__}"
+        )
+        assert list(actual) == list(expected), f"member order at {where}"
+        # `actual[key]` rather than `.get`: the assertion above has already
+        # established that both carry the same member names.
+        for key, value in expected.items():
+            assert_member_order(actual[key], value, f"{where}.{key}")
+        return
+    if _is_array(expected):
+        assert _is_array(actual), f"expected an array at {where}, got {type(actual).__name__}"
+        assert len(actual) == len(expected), f"array length at {where}"
+        for index, value in enumerate(expected):
+            assert_member_order(actual[index], value, f"{where}[{index}]")
 
 
 def run_record(case: Case, _tmp_path: Path) -> None:
@@ -249,6 +276,33 @@ def test_the_member_order_check_reaches_a_nested_object() -> None:
     assert_member_order(document, {"a": 1, "environment": {"platform": "p", "go": "1.23"}})
     with pytest.raises(AssertionError, match=r"member order at <root>\.environment"):
         assert_member_order(document, {"a": 1, "environment": {"go": "1.23", "platform": "p"}})
+
+
+def test_the_member_order_check_descends_into_an_array_of_objects() -> None:
+    """Arrays are descended into, with the index in the path.
+
+    Nothing in `record.json` is shaped like this; the suites after it may be,
+    and a helper that skipped arrays would hand them a case that cannot fail.
+    """
+    document = {"cases": [{"a": 1}, {"b": 2, "c": 3}]}
+    assert_member_order(document, {"cases": [{"a": 1}, {"b": 2, "c": 3}]})
+    with pytest.raises(AssertionError, match=r"member order at <root>\.cases\[1\]"):
+        assert_member_order(document, {"cases": [{"a": 1}, {"c": 3, "b": 2}]})
+    with pytest.raises(AssertionError, match=r"array length at <root>\.cases"):
+        assert_member_order(document, {"cases": [{"a": 1}]})
+
+
+def test_the_member_order_check_refuses_a_value_of_the_wrong_kind() -> None:
+    """A scalar where an object was expected fails rather than being skipped."""
+    with pytest.raises(AssertionError, match=r"expected an object at <root>\.environment"):
+        assert_member_order({"environment": "macOS"}, {"environment": {"platform": "macOS"}})
+    with pytest.raises(AssertionError, match=r"expected an array at <root>\.frameworks"):
+        assert_member_order({"frameworks": {}}, {"frameworks": []})
+    with pytest.raises(AssertionError, match=r"expected an object at <root>"):
+        assert_member_order("not a document", {"run_id": "r"})
+    # A string is not an array, however sequence-like it is.
+    with pytest.raises(AssertionError, match=r"expected an array at <root>\.tags"):
+        assert_member_order({"tags": "ab"}, {"tags": ["a", "b"]})
 
 
 def test_a_runnerless_lab_file_fails(tmp_path: Path) -> None:
