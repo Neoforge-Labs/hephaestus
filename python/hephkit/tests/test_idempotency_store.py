@@ -1,14 +1,28 @@
-"""The record table of spec section 2.3: its columns and the constraints rule 6 asks for."""
+"""The idempotency record store: the table of 2.3, the executor port, and ``claim()``.
+
+The table's columns and the constraints rule 6 asks for come first, then the two
+adapters against the port, then the decision table of 2.3 to 2.8.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import re
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import asyncpg
 import pytest
+from sqlalchemy.ext.asyncio import create_async_engine
 
+from hephkit.errors import HephError
 from hephkit.idempotency import _sql
+from hephkit.idempotency.adapters import AsyncpgExecutor, SQLAlchemyExecutor
+from hephkit.idempotency.ports import Executor, Proceed, Replay
+from hephkit.idempotency.store import IdempotencyStore
 
 
 def _normalise(sql: str) -> str:
@@ -234,3 +248,339 @@ def test_a_missing_driver_names_the_extra(monkeypatch, module):
     cls = adapters.AsyncpgExecutor if module == "asyncpg" else adapters.SQLAlchemyExecutor
     with pytest.raises(ImportError, match=r"hephkit\[(postgres|sqlalchemy)\]"):
         cls(object())
+
+
+# --- claim(): the decision table of 2.3 to 2.8 ------------------------------
+#
+# `claim()` wants a connection with **no outer transaction**, because its
+# statements commit as they run: that is the opposite of the `adapter` fixture's
+# contract, so these tests open their own connections through `claimer`. A
+# record that is still invisible protects nothing, and several tests below claim
+# the same key from a second connection to prove the record is really there.
+
+FP = "sha256:" + "a" * 64
+OTHER_FP = "sha256:" + "b" * 64
+
+_SEED = (
+    "INSERT INTO heph_idempotency (scope, key, fingerprint, kind, state, created_at, "
+    "lease_expires_at, response_status, response_body, response_media_type) "
+    "VALUES ($1, $2, $3, $4, $5, now() - $6::interval, now() + $7::interval, $8, $9, $10)"
+)
+
+
+@asynccontextmanager
+async def _asyncpg_executor(dsn: str) -> AsyncIterator[Executor]:
+    conn = await asyncpg.connect(dsn)
+    try:
+        yield AsyncpgExecutor(conn)
+    finally:
+        await conn.close()
+
+
+@asynccontextmanager
+async def _sqlalchemy_executor(dsn: str) -> AsyncIterator[Executor]:
+    # AUTOCOMMIT is how a SQLAlchemy caller says "no outer transaction": without
+    # it `engine.connect()` begins one lazily, and claim's record would stay
+    # invisible to everyone else until the caller committed.
+    engine = create_async_engine(
+        dsn.replace("postgresql://", "postgresql+asyncpg://", 1), isolation_level="AUTOCOMMIT"
+    )
+    try:
+        async with engine.connect() as conn:
+            yield SQLAlchemyExecutor(conn)
+    finally:
+        await engine.dispose()
+
+
+class _Claimer:
+    """Hands out executors on fresh connections with no transaction open.
+
+    Each ``claim()`` gets a connection of its own, so two of them gathered are
+    genuinely concurrent rather than two awaits on one connection. Reads and
+    seeds go through ``pg_conn``, a connection of its own, so a read sees only
+    what claim has committed.
+    """
+
+    def __init__(
+        self,
+        open_executor: Callable[[], AbstractAsyncContextManager[Executor]],
+        reader: asyncpg.Connection,
+        store: IdempotencyStore,
+    ) -> None:
+        self.executor = open_executor
+        self.reader = reader
+        self.store = store
+
+    async def claim(
+        self, *, store: IdempotencyStore | None = None, **kwargs: Any
+    ) -> Proceed | Replay:
+        async with self.executor() as ex:
+            return await (store or self.store).claim(ex, **kwargs)
+
+    async def seed(
+        self,
+        *,
+        scope: str = "",
+        key: str = "k",
+        fingerprint: str = FP,
+        kind: str = "http",
+        state: str = "in_flight",
+        age: timedelta = timedelta(0),
+        lease: timedelta | None = timedelta(seconds=60),
+        status: int | None = None,
+        body: bytes | None = None,
+        media_type: str | None = None,
+    ) -> None:
+        await self.reader.execute(
+            _SEED, scope, key, fingerprint, kind, state, age, lease, status, body, media_type
+        )
+
+    async def count_keys(self) -> int:
+        return int(await self.reader.fetchval("SELECT count(*) FROM heph_idempotency"))
+
+    async def row(self, scope: str = "", key: str = "k") -> asyncpg.Record | None:
+        return await self.reader.fetchrow(
+            "SELECT *, lease_expires_at - now() AS lease_left, now() - created_at AS age "
+            "FROM heph_idempotency WHERE scope = $1 AND key = $2",
+            scope,
+            key,
+        )
+
+
+@pytest.fixture(params=["asyncpg", "sqlalchemy"])
+def claimer(request, pg_conn: asyncpg.Connection, postgres_dsn: str) -> _Claimer:
+    """Every claim test runs once per driver stack."""
+    opener = _asyncpg_executor if request.param == "asyncpg" else _sqlalchemy_executor
+    return _Claimer(lambda: opener(postgres_dsn), pg_conn, IdempotencyStore())
+
+
+# One test per row of the table.
+
+
+@pytest.mark.parametrize("kind", ["http", "event"])
+async def test_a_free_key_proceeds_and_leaves_a_leased_in_flight_record(claimer, kind):
+    """Spec 2.3: no live record, so the operation runs."""
+    assert await claimer.claim(scope="t1", key="k", fingerprint=FP, kind=kind) == Proceed(
+        taken_over=False
+    )
+    row = await claimer.row("t1", "k")
+    assert row is not None
+    assert (row["fingerprint"], row["kind"], row["state"]) == (FP, kind, "in_flight")
+    assert timedelta(seconds=50) < row["lease_left"] <= timedelta(seconds=60)
+
+
+@pytest.mark.parametrize(
+    "seeded",
+    [
+        pytest.param({"state": "completed", "lease": None, "status": 201}, id="completed"),
+        pytest.param({"lease": timedelta(seconds=-5)}, id="in-flight-lease-expired"),
+    ],
+)
+async def test_a_differing_fingerprint_is_422_whatever_the_state(claimer, seeded):
+    """Spec 2.6: one key means one payload, in flight or complete."""
+    await claimer.seed(fingerprint=OTHER_FP, **seeded)
+    with pytest.raises(HephError) as exc:
+        await claimer.claim(scope="", key="k", fingerprint=FP)
+    assert exc.value.code == "HEPH-IDEMP-422"
+    row = await claimer.row()
+    assert row is not None and row["fingerprint"] == OTHER_FP  # 2.8: never replaced
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "media_type"),
+    [(201, b'{"id":1}', "application/json"), (204, None, None)],
+    ids=["with-a-body", "without-one"],
+)
+async def test_a_completed_record_replays_the_stored_response(claimer, status, body, media_type):
+    """Spec 2.4: the operation MUST NOT run again."""
+    await claimer.seed(
+        state="completed", lease=None, status=status, body=body, media_type=media_type
+    )
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Replay(
+        status=status, body=body or b"", media_type=media_type
+    )
+    row = await claimer.row()
+    assert row is not None and row["state"] == "completed"  # the replay changed nothing
+
+
+async def test_a_live_lease_is_409(claimer):
+    """Spec 2.5: the original is still being processed, so retry later."""
+    await claimer.seed()
+    with pytest.raises(HephError) as exc:
+        await claimer.claim(scope="", key="k", fingerprint=FP)
+    assert exc.value.code == "HEPH-IDEMP-409"
+
+
+async def test_an_expired_lease_is_taken_over_with_a_new_lease(claimer):
+    """Spec 2.8: a crashed worker must not wedge a key for the retention window."""
+    await claimer.seed(age=timedelta(hours=1), lease=timedelta(seconds=-5))
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=True)
+    row = await claimer.row()
+    assert row is not None
+    assert timedelta(seconds=50) < row["lease_left"] <= timedelta(seconds=60)
+    assert row["fingerprint"] == FP  # 2.8's last sentence: never replaced
+    # A takeover continues the record rather than starting a new one, so
+    # retention keeps running from the original creation.
+    assert row["age"] > timedelta(minutes=59)
+
+
+async def test_a_record_past_retention_is_treated_as_new(claimer):
+    """Spec 2.7: after expiry the key is new, so 2.6 does not apply to it either."""
+    await claimer.seed(
+        fingerprint=OTHER_FP,
+        kind="event",
+        state="completed",
+        age=timedelta(hours=25),
+        lease=None,
+        status=201,
+        body=b"old",
+        media_type="application/json",
+    )
+    assert await claimer.claim(scope="", key="k", fingerprint=FP) == Proceed(taken_over=False)
+    row = await claimer.row()
+    assert row is not None
+    assert (row["fingerprint"], row["kind"], row["state"]) == (FP, "http", "in_flight")
+    assert row["age"] < timedelta(minutes=1)  # the record restarted
+    assert row["response_status"] is None  # and the aged-out response is gone
+    assert row["response_body"] is None and row["response_media_type"] is None
+    assert await claimer.count_keys() == 1
+
+
+# The three that matter most, plus the empty scope.
+
+
+async def test_exactly_one_of_two_concurrent_first_requests_proceeds(claimer):
+    """Spec 2.3. Two genuinely concurrent transactions, not two awaits on one."""
+    outcomes = await asyncio.gather(
+        claimer.claim(scope="", key="k", fingerprint=FP),
+        claimer.claim(scope="", key="k", fingerprint=FP),
+        return_exceptions=True,
+    )
+    assert [o for o in outcomes if isinstance(o, Proceed)] == [Proceed(taken_over=False)]
+    assert [o.code for o in outcomes if isinstance(o, HephError)] == ["HEPH-IDEMP-409"]
+    assert await claimer.count_keys() == 1
+
+
+async def test_exactly_one_of_two_concurrent_takeovers_proceeds(claimer):
+    """Spec 2.8: an expired lease is one record to win, not a free-for-all."""
+    await claimer.seed(lease=timedelta(seconds=-5))
+    outcomes = await asyncio.gather(
+        claimer.claim(scope="", key="k", fingerprint=FP),
+        claimer.claim(scope="", key="k", fingerprint=FP),
+        return_exceptions=True,
+    )
+    assert [o for o in outcomes if isinstance(o, Proceed)] == [Proceed(taken_over=True)]
+    assert [o.code for o in outcomes if isinstance(o, HephError)] == ["HEPH-IDEMP-409"]
+
+
+async def test_a_mismatched_fingerprint_beats_a_live_lease(claimer):
+    """Spec 2.6 takes precedence over 2.5: a client bug, not a retry-later."""
+    await claimer.seed(fingerprint=OTHER_FP, lease=timedelta(seconds=60))
+    with pytest.raises(HephError) as exc:
+        await claimer.claim(scope="", key="k", fingerprint=FP)
+    assert exc.value.code == "HEPH-IDEMP-422"
+
+
+async def test_the_empty_scope_is_a_scope(claimer):
+    """Two untenanted principals sharing a key still collide."""
+    assert isinstance(await claimer.claim(scope="", key="k", fingerprint=FP), Proceed)
+    with pytest.raises(HephError) as exc:
+        await claimer.claim(scope="", key="k", fingerprint=FP)
+    assert exc.value.code == "HEPH-IDEMP-409"
+    assert isinstance(await claimer.claim(scope="t1", key="k", fingerprint=FP), Proceed)
+    assert await claimer.count_keys() == 2
+
+
+@pytest.mark.parametrize("field", ["scope", "key"])
+async def test_none_is_a_type_error_not_an_empty_string(claimer, field):
+    """``scope=None`` is not "no scope": it would collapse every tenant into one row."""
+    kwargs: dict[str, Any] = {"scope": "", "key": "k", "fingerprint": FP, field: None}
+    with pytest.raises(TypeError, match=field):
+        await claimer.claim(**kwargs)
+    assert await claimer.count_keys() == 0
+
+
+# Retention and lease are configuration (2.7).
+
+
+async def test_the_configured_lease_is_the_one_stored(claimer):
+    store = IdempotencyStore(lease=timedelta(minutes=10))
+    outcome = await claimer.claim(scope="", key="k", fingerprint=FP, store=store)
+    assert outcome == Proceed(taken_over=False)
+    row = await claimer.row()
+    assert row is not None
+    assert timedelta(minutes=9) < row["lease_left"] <= timedelta(minutes=10)
+
+
+async def test_a_longer_retention_keeps_a_record_the_default_would_have_aged_out(claimer):
+    await claimer.seed(state="completed", lease=None, status=201, age=timedelta(hours=25))
+    store = IdempotencyStore(retention=timedelta(days=7))
+    assert await claimer.claim(scope="", key="k", fingerprint=FP, store=store) == Replay(
+        status=201, body=b"", media_type=None
+    )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"retention": timedelta(hours=23)}, "retention"),
+        ({"lease": timedelta(0)}, "lease"),
+        ({"lease": timedelta(seconds=-1)}, "lease"),
+    ],
+)
+def test_a_retention_or_lease_that_breaks_the_spec_is_refused(kwargs, match):
+    # 2.7: retention MAY be configured longer, so a shorter one is not a
+    # setting. A lease that has already expired makes 2.5 unreachable.
+    with pytest.raises(ValueError, match=match):
+        IdempotencyStore(**kwargs)
+
+
+# The record vanishing between claim's two statements.
+
+
+class _ChurnsTheRecord:
+    """Re-creates the record before every insert, removing it before every read.
+
+    A concurrent ``release()`` or retention purge is the one thing that can make
+    claim's read find nothing, and this is that window held open. ``once`` lets
+    the second pass through, so claim recovers; otherwise every pass is churned
+    and claim has to give up rather than loop.
+    """
+
+    def __init__(self, inner: Executor, reader: asyncpg.Connection, *, once: bool) -> None:
+        self._inner = inner
+        self._reader = reader
+        self._once = once
+        self.churns = 0
+
+    async def fetch_one(self, sql: str, params: Sequence[Any]) -> Mapping[str, Any] | None:
+        if not (self._once and self.churns >= 2):
+            self.churns += 1
+            if "ON CONFLICT" in sql:
+                await self._reader.execute(
+                    _SEED, "", "k", FP, "http", "in_flight", timedelta(0),
+                    timedelta(seconds=60), None, None, None,
+                )
+            else:
+                await self._reader.execute("DELETE FROM heph_idempotency")
+        return await self._inner.fetch_one(sql, params)
+
+    async def execute(self, sql: str, params: Sequence[Any]) -> int:
+        return await self._inner.execute(sql, params)
+
+
+async def test_a_record_that_vanishes_before_the_read_is_claimed_again(claimer):
+    async with claimer.executor() as inner:
+        churn = _ChurnsTheRecord(inner, claimer.reader, once=True)
+        outcome = await claimer.store.claim(churn, scope="", key="k", fingerprint=FP)
+    assert outcome == Proceed(taken_over=False)
+    assert churn.churns == 2
+
+
+async def test_a_key_that_keeps_vanishing_is_409_rather_than_a_loop(claimer):
+    async with claimer.executor() as inner:
+        churn = _ChurnsTheRecord(inner, claimer.reader, once=False)
+        with pytest.raises(HephError) as exc:
+            await claimer.store.claim(churn, scope="", key="k", fingerprint=FP)
+    assert exc.value.code == "HEPH-IDEMP-409"
+    assert churn.churns == 4  # two passes, and no more

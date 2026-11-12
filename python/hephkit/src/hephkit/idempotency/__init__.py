@@ -1,17 +1,22 @@
 """Idempotency keys and request fingerprints (spec section 2). Maturity: experimental.
 
-**What is implemented here: 2.1 and 2.2 only.** Key syntax and the request
-fingerprint are pure functions over a request, and they are pinned by
-``conformance/idempotency/*.json``. The rest of section 2 -- the record store
-(2.3), replay (2.4), the in-flight and fingerprint-mismatch responses (2.5,
-2.6), retention and leases (2.7, 2.8) -- is **not** here yet. Those need SQL
-transactions and constraints (CLAUDE.md rule 6), which is a larger piece of
-work than this module currently contains. Nothing in this module talks to a
-database or performs I/O.
+**This module itself is 2.1 and 2.2 only.** Key syntax and the request
+fingerprint are pure functions over a request, pinned by
+``conformance/idempotency/*.json``, and nothing here talks to a database or
+performs I/O.
 
-So this is not yet an idempotency middleware you can mount. It is the half of
-section 2 that a middleware will sit on, available early because the spec
-settled it and the vectors pin it.
+The record store that 2.3 to 2.8 describe lives in the submodules, because it
+needs SQL transactions and constraints (CLAUDE.md rule 6):
+
+* ``hephkit.idempotency.store.IdempotencyStore.claim`` is the decision of 2.3
+  to 2.8 -- proceed, replay, 409 or 422.
+* ``hephkit.idempotency.ports`` holds the executor port it runs through and the
+  outcome types, and ``hephkit.idempotency.adapters`` the asyncpg and
+  SQLAlchemy executors. Neither this module nor ``ports`` imports a driver.
+* ``schema.sql`` (also ``_sql.DDL``) is the table.
+
+Completing and releasing a record, and the middleware that would call all
+three, are not here yet: this is not an idempotency middleware you can mount.
 
 The fingerprint is deliberately built from the kit's existing primitives:
 ``hephkit.hashing.content_hash`` canonicalises with RFC 8785 and hashes in one
