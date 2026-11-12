@@ -33,7 +33,7 @@ idempotent (`CREATE TABLE IF NOT EXISTS`), so running it twice is safe.
 ```python
 from hephkit.idempotency import SCHEMA_SQL
 
-async with pool.acquire() as conn:
+async with pool.acquire() as conn:  # a pool you already have
     await conn.execute(SCHEMA_SQL)
 ```
 
@@ -139,12 +139,13 @@ and, in another shell, send the same request twice:
 ```bash
 KEY='Idempotency-Key: 018f7c2e-7b7a-7f1a-9a1e-2f3b4c5d6e7f'
 BODY='{"amount": "1999", "currency": "USD"}'
-curl -si -X POST localhost:54080/charges -H "$KEY" -H 'Content-Type: application/json' -d "$BODY" | head -1
-curl -si -X POST localhost:54080/charges -H "$KEY" -H 'Content-Type: application/json' -d "$BODY" | head -3
+curl -si -X POST localhost:54080/charges -H "$KEY" -H 'Content-Type: application/json' -d "$BODY"
+curl -si -X POST localhost:54080/charges -H "$KEY" -H 'Content-Type: application/json' -d "$BODY"
 ```
 
 The first call answers `201` and inserts one row. The second answers the same
-`201` with the same body and an extra header, and inserts nothing:
+`201` with the same body and inserts nothing. The headers that matter on that
+second response, among the ones your server adds:
 
 ```text
 HTTP/1.1 201 Created
@@ -156,7 +157,7 @@ Reuse that key with a different body and the answer is `422` with a
 `HEPH-IDEMP-422` problem body, because one key means one payload for the whole
 retention window. `SELECT count(*) FROM charges` stays at 1 throughout.
 
-## Three things the example cannot show you
+## What the example cannot show you
 
 **The handler must return a `Response`.** FastAPI applies `status_code` and
 serialises a `response_model` *after* the endpoint returns, so a decorator under
@@ -180,6 +181,27 @@ connection whose transaction holds the stored response, which is the whole
 guarantee: the response and the work it describes commit together, or neither
 does. A write on any other connection commits on its own and can outlive a
 rolled-back request.
+
+**The claim requires `READ COMMITTED`** — Postgres's default, so it is a
+requirement you meet by doing nothing and break by raising the isolation level.
+Under `REPEATABLE READ` or `SERIALIZABLE`, a row another transaction committed
+after the statement's snapshot was taken is invisible to it: the claim's insert
+raises a serialization failure (`40001`) instead of blocking, and its read of
+the record it conflicted with can find nothing at all. Nothing retries a
+`40001`, because re-running a claim means re-running your handler, so it reaches
+you. If you set `default_transaction_isolation` on the role or the session,
+leave these connections out of it.
+
+**`IdempotencyStateError` is yours to see, never your client's.** `complete()`
+raises it when the record is no longer this attempt's — gone, already completed,
+or taken over by a retry after the lease expired (spec 2.8). The raise is the
+point: it rolls your transaction back, so work is never committed with nothing
+recording it, and the attempt that does hold the key does it once. It is a
+`RuntimeError` rather than a `HephError` because it is a server-side invariant
+failure with no registry code and nothing a client can act on — let it surface
+as a 500 and let the client retry with the same key. `release()` in the same
+situation does nothing at all, so the failure path never masks the error that
+got you there.
 
 ## Pool sizing
 
@@ -209,6 +231,7 @@ transaction open:
 ```python
 from hephkit.idempotency import AsyncpgExecutor
 
+# `pool` and `store` are the ones the app already built.
 async with pool.acquire() as conn:  # no transaction open
     removed = await store.purge_expired(AsyncpgExecutor(conn))
 ```
@@ -239,8 +262,15 @@ async def event_executors(event: dict[str, Any]) -> AsyncIterator[Executors]:
     There is no shipped factory for this path: the route factories hand the work
     connection to the handler through `request.state`, and an event has none, so
     passing it on — a contextvar, an argument — is the application's to decide.
+
+    Two connections from one pool, so the sizing rule above applies here too,
+    and the timeouts are what turn an under-sized pool into an error instead of
+    a permanent stall.
     """
-    async with POOL.acquire() as claim_conn, POOL.acquire() as work_conn:
+    async with (
+        POOL.acquire(timeout=10.0) as claim_conn,
+        POOL.acquire(timeout=10.0) as work_conn,
+    ):
         tx = work_conn.transaction()
         await tx.start()
         try:
@@ -254,6 +284,13 @@ async def event_executors(event: dict[str, Any]) -> AsyncIterator[Executors]:
 
 @idempotent(
     store,
+    # A broker payload is not a client-supplied field: it was produced inside
+    # your own trust boundary, by a service that had already authenticated the
+    # principal. 2.3 forbids reading the scope off an incoming HTTP request; a
+    # tenant stamped on the event by its publisher is the same authenticated
+    # tenant, one hop later. If your broker is reachable from outside that
+    # boundary, resolve the tenant from the event's subject instead of trusting
+    # the field.
     scope=lambda event: event["tenant"],
     event_id=lambda event: event["id"],
     executors=event_executors,

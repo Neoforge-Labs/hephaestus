@@ -19,6 +19,14 @@ from typing import Any, Final, Literal
 
 from hephkit.errors import HephError
 from hephkit.hashing import new_uuid7
+# `hephkit.idempotency` imports this module from its own body, so the parent
+# package is in sys.modules but only partly populated when this line runs.
+# Importing a *submodule* is safe there: with the attribute not yet set, the
+# import system falls back to importing (or finding in sys.modules)
+# `hephkit.idempotency._sql` itself. As it happens `__init__` imports `_sql`
+# ahead of `store`, so the attribute is already present either way. Importing a
+# *name* would not be safe: `from hephkit.idempotency import fingerprint` here
+# has no such fallback and would raise on the partially initialised parent.
 from hephkit.idempotency import _sql
 from hephkit.idempotency.ports import Executor, Proceed, Replay
 
