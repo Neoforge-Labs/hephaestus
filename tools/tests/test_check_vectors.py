@@ -27,6 +27,9 @@ MINIMUM_CASES = {
     "signatures.verify": 10,
     "idempotency.key": 12,
     "idempotency.fingerprint": 16,
+    "lab.config": 10,
+    "lab.provenance": 12,
+    "lab.diff": 8,
 }
 
 
@@ -42,7 +45,7 @@ def test_all_vector_files_match_schema() -> None:
     # A literal, not len(MINIMUM_CASES) + 1: this is meant to fail when a suite
     # is added, so that adding one is a decision somebody records here rather
     # than something a derived count absorbs silently.
-    assert len(files) == 13, files  # twelve suites plus the schema
+    assert len(files) == 16, files  # fifteen suites plus the schema
 
 
 def test_minimum_case_counts() -> None:
@@ -57,7 +60,7 @@ def _scratch(tmp_path: Path, file_suite: str, cases: object, **top: object) -> P
         (CONFORMANCE / "schema" / "vector-file.schema.json").read_text(encoding="utf-8"), encoding="utf-8"
     )
     (tmp_path / area).mkdir()
-    body = {"suite": file_suite, "spec": "0.4.0", "cases": cases}
+    body = {"suite": file_suite, "spec": "0.5.0", "cases": cases}
     body.update(top)
     (tmp_path / area / f"{name}.json").write_text(json.dumps(body), encoding="utf-8")
     return tmp_path

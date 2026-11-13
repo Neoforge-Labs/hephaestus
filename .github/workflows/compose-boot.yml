@@ -24,6 +24,17 @@ jobs:
       - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
         with:
           moon-version: '2.6.5'
+      # The merged-stack section makes one tracked run against the booted mlflow
+      # fragment and reads its tags back through the REST API, which needs
+      # `hephkit.lab` and an mlflow client in an ephemeral environment -- so this
+      # job needs uv, which ubuntu-latest does not preinstall. Without it the
+      # assertion fails rather than skipping, which is why it is here and not a
+      # guard inside the script: a check that quietly skips itself when its
+      # interpreter is missing is the one shape this gate may not have.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.6' # keep equal to uv in .prototools
+          python-version: '3.12'
       # No apt step. The boot test asks Postgres from inside its own container,
       # which already ships psql, and checks the published host port with a
       # bare TCP connect. Installing postgresql-client from the Ubuntu mirrors

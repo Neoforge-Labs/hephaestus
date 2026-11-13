@@ -17,7 +17,11 @@ const meta: MetaRecord = {
   "HEPH-MONEY-422": "HEPH-MONEY-422",
   "HEPH-MONEY-409": "HEPH-MONEY-409",
   "HEPH-WH-401": "HEPH-WH-401",
-  "HEPH-DB-503": "HEPH-DB-503"
+  "HEPH-DB-503": "HEPH-DB-503",
+  "HEPH-LAB-422": "HEPH-LAB-422",
+  "HEPH-LAB-409": "HEPH-LAB-409",
+  "HEPH-LAB-424": "HEPH-LAB-424",
+  "HEPH-LAB-412": "HEPH-LAB-412"
 }
 
 export default meta

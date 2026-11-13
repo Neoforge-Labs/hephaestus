@@ -29,7 +29,6 @@ from hephkit.money import Money, MoneyError
 from hephkit.signatures import SignatureError, sign, verify
 
 ROOT = Path(__file__).resolve().parents[3] / "conformance"
-SCHEMA_DIR = ROOT / "schema"
 
 Case = dict[str, Any]
 
@@ -272,10 +271,29 @@ RUNNERS: dict[str, Callable[[Case], None]] = {
 }
 
 
-def vector_files() -> list[Path]:
+def vector_files(root: Path = ROOT) -> list[Path]:
+    """Every vector file `hephkit` is responsible for running.
+
+    `schema/` holds schemas, not vectors. `lab/` holds the `lab.*` suites, which
+    run from `python/hephkit-lab/tests/test_conformance.py`: they exercise
+    `hephkit-lab`, which depends on pydantic and more, and `hephkit` must keep
+    zero runtime dependencies, so it cannot run them. Only the `lab/` directory
+    is exempt; a runner-less file in any other area still fails below.
+    """
+    excluded = (root / "schema", root / "lab")
     return sorted(
-        p for p in ROOT.rglob("*.json") if SCHEMA_DIR not in p.parents
+        p for p in root.rglob("*.json") if not any(d in p.parents for d in excluded)
     )
+
+
+def runnerless_vector_files(root: Path = ROOT) -> dict[str, str]:
+    """Vector files (relative path -> suite) with no runner in this package."""
+    unknown = {}
+    for path in vector_files(root):
+        suite = json.loads(path.read_text(encoding="utf-8"))["suite"]
+        if suite not in RUNNERS:
+            unknown[str(path.relative_to(root))] = suite
+    return unknown
 
 
 def collect() -> list[Any]:
@@ -295,12 +313,26 @@ def test_vector_files_are_found() -> None:
 
 
 def test_every_vector_file_has_a_runner() -> None:
-    unknown = {}
-    for path in vector_files():
-        suite = json.loads(path.read_text(encoding="utf-8"))["suite"]
-        if suite not in RUNNERS:
-            unknown[str(path.relative_to(ROOT))] = suite
+    unknown = runnerless_vector_files()
     assert not unknown, f"vector files with no Python runner: {unknown}"
+
+
+def _write_vector(root: Path, rel: str, suite: str) -> None:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"suite": suite, "cases": []}), encoding="utf-8")
+
+
+def test_lab_suites_are_not_required_to_have_a_hephkit_runner(tmp_path: Path) -> None:
+    _write_vector(tmp_path, "lab/config.json", "lab.config")
+    assert runnerless_vector_files(tmp_path) == {}
+
+
+def test_runnerless_file_outside_lab_still_fails(tmp_path: Path) -> None:
+    # The lab exemption must not weaken the check for any other area.
+    _write_vector(tmp_path, "lab/config.json", "lab.config")
+    _write_vector(tmp_path, "money/newthing.json", "money.newthing")
+    assert runnerless_vector_files(tmp_path) == {"money/newthing.json": "money.newthing"}
 
 
 def test_every_runner_has_a_vector_file() -> None:

@@ -1,0 +1,26 @@
+language: 'python'
+layer: 'application'
+
+tasks:
+  gate:
+    # The in-repo replay gate (design section 11): record, replay with the
+    # network blocked, diff a perturbed input, refuse a violating fixture.
+    #
+    # Docker-free, unlike examples-hello:tutorial, which is why this one runs on
+    # every pull request. The only tool it needs is uv; the block on the network
+    # is in-process, because `unshare` does not exist on macOS and a container
+    # would put a daemon back on the critical path.
+    script: 'bash gate_test.sh'
+    inputs:
+      - 'experiment.py'
+      - 'gate_test.sh'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      # The gate is a test of the lab spine, so a change to any of it must
+      # invalidate this cache as it does the distribution's own tasks'.
+      - '/python/hephkit-lab/src/**/*'
+      - '/python/hephkit-lab/pyproject.toml'
+      - '/python/hephkit/src/**/*'
+      - '/python/hephkit/pyproject.toml'
+      - '/core/hephkit-core/**/*'
+      - '/core/hephkit-py/**/*'

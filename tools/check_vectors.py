@@ -41,6 +41,18 @@ MIN_CASES = {
     # likely to "helpfully" get wrong.
     "idempotency.key": 12,
     "idempotency.fingerprint": 16,
+    # Design 8.1. The minimum covers each of the four layers alone, the full
+    # precedence chain, a nested override, the refusals, and the config hashes
+    # quoted from `hashing.content`.
+    "lab.config": 10,
+    # Spec 7. The minimum covers the three conditions of 7.3 in combination,
+    # both ways a code_sha goes null, the reserved environment members of 7.4
+    # and the refusals a record document must meet.
+    "lab.provenance": 12,
+    # Spec 9. The minimum covers what 9.1 compares and what it must not, the
+    # report shapes of 9.2 including a position only one side holds, and 9.3's
+    # kinds, non-finite wrapper and float tolerance on both sides of each bound.
+    "lab.diff": 8,
 }
 
 

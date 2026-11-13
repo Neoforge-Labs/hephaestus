@@ -1,0 +1,33 @@
+---
+# GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
+# Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
+title: "HEPH-LAB-424 — Required record, manifest or frozen input is missing"
+---
+
+# HEPH-LAB-424
+
+**Required record, manifest or frozen input is missing**
+
+| | |
+| --- | --- |
+| HTTP status | `424` |
+| Area | `LAB` |
+| Problem `type` | `https://hephkit.dev/errors/HEPH-LAB-424` |
+
+## What the caller sees
+
+This is the default `detail` sent in the problem+json response, verbatim:
+
+A run record, dataset manifest or frozen input that this operation depends on is missing. Produce it, then retry.
+
+## What to do as a developer
+
+Guidance for the engineer who hit this code. It is non-normative: it is never
+sent on the wire and does not constrain an implementation. Wire behaviour is
+defined only by `spec/heph-spec.md` and the conformance vectors.
+
+The operation depends on an artefact that is not there, such as the record of the run being replayed, the manifest of a dataset being read, or a frozen input a recorded run referenced. Nothing was half-done; the dependency is absent rather than corrupt. Produce the artefact and retry, recording the run before replaying it, writing the dataset manifest before reading through it, and committing frozen inputs alongside the record rather than leaving them in a working directory. If the artefact exists but says the wrong thing, the code is HEPH-LAB-412, and if the experiment configuration is malformed rather than absent, it is HEPH-LAB-422.
+
+---
+
+Defined in `spec/heph-spec.md` section 1. See all codes in the [error index](/errors).

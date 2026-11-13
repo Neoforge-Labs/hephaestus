@@ -1,6 +1,6 @@
 {
   "suite": "idempotency.key",
-  "spec": "0.4.0",
+  "spec": "0.5.0",
   "description": "Idempotency-Key syntax (heph-spec 2.1): 1 to 255 characters of printable ASCII (VCHAR, 0x21-0x7E) with no whitespace. `required` is whether the endpoint requires a key: when it does not, a malformed key is ignored rather than failing the request.",
   "source": "heph-spec 2.1, applied case by case. No implementation was run.",
   "cases": [

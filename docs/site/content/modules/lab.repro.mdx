@@ -1,0 +1,100 @@
+---
+title: "lab.repro"
+---
+
+# lab.repro
+
+`hephkit.lab.repro` is [spec section 7](/spec#7-provenance-record) in Python: the
+provenance record of one research run. It captures the four members that decide
+whether a re-execution is the same run — `config_hash`, `data_hash`, `deps_hash`
+and `code_sha`, the **determinism contract** — alongside an `environment` that
+merely describes the machine, and it classifies the run as `deterministic` or
+`provenance-only` on the evidence rather than on a promise. `seed_everything`
+seeds every source of randomness the process can reach.
+
+Maturity: **`experimental`**. The API may change, and per
+[ADR 0015](/adrs/0015-maturity-levels) nothing below `stable` may sit in a
+production money path. Why the determinism contract and the environment are
+split, and why `environment` is never compared, is
+[ADR 0024](/adrs/0024-provenance-record-splits-hashes-from-environment).
+
+## Installing
+
+`hephkit-lab` is not on PyPI yet — [ADR 0023](/adrs/0023-hephkit-lab-ships-separately)
+records the precondition on publishing it — so install both portions of the
+`hephkit` namespace package out of a checkout of this repository:
+
+```bash
+uv add --editable ./python/hephkit ./python/hephkit-lab
+```
+
+## An example
+
+Save this as `demo.py` and run `uv run python demo.py` inside a git repository.
+
+```python
+import json
+import random
+from pathlib import Path
+
+from hephkit.hashing import content_hash
+from hephkit.lab.repro import capture, seed_everything
+
+seed_everything(20261112)
+print("first three draws:", [round(random.random(), 6) for _ in range(3)])
+
+provenance = capture(
+    run_id="demo-0001",
+    config_hash=content_hash({"seed": 20261112, "epochs": 10}),
+    data_hash=content_hash({"rows": 128, "source": "synthetic"}),
+    repo=Path("."),
+)
+print(json.dumps(provenance.as_document(), indent=2))
+print("class:", provenance.run_class)
+```
+
+Run it twice: the three draws are identical both times, which is what
+`seed_everything` buys. The document is the seven members of 7.1, and `class`
+tells you which kind of run you just recorded — `deterministic` only if a commit
+names the code, the working tree is clean and a lockfile exists.
+
+## The two classes, and why yours is probably the second one
+
+[Spec 7.3](/spec#7-provenance-record) makes a run `deterministic` only when all
+three hold. Anything else is `provenance-only`, which is a complete record of a
+run that cannot be promised to re-execute — not an error and not a lesser
+record:
+
+- **`code_sha` is `null`** exactly when git `HEAD` resolves to no commit, never
+  merely because the tree is dirty. A dirty tree has a commit; it just is not
+  the code that ran, which is why it costs the `deterministic` class and not the
+  field.
+- **`deps_hash` is `null`** exactly when there is no lockfile. `capture` looks
+  for `uv.lock` beside the code unless you pass `lockfile=`.
+- A **dirty working tree** costs the class and nothing else.
+
+So an uncommitted experiment records as `provenance-only`, and the first thing
+to do about a run you want to be able to reproduce is commit it.
+
+## What a record never carries
+
+No hostname, no username, no filesystem path ([spec 7.5](/spec#7-provenance-record)),
+so a record can be published beside a paper. `environment` is descriptive only:
+`platform`, `python`, the versions of the frameworks it found and the accelerator
+`nvidia-smi` reports, each recorded as `null` when absent rather than guessed.
+[`lab.replay`](/modules/lab.replay) never compares it, so two records that differ
+only in the machine that produced them are not a divergence.
+
+`ProvenanceRecord` is frozen and closed to extras: a record is the account of a
+run that already happened. `class` is a Python keyword, so the attribute is
+`run_class` and the member is its alias — serialise with `as_document()`, never
+a plain `model_dump()`, which would write the attribute name.
+
+## Seeding is not a determinism claim
+
+`seed_everything` seeds the standard library, NumPy and PyTorch (each behind an
+import guard, so neither is a dependency of the spine), asks PyTorch for
+deterministic kernels, and sets `PYTHONHASHSEED` — which does nothing for the
+interpreter already running and everything for a child process it spawns. None
+of that makes a run `deterministic`; only the three conditions above do, and
+`capture` is what decides.

@@ -81,6 +81,11 @@ jobs:
         run: moon run hephkit:test-fast
       - name: mypy --strict
         run: moon run hephkit:typecheck
+      - name: hephkit-lab tests and mypy --strict
+        # Its own job step rather than a second project in the lines above, so a
+        # failure names the distribution. The lab spine installs with no
+        # scientific stack (ADR 0023), so this adds seconds, not minutes.
+        run: moon run hephkit-lab:test-fast hephkit-lab:typecheck
       - name: Generated files are not stale
         run: moon run hephkit:gen-errors hephkit:gen-conventions
       - name: Rust core codes are all in spec/errors.yaml

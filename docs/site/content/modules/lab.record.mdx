@@ -1,0 +1,118 @@
+---
+title: "lab.record"
+---
+
+# lab.record
+
+`hephkit.lab.record` is [spec section 8](/spec#8-run-records) in Python: a run
+record is a directory holding `provenance.json`, `rows.jsonl` and
+`summary.json`, every document canonical JSON. One row per cell that completed,
+durable before the call that appended it returns. An experiment is handed the
+open record and nothing else, which is what makes "a number cannot exist without
+a record" structural rather than a habit.
+
+Maturity: **`experimental`**. The API may change, and per
+[ADR 0015](/adrs/0015-maturity-levels) nothing below `stable` may sit in a
+production money path. Why the record is the spine rather than a feature is
+[ADR 0022](/adrs/0022-research-integrity-is-the-spine).
+
+## Installing
+
+`hephkit-lab` is not on PyPI yet — [ADR 0023](/adrs/0023-hephkit-lab-ships-separately)
+records the precondition on publishing it — so install both portions of the
+`hephkit` namespace package out of a checkout of this repository:
+
+```bash
+uv add --editable ./python/hephkit ./python/hephkit-lab
+```
+
+## An example
+
+Save this as `demo.py` and run `uv run python demo.py`.
+
+```python
+import json
+from pathlib import Path
+
+from hephkit.hashing import content_hash
+from hephkit.lab.record import RunRecord, read_record, register, run
+from hephkit.lab.repro import capture
+
+
+@register("demo")
+def demo(record: RunRecord) -> None:
+    # The experiment takes the open record and nothing else: there is no
+    # second parameter a destination could arrive through (spec 8.6).
+    for fold in range(3):
+        record.append_row(f"fold-{fold}", {"rmse": 0.5 - fold * 0.01, "n": 32})
+    record.append_row("summary", {"rmse_mean": 0.49, "model": "ridge"})
+
+
+provenance = capture(
+    run_id="demo-0001",
+    config_hash=content_hash({"alpha": 1.0}),
+    data_hash=content_hash({"rows": 96}),
+    repo=Path("."),
+)
+record = run("demo", Path("runs/demo-0001"), provenance=provenance)
+
+back = read_record(record.path)
+print("complete:", back.complete, "| cells:", [row.cell for row in back.rows])
+print(json.dumps(back.summary(), indent=2))
+print((record.path / "rows.jsonl").read_text())
+```
+
+It writes `runs/demo-0001/`, reads it back through the same reader a published
+record goes through, and prints the four rows. Delete `summary.json` and run the
+read again: `complete` is `False`, because a record with no summary is a run that
+died rather than a broken artefact.
+
+### Name the directory after the run
+
+`runs/demo-0001` for `run_id="demo-0001"` is not decoration. `open_record` and
+`run` take any directory you point them at and never derive one from the run,
+but [`lab.gates`](/modules/lab.gates) does: the citations gate resolves a
+manuscript's `run:<run_id>` to `<records>/<run_id>` and compares the directory
+name against the record's own `run_id`, so a mis-filed record is a finding
+rather than an invisible redirection. Record into `runs/2026-11-12-sweep/`
+instead and the record itself is perfectly good — every citation of that run is
+flagged the moment you turn the citations gate on.
+
+## A cell per fold, not a run per fold
+
+That is the shape this spine is built for, and it is worth saying because the
+alternative is the first thing people reach for. Per-fold, per-trial and
+per-seed numbers belong in one record as one cell each — `read_record` gives
+them back as rows, and [`lab.replay`](/modules/lab.replay) compares them by cell
+name and value name, so a diff says *which fold moved*. One run per fold gives
+you N records nobody diffs.
+
+## What it refuses, and why
+
+- **Rewriting a record.** `open_record` refuses a directory that already holds
+  one ([spec 8.3](/spec#8-run-records)); a resumed run opens a record of its own.
+- **Naming one cell twice.** A record cannot say which of the two values the run
+  produced ([spec 8.2](/spec#8-run-records)).
+- **A stored summary the rows do not support.** Every member of the summary is
+  derived from the rows, so `read_record` recomputes it and refuses a record
+  whose stored copy disagrees ([spec 8.4](/spec#8-run-records)).
+- **A record it cannot write.** Every write failure raises
+  [HEPH-LAB-424](/errors/HEPH-LAB-424) and fails the run. Nothing here warns and
+  continues, writes elsewhere, or drops a row: a record that cannot be written
+  is a failed run ([spec 8.5](/spec#8-run-records)).
+
+A record that is **absent** is `RecordError` (`HEPH-LAB-424`). A record that is
+there and says something wrong is a plain `ValueError`: the artefact exists and
+is not the record of what it claims.
+
+## Two details that surprise people
+
+**No wall-clock time, anywhere in any of the three documents.** A clock reading
+in a compared position would make every replay diverge, so there is none to
+compare ([spec 8.1](/spec#8-run-records)).
+
+**A non-finite value is wrapped.** `NaN` is recorded as `{"nonfinite": "NaN"}`,
+and likewise for `Infinity` and `-Infinity`, because the bare tokens some
+encoders emit are not JSON and no conforming parser accepts them
+([spec 8.2](/spec#8-run-records)). `encode_value` is that encoder, exported so a
+report can use it too.

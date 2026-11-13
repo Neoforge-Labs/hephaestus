@@ -1,0 +1,78 @@
+# MLflow tracking server. maturity: experimental
+# DEV AND TEST ONLY. Single-process server with no authentication, dev
+# credentials and a throwaway artifact bucket. Never deploy this fragment.
+# REQUIRES the `postgres` and `objects` fragments in dev.fragments: it has
+# depends_on on both, so on its own it fails with an undefined-service error.
+# Needs Docker Compose 2.17+ (dockerfile_inline).
+# Host port 54500. Backend store: the `mlflow` database in the postgres
+# fragment. Artifacts: the `mlflow` bucket in the objects (SeaweedFS) fragment,
+# proxied through the server, so clients need no S3 credentials. Credentials
+# are the dev ones from postgres.yaml and seaweedfs-s3.json.
+services:
+  mlflow:
+    # The official image ships neither a Postgres driver nor boto3, so it is
+    # extended here, inline, so the build travels with the fragment when `heph
+    # dev` materialises it (a path into the repo would not exist there). Base
+    # pinned by digest (tag: v3.1.1); to bump, resolve the new digest with
+    # `docker buildx imagetools inspect` and bump the image tag below, or
+    # Compose reuses the old local image. The command creates the database and
+    # bucket if absent. A separate database (not `heph`) keeps MLflow's own
+    # `alembic_version` table away from Hephaestus migrations.
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM ghcr.io/mlflow/mlflow@sha256:e8c9caf0615dd18a766091a3c37a41ecca2a00d663bc9a6d8b7417950d828114
+        RUN pip install --no-cache-dir --disable-pip-version-check --root-user-action=ignore \
+            psycopg2-binary==2.9.10 boto3==1.38.46
+    image: heph-mlflow:3.1.1-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://seaweedfs:8333
+      AWS_ACCESS_KEY_ID: heph
+      AWS_SECRET_ACCESS_KEY: heph-dev-secret
+      AWS_DEFAULT_REGION: us-east-1
+    ports:
+      - "54500:5000"
+    command:
+      - bash
+      - -c
+      - |
+        set -eu
+        python - <<'PY'
+        import boto3, psycopg2
+        c = psycopg2.connect(host="postgres", user="heph", password="heph", dbname="heph")
+        c.autocommit = True
+        cur = c.cursor()
+        cur.execute("select 1 from pg_database where datname = 'mlflow'")
+        if cur.fetchone() is None:
+            cur.execute("create database mlflow")
+        c.close()
+        s3 = boto3.client("s3", endpoint_url="http://seaweedfs:8333")
+        if "mlflow" not in [b["Name"] for b in s3.list_buckets()["Buckets"]]:
+            s3.create_bucket(Bucket="mlflow")
+        PY
+        exec mlflow server --host 0.0.0.0 --port 5000 \
+          --backend-store-uri postgresql://heph:heph@postgres:5432/mlflow \
+          --artifacts-destination s3://mlflow/ --serve-artifacts
+    healthcheck:
+      # /health is static liveness: it does not touch the backend store, so a
+      # healthy container is not evidence Postgres works (boot_test.sh checks
+      # that through the API). A future condition: service_healthy on mlflow
+      # is weaker than it looks.
+      # Probed from inside, against loopback (the server binds 0.0.0.0). The
+      # image has no curl or wget, hence python. Slow first boot: database
+      # and bucket creation, then the server's own migrations against Postgres,
+      # so the budget is generous (start_period + 30 x 5 s).
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=4)"
+      start_period: 30s
+      interval: 5s
+      timeout: 5s
+      retries: 30

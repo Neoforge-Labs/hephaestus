@@ -1,0 +1,157 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hephkit-lab"
+version = "0.1.0"
+description = "Hephaestus research core: run records, replay-and-diff, frozen inputs and CI gates over hephkit (experimental)"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+# The whole integrity spine -- config, repro, record, replay, gates -- installs
+# with no scientific stack at all (ADR 0023). Everything heavy is an extra
+# below. `tests/test_package.py::test_spine_declares_no_heavy_dependencies`
+# fails if anything else is added here.
+#
+# `hephkit>=0.2` is a LOCAL-DEVELOPMENT FLOOR ONLY, and it is loose on purpose.
+# Do not "tidy" it upwards without reading this.
+#
+# `hephkit.lab` needs a `hephkit` that is a PEP 420 namespace package (ADR 0021),
+# and the published 0.2.0 is not one: it still ships `src/hephkit/__init__.py`.
+# What that costs depends on the install shape, and only one of them is benign:
+#
+#   * Merged, as a plain non-editable `pip install` produces: `hephkit/lab/`
+#     lands inside the existing `site-packages/hephkit/`, the regular package's
+#     `__init__.py` runs, and `import hephkit.lab` works. Verified.
+#   * Split path -- an editable install, `pip install --target`, `PYTHONPATH`:
+#     the two portions sit on separate `sys.path` entries, the regular package's
+#     `__path__` is the first `hephkit/` directory found, and the other portion
+#     is unimportable. Verified: `ModuleNotFoundError: No module named
+#     'hephkit.lab'`.
+#
+# So a published 0.2.0 offers no composition guarantee; it happens to work in
+# one shape. The version that first ships the namespace package does not exist
+# yet -- `release-please-config.json` binds five packages with a
+# `linked-versions` plugin and `tools/tests/test_release_config.py` asserts the
+# manifest holds one shared version, so the number is release-please's to assign
+# and cannot be hand-picked here. Until it does, the floor exists only to let
+# `[tool.uv.sources]` resolve the portion in this repository.
+#
+# Raising this floor to the first RELEASED `hephkit` containing the namespace
+# package is a hard precondition on ever publishing `hephkit-lab`. "Works in one
+# install shape by accident" is not a dependency contract, and the shape it
+# fails in is the one every developer of a consumer uses.
+dependencies = ["hephkit>=0.2", "pydantic>=2.9"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Typing :: Typed",
+]
+
+# The extras partition of design section 7.1.2. A non-ML project must not pay
+# for an ML stack, and a non-bio project must not pay for a bio engine.
+[project.optional-dependencies]
+track = ["mlflow>=3.0"]
+data = ["dvc>=3.60", "polars>=1.20", "duckdb>=1.1"]
+causal = ["dowhy>=0.13", "causal-learn>=0.1.4", "causalphylo>=0.1"]
+stats = ["scipy>=1.14"]
+ml = ["torch>=2.6", "accelerate>=1.0", "safetensors>=0.5", "transformers>=4.50"]
+flows = ["prefect>=3.2"]
+notebook = ["marimo>=0.14"]
+bio = ["ligase-bio>=0.4"]
+all = [
+    "hephkit-lab[track]",
+    "hephkit-lab[data]",
+    "hephkit-lab[causal]",
+    "hephkit-lab[stats]",
+    "hephkit-lab[ml]",
+    "hephkit-lab[flows]",
+    "hephkit-lab[notebook]",
+    "hephkit-lab[bio]",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-cov>=5", "mypy>=1.11"]
+
+# `hephkit` is not on PyPI at 0.3 yet, and the development loop must resolve the
+# portion in this repository in any case: an editable install of each portion is
+# the layout design section 7.1.3's typing finding was established against.
+[tool.uv.sources]
+hephkit = { path = "../hephkit", editable = true }
+
+# This distribution ships `hephkit/lab/` and nothing else. Naming the subpackage
+# rather than `src/hephkit` is what guarantees no `hephkit/__init__.py` and no
+# `hephkit/py.typed` can ever reach the wheel: either would be a file two
+# distributions own in a merged `pip install` layout (ADR 0021, ADR 0023).
+[tool.hatch.build.targets.wheel]
+only-include = ["src/hephkit/lab"]
+sources = ["src"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+# Registered for parity with `hephkit`, whose `test-fast` task deselects it. No
+# lab test is slow yet; the marker exists so the two task sets stay identical.
+markers = ["slow: long-running tests; deselect with -m 'not slow'"]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+# `hephkit.lab` rather than `hephkit`: the sibling portion is installed editable
+# into this environment, and measuring it here would report another
+# distribution's coverage against this one's gate.
+source = ["hephkit.lab"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+# `hephkit` is a PEP 420 namespace package (ADR 0021), so `src/hephkit/` has no
+# __init__.py to anchor the package root and `mypy --strict src` would otherwise
+# reach each file under two module names. Naming one explicit base resolves
+# every file to `hephkit.lab.*`. The path is config-relative, not cwd-relative,
+# so running mypy from the repository root cannot break it.
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
+explicit_package_bases = true
+
+# `lab.repro` imports NumPy and PyTorch inside its seeding functions, behind
+# `except ImportError` (ADR 0023 keeps both out of the spine, so neither is
+# installed in this environment and neither may be a module-scope import).
+# Without this, `mypy --strict` fails on the two guarded imports for want of
+# stubs. An inline `# type: ignore[import-not-found]` would be worse: with
+# `--strict`, the ignore becomes an unused-ignore error in any environment where
+# the ml extra IS installed, so the typecheck would pass or fail depending on
+# what the developer happened to have.
+#
+# What this does NOT do is check the call names: under `ignore_missing_imports`
+# every attribute of either library is `Any`, so a misspelled `manual_seed`
+# would typecheck. The recording stubs in `tests/test_repro.py` are what guards
+# those names -- each is a `types.ModuleType` carrying exactly the attributes
+# the seeding is allowed to touch, so a call this module invents raises
+# `AttributeError` there rather than passing silently.
+[[tool.mypy.overrides]]
+# A bare name and a dotted pattern are separate matches in mypy, so each
+# library needs both.
+module = ["numpy", "numpy.*", "torch", "torch.*"]
+ignore_missing_imports = true
+
+# `lab.track` imports mlflow inside the function `tracked_run` starts a run
+# with, behind the `track` extra and behind `except ImportError`, for the same
+# reason as above and with the same consequence: the spine does not install it
+# (ADR 0023), so `mypy --strict` would fail on the guarded import for want of
+# the distribution. An inline ignore would become an unused-ignore error
+# wherever the extra IS installed.
+#
+# And with the same caveat: every mlflow attribute is `Any` here, so a
+# misspelled `log_metrics` would typecheck. The recording stub in
+# `tests/test_track.py` is what guards those names -- a `types.ModuleType`
+# carrying exactly the attributes the wrapper is allowed to touch, where a call
+# this module invents raises `AttributeError` instead of passing silently.
+[[tool.mypy.overrides]]
+module = ["mlflow", "mlflow.*"]
+ignore_missing_imports = true

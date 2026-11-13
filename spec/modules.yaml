@@ -26,6 +26,14 @@
 - {name: settings, home: python, status: shipped, maturity: experimental, spec_section: null}
 - {name: observability, home: python, status: shipped, maturity: experimental, spec_section: null}
 
+# Python research core (the hephkit-lab distribution, ADR 0021)
+- {name: lab.config, home: python, status: shipped, maturity: experimental, spec_section: null}
+- {name: lab.repro, home: python, status: shipped, maturity: experimental, spec_section: "7"}
+- {name: lab.record, home: python, status: shipped, maturity: experimental, spec_section: "8"}
+- {name: lab.replay, home: python, status: shipped, maturity: experimental, spec_section: "9"}
+- {name: lab.gates, home: python, status: shipped, maturity: experimental, spec_section: null}
+- {name: lab.track, home: python, status: shipped, maturity: experimental, spec_section: null}
+
 # Rust core
 - {name: hephkit-core, home: rust, status: shipped, maturity: experimental, spec_section: null}
 - {name: hephkit-py, home: rust, status: shipped, maturity: experimental, spec_section: null}
@@ -39,6 +47,7 @@
 
 # Compose fragments
 - {name: mail, home: compose, status: shipped, maturity: experimental, spec_section: null}
+- {name: mlflow, home: compose, status: shipped, maturity: experimental, spec_section: null}
 - {name: objects, home: compose, status: shipped, maturity: experimental, spec_section: null}
 - {name: postgres, home: compose, status: shipped, maturity: experimental, spec_section: null}
 - {name: redis, home: compose, status: shipped, maturity: experimental, spec_section: null}
@@ -57,4 +66,3 @@
 - {name: billing, home: python, status: planned, phase: 4, spec_section: null}
 - {name: registry, home: ts, status: planned, phase: 4, spec_section: null}
 - {name: heph new, home: go, status: planned, phase: 5, spec_section: null}
-- {name: lab.repro, home: python, status: planned, phase: 3, spec_section: "7"}

@@ -1,0 +1,446 @@
+"""Typed experiment configs with layered overrides and a content-hashed result.
+
+A config is a pydantic model. :func:`resolve` builds one from four layers --
+defaults, a JSON file, the environment, the command line, applied in that order
+so each beats the one before it (design 8.1) -- validates the result and returns
+it. :func:`config_hash` is the content hash of that result (spec 4.2), computed
+by :func:`hephkit.hashing.content_hash`; nothing is hashed here.
+
+Every refusal is a :class:`ConfigError` carrying ``HEPH-LAB-422`` and the dotted
+path of the member at fault, because that code's guidance asks the caller to fix
+the *layer* that supplied the bad value rather than to patch the config after
+resolution. :class:`ExperimentConfig` is frozen to make that structurally true:
+the object :func:`resolve` returns is the object :func:`config_hash` hashes, and
+there is no later assignment to it that the hash would not see.
+
+Conventions this module fixes, because the spec does not:
+
+* **Environment.** Only members under the ``HEPH_LAB_`` prefix are read. ``__``
+  separates nesting levels: ``HEPH_LAB_OPTIM__LR`` sets ``optim.lr``. The prefix
+  is ``HEPH_LAB_`` and not ``HEPH_`` because :class:`hephkit.settings.HephSettings`
+  owns ``HEPH_`` for service settings (``HEPH_ENV``, ``HEPH_SERVICE_NAME``,
+  ``HEPH_DATABASE_URL``, ``HEPH_LOG_LEVEL``) in this same installed kit. A lab
+  config reading the whole ``HEPH_`` namespace would take those names as config
+  members, and since :func:`resolve` refuses a member the model does not declare,
+  every ``resolve(..., env=os.environ)`` call would be refused with
+  ``HEPH-LAB-422`` in any process that has the kit's own settings set -- a
+  research container in a generated ingot, a dev shell, a CI job exporting
+  ``HEPH_ENV``. Refusing an undeclared member is the behaviour that is right; the
+  prefix is what moves out of the way.
+
+  One residue runs the other way, and it is not a bug: ``HephSettings`` reports
+  any ``HEPH_*`` name matching no setting field in ``SettingsError.unused_env``
+  as "likely a typo", so ``HEPH_LAB_*`` members appear in that list. It is
+  informational, and it is only built on a path where settings construction has
+  already failed for a missing required setting, so it never refuses anything.
+* **Command line.** Options are ``--<dotted.path>=<value>`` or
+  ``--<dotted.path> <value>``. There are no implicit booleans; write
+  ``--flag=true``. The line is read left to right and a repeated option takes
+  its last value -- ``--seed=1 --seed=2`` is 2, not a refusal -- for the same
+  reason a later layer beats an earlier one.
+* **Scalars from the environment and the command line** are read as JSON when
+  they parse as JSON and as the raw string otherwise, so ``--seed=7`` is the
+  integer 7 and ``--name=resnet`` is the string ``"resnet"``. Pydantic does the
+  rest of the coercion.
+* **The file layer** is one JSON **object**, and JSON only. YAML is what a
+  researcher reaches for, and it is deliberately absent: PyYAML in
+  ``[project].dependencies`` would breach the two-dependency spine of ADR 0023,
+  which ``test_spine_declares_no_heavy_dependencies`` enforces. Do not "add
+  YAML support" here -- it belongs behind an extra, or in the task that owns
+  config files on disk.
+* **An absent config file is ``HEPH-LAB-424``**, not ``422``: 422's guidance in
+  ``spec/errors.yaml`` says in as many words that "a config file that is absent
+  rather than wrong is HEPH-LAB-424". :class:`MissingConfigError` carries it and
+  subclasses :class:`ConfigError`, so one ``except ConfigError`` still catches
+  every refusal this module makes and ``.code`` is what tells them apart. A
+  malformed file, or one holding something other than an object, stays ``422``.
+  An absent file is reported **before** any member of any layer is checked, so
+  ``resolve(M, defaults={"unknown": 1}, file=absent)`` is ``424``: a layer that
+  cannot be read at all is a more fundamental failure than one that reads and
+  says something wrong.
+
+  This taxonomy has one gap, named here so the next reader does not rediscover
+  it: ``_read_file`` separates an absent file from a malformed one, but it
+  catches only ``ValueError``, so a file that is present and cannot be *read* --
+  no permission on it, or an I/O error reading it -- escapes as the bare
+  ``OSError`` the filesystem raised, carrying no ``.code``, no ``.field`` and no
+  ``.layer``. That is a known gap and a recorded follow-up rather than a
+  decision; closing it means settling which code such a file carries, which this
+  module does not yet do.
+* **A later layer that supplies an object where an earlier one gave a scalar
+  replaces it**, like any other override. But an ``env`` or ``cli`` member such
+  as ``HEPH_LAB_OPTIM__LR`` names ``optim.lr`` and says nothing about ``optim``, so
+  where no layer has supplied an object at ``optim`` the override is refused
+  (``422``) rather than silently granted an object it never named. The two
+  mechanisms differ on purpose; ``conformance/lab/config.json`` pins both.
+* **Refusals here are ``ValueError`` subclasses, not
+  ``hephkit.errors.HephError``**, so they carry no ``status``, ``title`` or
+  ``type_url`` and an ``except HephError`` handler rendering problem+json does
+  not see them. The ``ValueError`` base is **this module's own** and does not
+  generalise: :class:`ConfigError` subclasses it, so ``except ValueError``
+  catches every refusal this module makes, but the rest of the spine raises from
+  ``RuntimeError`` -- :class:`hephkit.lab.record.RecordError`,
+  :class:`hephkit.lab.replay.ReplayError` and
+  :class:`hephkit.lab.gates.GateError` are not ``ValueError``. A caller that
+  wants every lab failure catches each module's own base class, not
+  ``ValueError``.
+
+  What does generalise to every ``hephkit.lab`` module is the
+  not-``HephError`` half, and each of those classes states it in its own
+  docstring: this is research tooling that sits *below* research code, not
+  behind an HTTP boundary, and ``.code`` is here for correlation, logging and
+  the registry's disambiguation rather than for wire rendering. A service that
+  needs a lab failure as problem+json maps it at its own edge, as it would any
+  library exception.
+
+Maturity: experimental.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterator, Mapping, Sequence
+from pathlib import Path
+from typing import Any, TypeVar
+
+from hephkit.errors import LAB_422, LAB_424
+from hephkit.hashing import content_hash
+from pydantic import BaseModel, ConfigDict
+from pydantic import ValidationError as _ValidationError
+from pydantic_core import PydanticSerializationError, to_jsonable_python
+
+__all__ = [
+    "ENV_NESTING",
+    "ENV_PREFIX",
+    "ConfigError",
+    "ExperimentConfig",
+    "MissingConfigError",
+    "config_hash",
+    "resolve",
+]
+
+# Error codes live only in `spec/errors.yaml` (CLAUDE.md). `LAB_422` and
+# `LAB_424` are generated from it into `hephkit.errors._codes` by
+# `tools/gen_errors.py` and re-exported publicly, so they are imported rather
+# than re-spelled here. Nothing in `tools/` would catch a hand-written literal:
+# `gen_errors.py --check` compares the generated file against the registry and
+# `check_registry.py` validates the YAML, and neither reads module source, so a
+# renumbering would diverge silently. `tests/test_error_codes.py` is the check
+# that forbids a literal, in any `hephkit.lab` module.
+
+#: The registry code a config that is wrong carries.
+CODE = LAB_422
+
+#: The registry code a config file that is absent carries, which 422's own
+#: guidance names: "a config file that is absent rather than wrong is
+#: HEPH-LAB-424".
+MISSING_CODE = LAB_424
+
+#: Environment members outside this prefix are not config values. It is
+#: ``HEPH_LAB_`` and not ``HEPH_`` because ``hephkit.settings.HephSettings``
+#: owns ``HEPH_`` for service settings in this same kit; see the module
+#: docstring for what reading the whole ``HEPH_`` namespace would cost.
+ENV_PREFIX = "HEPH_LAB_"
+
+#: What separates nesting levels in an environment member name.
+ENV_NESTING = "__"
+
+C = TypeVar("C", bound=BaseModel)
+
+
+class ConfigError(ValueError):
+    """An experiment config does not satisfy its model (``HEPH-LAB-422``).
+
+    ``field`` is the dotted path of the member at fault (``optim.lr``,
+    ``tags[1]``) or ``None`` when the fault is not a single member, and
+    ``layer`` names the layer that supplied it, so the caller can fix the layer
+    rather than the resolved object.
+    """
+
+    code = CODE
+
+    def __init__(self, message: str, *, field: str | None = None, layer: str | None = None) -> None:
+        super().__init__(message)
+        self.field = field
+        self.layer = layer
+
+
+class MissingConfigError(ConfigError):
+    """A config layer's file is not there at all (``HEPH-LAB-424``).
+
+    A subclass of :class:`ConfigError` so one ``except`` clause covers every
+    refusal of this module, with ``.code`` distinguishing the absent file from
+    the malformed one.
+    """
+
+    code = MISSING_CODE
+
+
+class ExperimentConfig(BaseModel):
+    """Base class for an experiment config: frozen, and closed to extras.
+
+    Frozen because resolution is the single point at which a config comes into
+    being: a value patched afterwards is not the value ``config_hash`` would
+    have hashed. Closed to extras so a typo cannot ride along as a member the
+    model never declared.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+def _as_mapping(value: Any, layer: str) -> Mapping[str, Any]:
+    if isinstance(value, Mapping):
+        return value
+    raise ConfigError(
+        f"the {layer} config layer must be a JSON object, not {type(value).__name__}",
+        layer=layer,
+    )
+
+
+def _leaf_paths(tree: Mapping[str, Any], prefix: tuple[str, ...] = ()) -> Iterator[tuple[str, ...]]:
+    """Every path in `tree` at which a non-mapping value sits."""
+    for key, value in tree.items():
+        path = (*prefix, str(key))
+        if isinstance(value, Mapping) and value:
+            yield from _leaf_paths(value, path)
+        else:
+            yield path
+
+
+def _merge(into: dict[str, Any], src: Mapping[str, Any]) -> None:
+    """Deep-merge `src` over `into`: a mapping merges, anything else replaces."""
+    for key, value in src.items():
+        if isinstance(value, Mapping) and isinstance(into.get(key), dict):
+            _merge(into[key], value)
+        elif isinstance(value, Mapping):
+            nested: dict[str, Any] = {}
+            _merge(nested, value)
+            into[key] = nested
+        else:
+            into[key] = value
+
+
+def _set_path(into: dict[str, Any], parts: Sequence[str], value: Any, layer: str) -> None:
+    cursor = into
+    for depth, part in enumerate(parts[:-1]):
+        nxt = cursor.get(part)
+        if nxt is None:
+            nxt = cursor[part] = {}
+        elif not isinstance(nxt, dict):
+            dotted = ".".join(parts)
+            raise ConfigError(
+                f"the {layer} layer sets {dotted!r}, but an earlier layer gave "
+                f"{'.'.join(parts[: depth + 1])!r} a value that is not an object",
+                field=dotted,
+                layer=layer,
+            )
+        cursor = nxt
+    cursor[parts[-1]] = value
+
+
+def _scalar(text: str) -> Any:
+    """A value from the environment or the command line: JSON if it parses."""
+    try:
+        return json.loads(text)
+    except ValueError:
+        return text
+
+
+def _check_path(model: type[BaseModel], parts: Sequence[str], layer: str) -> None:
+    """Refuse a path the model does not declare, naming the whole path.
+
+    Checking stops at the first member whose annotation is not another model:
+    below a `dict[str, Any]` the model declares no structure, so there is
+    nothing there to contradict.
+    """
+    cursor: type[BaseModel] | None = model
+    for index, part in enumerate(parts):
+        if cursor is None:
+            return
+        fields = cursor.model_fields
+        if part not in fields:
+            dotted = ".".join(parts[: index + 1])
+            known = ", ".join(sorted(fields)) or "no members"
+            raise ConfigError(
+                f"the {layer} layer sets {dotted!r}, which this config does not "
+                f"declare (it declares: {known})",
+                field=dotted,
+                layer=layer,
+            )
+        annotation = fields[part].annotation
+        cursor = (
+            annotation
+            if isinstance(annotation, type) and issubclass(annotation, BaseModel)
+            else None
+        )
+
+
+def _apply(
+    merged: dict[str, Any],
+    origins: dict[str, str],
+    model: type[BaseModel],
+    layer: str,
+    values: Mapping[tuple[str, ...], Any],
+) -> None:
+    """Set every path of one override layer, recording which layer set it."""
+    for parts, value in values.items():
+        _check_path(model, parts, layer)
+        _set_path(merged, parts, value, layer)
+        origins[".".join(parts)] = layer
+
+
+def _cli_values(argv: Sequence[str]) -> dict[tuple[str, ...], Any]:
+    values: dict[tuple[str, ...], Any] = {}
+    pending = list(argv)
+    while pending:
+        token = pending.pop(0)
+        if not token.startswith("--"):
+            raise ConfigError(
+                f"the cli layer takes --key=value options; got {token!r}", layer="cli"
+            )
+        name, sep, text = token[2:].partition("=")
+        if not name:
+            raise ConfigError(f"the cli option {token!r} names no config member", layer="cli")
+        if not sep:
+            if not pending or pending[0].startswith("--"):
+                raise ConfigError(
+                    f"the cli option {token!r} carries no value",
+                    field=name,
+                    layer="cli",
+                )
+            text = pending.pop(0)
+        values[tuple(name.split("."))] = _scalar(text)
+    return values
+
+
+def _env_values(env: Mapping[str, str], prefix: str) -> dict[tuple[str, ...], Any]:
+    return {
+        tuple(key[len(prefix) :].lower().split(ENV_NESTING)): _scalar(value)
+        for key, value in env.items()
+        if key.startswith(prefix)
+    }
+
+
+def _read_file(file: Path) -> Mapping[str, Any]:
+    if not file.is_file():
+        raise MissingConfigError(
+            f"the config file {file} does not exist; produce it, or pass no file layer",
+            layer="file",
+        )
+    try:
+        document = json.loads(file.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise ConfigError(
+            f"the config file {file.name} is not valid JSON: {exc}", layer="file"
+        ) from exc
+    return _as_mapping(document, "file")
+
+
+def _walk(value: Any, prefix: str = "") -> Iterator[tuple[str, Any]]:
+    """Every leaf of a dumped config, with its dotted (and indexed) path."""
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            yield from _walk(item, f"{prefix}.{key}" if prefix else str(key))
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            yield from _walk(item, f"{prefix}[{index}]")
+    else:
+        yield prefix, value
+
+
+def _unserialisable(cfg: BaseModel) -> tuple[str | None, Any]:
+    """The path and value of the first member pydantic cannot serialise."""
+    for path, value in _walk(cfg.model_dump()):
+        try:
+            to_jsonable_python(value)
+        except (PydanticSerializationError, TypeError, ValueError):
+            return path, value
+    return None, None
+
+
+def _refuse_unserialisable(cfg: BaseModel, exc: Exception) -> ConfigError:
+    path, value = _unserialisable(cfg)
+    if path is None:
+        reason = f"pydantic could not serialise it to JSON ({exc})"
+    else:
+        reason = (
+            f"member {path!r} holds {type(value).__name__}, "
+            "which cannot be serialised to JSON"
+        )
+    return ConfigError(
+        f"this config cannot be hashed: {reason}. Fix the config layer that "
+        "supplied it rather than patching after resolution: a value patched "
+        "after resolution is not the value that would be hashed into config_hash",
+        field=path,
+    )
+
+
+def _jsonable(cfg: BaseModel) -> Any:
+    try:
+        return cfg.model_dump(mode="json")
+    except (PydanticSerializationError, TypeError) as exc:
+        raise _refuse_unserialisable(cfg, exc) from exc
+
+
+def resolve(
+    model: type[C],
+    *,
+    defaults: Mapping[str, Any] | None = None,
+    file: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    argv: Sequence[str] | None = None,
+    env_prefix: str = ENV_PREFIX,
+) -> C:
+    """Resolve `model` from the four layers and return the validated config.
+
+    Later layers beat earlier ones: defaults, then `file`, then `env`, then
+    `argv` (design 8.1). Nested objects merge member by member, so an override
+    of one member leaves its siblings alone. Every refusal is a
+    :class:`ConfigError` naming the member and the layer.
+    """
+    # Read the file before anything else is checked, so an absent file layer is
+    # HEPH-LAB-424 even when another layer also holds a bad member. Explicit
+    # rather than relying on where the call sits in the loop below.
+    file_layer = _read_file(file) if file is not None else None
+    merged: dict[str, Any] = {}
+    # Dotted path -> the layer that last set it, so a validation failure can
+    # name the layer to fix rather than only the member.
+    origins: dict[str, str] = {}
+    for layer, mapping in (("defaults", defaults), ("file", file_layer)):
+        if mapping is None:
+            continue
+        tree = _as_mapping(mapping, layer)
+        paths = list(_leaf_paths(tree))
+        for parts in paths:
+            _check_path(model, parts, layer)
+        _merge(merged, tree)
+        origins.update({".".join(parts): layer for parts in paths})
+    _apply(merged, origins, model, "env", _env_values(env or {}, env_prefix))
+    _apply(merged, origins, model, "cli", _cli_values(argv or ()))
+
+    try:
+        cfg = model.model_validate(merged)
+    except _ValidationError as exc:
+        first = exc.errors()[0]
+        path = ".".join(str(part) for part in first["loc"])
+        origin = origins.get(path)
+        where = f" (set by the {origin} layer)" if origin else ""
+        raise ConfigError(
+            f"this config does not satisfy {model.__name__}: "
+            f"{path or '<root>'}: {first['msg']}{where}",
+            field=path or None,
+            layer=origin,
+        ) from exc
+    # Resolution produces the object that gets hashed, so a config that could
+    # not be hashed is refused here rather than at the hash.
+    _jsonable(cfg)
+    return cfg
+
+
+def config_hash(cfg: BaseModel) -> str:
+    """The content hash of `cfg` (spec 4.2), over its canonical JSON (spec 4.1)."""
+    payload = _jsonable(cfg)
+    try:
+        return content_hash(payload)
+    except TypeError as exc:  # pragma: no cover - mode="json" leaves no such value
+        raise _refuse_unserialisable(cfg, exc) from exc

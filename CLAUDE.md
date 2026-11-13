@@ -89,7 +89,7 @@ summarise them away. Done means green.
 - Conventional Commits; branches `work/<topic>`.
 - No AI attribution in commits, PR bodies or branch names.
 - Local host ports use the 54xxx block (Grafana 54300, OTLP 54317/54318,
-  Postgres 54320, S3 54333, Redis 54379, Mailpit 54025/54825).
+  Postgres 54320, S3 54333, Redis 54379, MLflow 54500, Mailpit 54025/54825).
 - Error codes match `^HEPH-[A-Z]{2,6}-\d{3}$` and live only in `spec/errors.yaml`.
 - Generated files (`_codes.py`, `conventions.py`, synced Compose fragments, and
   the brand PNGs `apple-touch-icon.png` and `og-card.png`) are never edited by

@@ -4,15 +4,15 @@
 title: "heph-spec"
 ---
 
-> **Two version numbers.** This page is version 0.4.0 of the specification. The packages (`hephkit`, `hephkit-core` and the Go module) are versioned independently: a change to the specification bumps the spec version, while package releases follow their own commit history, so the two numbers need not match. Package versions are published with the project's releases.
+> **Two version numbers.** This page is version 0.5.0 of the specification. The packages (`hephkit`, `hephkit-core` and the Go module) are versioned independently: a change to the specification bumps the spec version, while package releases follow their own commit history, so the two numbers need not match. Package versions are published with the project's releases.
 
 # heph-spec
 
-- **Version:** 0.4.0
+- **Version:** 0.5.0
 - **Status:** Draft for implementation in Phase 1; every module implementing it is `experimental`.
 - **Registries:** `spec/errors.yaml` (error codes), `conventions/attributes.yaml` (telemetry attributes), `spec/currencies.yaml` (ISO 4217 minor units, with its publication pinned by `spec/currencies.source.yaml`).
 
-The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119 and RFC 8174. Where this document profiles a standard, the standard governs everything this document does not restate. Four parts are original: the error-code registry (section 1), idempotency storage and replay (section 2), money on the wire (section 3) and the provenance record (section 7).
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119 and RFC 8174. Where this document profiles a standard, the standard governs everything this document does not restate. Six parts are original: the error-code registry (section 1), idempotency storage and replay (section 2), money on the wire (section 3), the provenance record (section 7), the run record (section 8) and the replay and diff of a run (section 9).
 
 ## Decisions this version settles
 
@@ -29,6 +29,23 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 - Fractional digits beyond a currency's exponent are accepted when every one of them is zero, because the value is preserved exactly; a non-zero digit beyond the exponent still needs a rounding mode (3.6, ADR 0016).
 - Ordering two amounts of different currencies is `HEPH-MONEY-409`, never a boolean, so ordering is a fallible operation and is never offered through an interface that cannot fail; equality keeps answering every pair (3.8).
 - The accepted currency set is the whole of ISO 4217 List One, a code being accepted if and only if List One gives it a numeric minor-unit field, which includes the funds codes and excludes the `N.A.` codes (3.3, ADR 0017).
+- The provenance record (section 7) is normative, and its fields split by whether they decide re-execution or merely describe it: `config_hash`, `data_hash`, `deps_hash` and `code_sha` form the determinism contract, while `environment` is descriptive and is never compared (7.1, 7.2, ADR 0024).
+- A run is `provenance-only` unless a git commit names the code, the working tree is clean and a dependency lockfile exists; `code_sha` is `null` exactly when git `HEAD` resolves to no commit, never merely because the tree is dirty, and `deps_hash` exactly when there is no lockfile, and `environment` never carries a hostname, a username or a filesystem path (7.1, 7.3, 7.5, ADR 0024).
+- A run record is a directory holding `provenance.json`, `rows.jsonl` and `summary.json`, every document canonical JSON; a row is durable before the call that appended it returns, so a crash costs the row in flight and no completed cell (8.1, 8.3).
+- A record that cannot be written is a failed run: every write failure is raised and fails the run, and an implementation never warns and continues, writes elsewhere, drops a row or reports a number the record does not hold (8.5).
+- The summary is an index derived from the rows, a reader recomputes it and refuses a record whose stored summary disagrees, and a record with no summary is unfinished rather than invalid (8.4).
+- A record carries no wall-clock time in any of its documents, because a clock reading in a compared position would make every replay diverge (8.1).
+- A non-finite value is recorded as `{"nonfinite": "NaN"}`, `{"nonfinite": "Infinity"}` or `{"nonfinite": "-Infinity"}`, never as a bare `NaN` or `Infinity` token, which 4.3 rejects and no conforming parser accepts (8.2).
+- A replay compares the four determinism-contract members of the provenance record and the rows, by cell name and value name. It compares `environment`, `run_id`, `class`, the summary and the order of the rows not at all, each for a reason of its own (9.1).
+- A difference names a position — a cell and a value name, or a determinism-contract member — and the two values found there; a `null` says the position is absent, since a row value is never null, and a report matched exactly when it carries no difference (9.2).
+- A `null` at a determinism-contract member is the member's own value and equals only another `null`, so a replay of a `provenance-only` run does not diverge at a `deps_hash` or a `code_sha` neither side ever had (9.2, 9.3, 7.1, 7.3).
+- A report carries `record_unfinished`, so an unfinished record's unreached cells are reported as positions and are still distinguishable from values that appeared (9.2, 8.4).
+- The float comparison is evaluated in binary64, and an implementation with wider arithmetic still produces the binary64 verdict (9.3).
+- A re-execution whose experiment raises produces no report: the failure reaches the caller and its record is left unfinished (9.1, 8.4, 8.5).
+- `NaN` compares **equal** to `NaN` for the purposes of a replay, because 8.2's wrapper is compared by the value it names and a record must compare equal to itself (9.3).
+- Two finite numbers are equal exactly when `|a - b| <= max(1e-9 * max(|a|, |b|), 1e-12)`: relative so that 7.2's second machine can satisfy the contract, absolute so that a value near zero is comparable at all, symmetric, and not loosenable per run, cell or value (9.3).
+- A divergence is reported, never raised: a replay produces its difference report, and a caller that needs a refusal derives one from it under `HEPH-LAB-409` (9.1, 9.4).
+- Section 10 is reserved: dataset manifests, and with them the digest scope of `data_hash`, are not yet specified, and an implementation chooses no scope of its own meanwhile (10, 7.1).
 
 ## 1. Errors
 
@@ -186,16 +203,205 @@ This matches the `rfc8785` reference package, which raises on integer literals o
 
 ## 7. Provenance record
 
-**Status: draft.** Not implemented in Phase 1; fields may change before it is promoted.
+7.1. A provenance record describes one research run. A record MUST carry every member of this table, with the type given, and MUST NOT carry a top-level member this specification does not define. The last column says whether the member belongs to the **determinism contract**: the set of members that decide whether a re-execution is the same run, as against the members that merely describe it.
 
-7.1. A provenance record describes one research run with these fields:
+| Field | Type | Meaning | In the determinism contract |
+| --- | --- | --- | --- |
+| `run_id` | string | Unique identifier of the run | no, an identifier |
+| `config_hash` | string | Content hash (4.2) of the canonical run configuration | yes |
+| `data_hash` | string | Content hash (4.2) of the input data, over the digest scope section 10 defines | yes |
+| `deps_hash` | string or null | Content hash (4.2) of the dependency lockfile, or `null` when the run had no lockfile | yes |
+| `code_sha` | string or null | Git commit SHA of the code that ran, as lowercase hex, or `null` when no git commit names it | yes |
+| `class` | string | `deterministic` or `provenance-only` | no, a classification |
+| `environment` | object | Descriptive facts about the machine that ran it (7.4) | **no, and never compared (7.2)** |
 
-| Field | Type | Meaning |
+`deps_hash` is a content hash over the lockfile's bytes exactly as read, not over a parsed or re-serialised form, because the lockfile is not required to be JSON and 4.1 therefore does not apply to it. It is in the determinism contract because two different dependency sets genuinely give different answers, so a replay whose `deps_hash` differs from the record's has not reproduced the recorded run.
+
+The **digest scope** of `data_hash` — whether the hash is taken over raw bytes or over canonical JSON (4.1), and how the inputs of a multi-file dataset combine into one value — is not settled in this section. It is settled with dataset manifests, in section 10, and an implementation follows that section rather than choosing for itself.
+
+This section names code by a **git commit**, and says so plainly rather than inventing an identifier no implementation would use. `code_sha` is the commit that git `HEAD` resolves to, and it is non-null whenever `HEAD` resolves to a commit **regardless of whether the working tree is clean**: a dirty tree does not make `code_sha` `null`, it costs the run the `deterministic` class instead (7.3). `code_sha` is therefore `null` exactly when `HEAD` resolves to no commit, which covers every case that yields no commit SHA: code under no version control at all, a git repository with no commit yet, and a tree held in another version-control system. Where `HEAD` resolves, the record MUST carry that SHA; omitting the member is never an alternative to the `null`. A `null` means nothing in the record names the code that produced the result, so the run is `provenance-only` (7.3).
+
+`run_id` is opaque: implementations MUST NOT derive meaning from its form. Two records that differ only in `run_id` describe the same re-execution.
+
+Where a record is hashed, the hash is a content hash (4.2) over the record's canonical JSON (4.1).
+
+7.2. `class` MUST be exactly `deterministic` or `provenance-only`. The hyphen in `provenance-only` is normative; `provenance_only` is not a value of this field.
+
+A `deterministic` run re-executes from the members of its determinism contract to an identical result. A `provenance-only` run records how a result was produced and makes no claim that re-executing it reproduces the result exactly. Both classes carry the same members: `provenance-only` is a weaker claim, not a record with members left out, though `code_sha` or `deps_hash` may be `null` in one (7.1, 7.3).
+
+Whatever else a replay compares, it MUST NOT compare `environment`, and a record that differs from another only in `environment` MUST NOT be reported as a divergence. This is what makes `deterministic` a wearable label: the same configuration, data, dependencies and code re-executed on a second machine is the same run even though its platform, runtime version and accelerator differ, and a contract that said otherwise would be satisfiable by no two machines.
+
+7.3. A run MUST be classified `provenance-only`, never `deterministic`, unless **all** of these hold when the run starts:
+
+- **A git commit names the code**, that is `HEAD` resolves and `code_sha` is non-null (7.1). Otherwise `code_sha` is `null`, and a record that does not name the code that produced the result cannot claim that the code re-executes to it.
+- **The working tree is clean.** Nothing tracked in the commit named by `code_sha` differs from it, and no untracked file is present other than those the repository's own ignore rules exclude. A tree for which `git status --porcelain` prints nothing satisfies this. Without the condition `code_sha` stops identifying the code that produced the result, which is the one thing it is in the record to do.
+- **A dependency lockfile exists.** Otherwise `deps_hash` is `null`, the dependency set is unpinned, and nothing in the record pins the versions that produced the result.
+
+A record whose `class` is `deterministic` therefore MUST carry a non-null `code_sha` and a non-null `deps_hash`. An implementation MAY impose further conditions of its own before it classifies a run `deterministic`, and MUST NOT classify a run `deterministic` when any condition above fails. A run that fails one is still recorded in full: it carries `config_hash`, `data_hash`, `environment` and whichever of `code_sha` and `deps_hash` it can, so a run whose code no git commit names is recorded and classified rather than refused, and loses no traceability by being honest about its class.
+
+7.4. `environment` MUST be present and MUST be an object. It is descriptive: it records what the run met, so that a reader of a published result can see it, and it takes no part in any comparison (7.2). Its members:
+
+| Member | Type | Meaning | Example |
+| --- | --- | --- | --- |
+| `platform` | string | Operating system and architecture | `macOS-15.6-arm64` |
+| `python` | string | Version of the Python runtime the run executed under | `3.12.7` |
+| `frameworks` | object | Library name to version string, or `null` for a library that was looked for and not found | `{"numpy": "2.1.3", "torch": null}` |
+| `accelerator` | object or null | `{"model": string, "driver": string}`, or `null` when the run used no accelerator | `{"model": "NVIDIA RTX 4090", "driver": "550.54.14"}` |
+
+A `null` under `frameworks` means the library was looked for and was absent; a library the implementation never looked for is simply not a member. Absence is recorded, not assumed.
+
+These members are individually optional, because an implementation records only what it can observe, but their names and types are reserved: an implementation that records one of these facts MUST use the name and type given here and MUST NOT record the same fact under another name. An implementation whose runtime is not Python omits `python` and records its own runtime version under a member named for that runtime, such as `go`. Further members MAY be added, subject to 7.5.
+
+7.5. `environment` MUST NOT carry the hostname of the machine, the name of the user who ran it, or any filesystem path, under those or any other member names. A record is committed and published alongside the result it describes, and those three identify a person or a machine instead of describing an environment; 6.2 already requires `pii: true` attributes to be redacted from log output, and a record outlives a log line. A project that needs them keeps them in its own configuration, outside the record.
+
+## 8. Run records
+
+8.1. A **run record** is the account of one research run: the provenance record of section 7, the rows the run produced, and a summary derived from those rows. A reported number MUST come from a row of a record. This section exists so that "a number cannot exist without a record" is a property of the artefact rather than a habit of whoever ran it.
+
+A record is a **directory**. The names of the three files in it are normative:
+
+| File | Holds | Written |
 | --- | --- | --- |
-| `run_id` | string | Unique identifier of the run |
-| `config_hash` | string | Content hash (4.2) of the canonical run configuration |
-| `data_hash` | string | Content hash (4.2) of the input data |
-| `code_sha` | string | Git commit SHA of the code that ran |
-| `class` | string | `deterministic` or `provenance-only` |
+| `provenance.json` | The section 7 provenance record of the run, as one JSON object | Once, before the first row (8.3) |
+| `rows.jsonl` | The rows, one per line, in completion order (8.2) | Appended as each cell completes (8.3) |
+| `summary.json` | The summary derived from the rows (8.4) | Once, when the run finishes (8.4) |
 
-7.2. `deterministic` runs re-execute from `config_hash` and `data_hash` to an identical result. `provenance-only` runs record how a result was produced but are not expected to reproduce it exactly.
+Every document in a record is canonical JSON (4.1), so the record of one run is the same bytes wherever it is written and a hash over one of its files depends on what the file says rather than on how it was formatted. A file holding one document — `provenance.json`, `summary.json` — holds exactly that document's canonical JSON and nothing after it, not even a trailing newline, so that the hash of the file is the content hash of the document. `rows.jsonl` is JSON Lines: each line is one canonical JSON object followed by a single LF (U+000A) and holds nothing else, so a reader may read a record a line at a time and a writer may append to it without rewriting what is already there.
+
+`provenance.json` holds the section 7 record **unchanged**. 7.1 forbids a record to carry a top-level member that specification does not define, so what this section needs and section 7 does not name — the rows, the summary — lives in a document of its own and never as an eighth member of the provenance record.
+
+A record carries **no wall-clock time**, under any member name, in any of its three documents. Section 7 defines none and this section adds none, for a reason that outlives both: a replay (section 9) compares a record's rows against the rows of a re-execution, so a clock reading recorded in a compared position would make every replay of even a perfectly reproducible run diverge. A project that needs to know when a run happened reads it from the commit that carries the record, which is where the question is answered without putting the answer somewhere a comparison has to ignore.
+
+8.2. A **row** is the result of one **cell**: the smallest unit of work the run completes and can be reported on, such as one model against one dataset. A row document carries exactly these two members and MUST NOT carry another:
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `cell` | string | Name of the cell that completed. Non-empty, and unique within the record |
+| `values` | object | The values that cell produced, by name. MAY be empty |
+
+Each member of `values` is a JSON string, a finite JSON number, or the object `{"nonfinite": t}`, which carries exactly the member `nonfinite` and MUST NOT carry another, where `t` is exactly one of `"NaN"`, `"Infinity"` and `"-Infinity"`. An object that is not that is not a value this section defines, and a reader MUST refuse it rather than read it as something else. A reader MUST read that object back as the value it names, and MUST NOT treat it as an ordinary object. The wrapper exists because research results do contain non-finite values and JSON cannot carry one: 4.3 rejects them outright, and the bare tokens `NaN` and `Infinity` that some encoders emit are not JSON and are rejected by a conforming parser in another language. Recording a diverged loss as a thing every reader can parse is what the wrapper buys; writing those bare tokens into a record is forbidden, and so is dropping the value or substituting a finite one for it.
+
+A cell name MUST be unique within a record. A record that named one cell twice could not say which of the two values the run produced, so an implementation MUST refuse a second row for a cell it has already recorded rather than appending it, overwriting it or keeping the last.
+
+8.3. **Incremental write semantics.** A record is written as the run proceeds, never assembled at its end.
+
+- `provenance.json` MUST be written and MUST be durable before the first row is appended. A directory holding rows and no provenance record describes a run nothing identifies.
+- `rows.jsonl` MUST exist, possibly empty, from the moment the record is open, so that a run which died before its first cell is still the record of a run that started.
+- Each row MUST be appended as one line, and MUST be **durable before the call that appended it returns**. Durable means handed to storage rather than left in a buffer the writing process owns: the bytes MUST survive the death of that process without a further call. A write followed by a flush of the application buffer and a synchronisation of the file to its storage satisfies this; a write into a buffer flushed at some later convenient moment does not.
+- A record MUST NOT be rewritten. A row once written is never amended or removed, and `summary.json` is written once.
+
+A reader MUST treat a final line of `rows.jsonl` that is not terminated by LF as the row that was in flight when the writer died, and MUST discard it: a line without its LF was never a complete row, and that one row is what the paragraph below permits a crash to cost. Every LF-terminated line MUST be a row document (8.2), and a reader that meets one which is not MUST refuse the record rather than skip the line — such a file has been corrupted or edited, and reading past it would report a run whose rows nobody can account for. A reader MUST NOT apply the first rule to any line but the last.
+
+The cost of a crash is therefore at most the row in flight: every cell that completed before it is on disk and readable. That is the whole point of writing a record this way, and the reason it is a MUST rather than a quality of implementation — a run that buffers its rows and dies loses the work of every cell it had finished.
+
+8.4. The **summary** document carries exactly these three members and MUST NOT carry another:
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `run_id` | string | The `run_id` of this record's provenance record (7.1) |
+| `cells` | array of strings | Every cell name, in the order the rows give them |
+| `rows` | integer | The number of rows in `rows.jsonl` |
+
+Every member is derived from the record's other two documents. The summary is an **index**, not a second place where results live: a number exists in a row or it does not exist, and an implementation MUST NOT record in the summary a value no row holds.
+
+A reader MUST recompute the summary from the rows, and MUST refuse a record whose stored `summary.json` disagrees with what the rows say. Such a directory is not a run record: reporting from it would be reporting what the rows do not hold, which is the one thing a record exists to prevent.
+
+A run that ends by failing has not finished: an implementation MUST NOT write a summary for it, so a run whose experiment raised leaves its rows and no summary, exactly as a killed one does.
+
+A record holding no `summary.json` is **unfinished**: the run did not reach its end. A reader MUST still read its rows and MUST NOT refuse it for the missing summary, since the rows of an unfinished record are exactly what 8.3 was written to preserve. A reader MUST be able to tell an unfinished record from a finished one, and MUST NOT present an unfinished one as a complete run.
+
+8.5. **A record that cannot be written is a failed run, not a quiet one.** Every failure to create the record directory, to write or synchronise the provenance record, to append a row, or to write the summary MUST be raised to the caller and MUST fail the run.
+
+An implementation MUST NOT, on such a failure: warn and continue; log it and return a result; write the record to any location other than the one it was given; skip, buffer or drop a row; or report a number the record does not hold. A run whose record failed produced no citable number, whatever else it computed. An unwritable record is the failure mode this clause is aimed at, because it is the one an implementation is most tempted to be helpful about.
+
+8.6. An implementation MAY offer a **registry of experiments**, and one that does MUST shape it so that an experiment cannot choose where its results go. An experiment is a function of one argument, the open record. It MUST NOT be passed a directory, a path or any other destination, and an implementation MUST refuse at registration a function that takes one rather than discovering the problem when the function runs. Opening the record, choosing where it goes and closing it belong to the runner.
+
+This is what 8.1 rests on: no destination reaches an experiment through its signature, so the record it was handed is the only one it was given. The rule is about what an implementation passes, and it is deliberately not a claim that an experiment cannot write a file by other means — nothing in a general-purpose language could enforce that, and a section that pretended otherwise would be describing a guarantee no implementation can keep.
+
+8.7. **How this section is pinned.** The framing this section fixes — the three file names (8.1), the absence of a trailing newline on a file holding one document (8.1), the single LF that terminates each line of `rows.jsonl` (8.1), the refusal of an LF-terminated line that is not a row document (8.3), and the refusal of a record whose stored summary disagrees with its rows (8.4) — is currently pinned by contract tests in the implementation rather than by a shared vector suite under `conformance/`. A second implementation MUST therefore be checked against this section directly, and MUST NOT read the absence of a suite as the absence of a requirement: every MUST of this section is normative whether or not a vector exercises it. A vector suite for the framing is left to a later version of this specification.
+
+## 9. Replay and diff
+
+9.1. A **replay** re-executes the run that a record (section 8) describes and compares the result against that record. Its product is a **difference report** (9.2). A replay that differs is not a failure of the tool: it names which values moved, and that naming is the finding. An implementation MUST produce the report, and MUST NOT refuse in place of producing one.
+
+A replay compares exactly two things:
+
+- **The determinism contract of the record's provenance record**: `config_hash`, `data_hash`, `deps_hash` and `code_sha` (7.1). These are the members that decide whether a re-execution is the same run. A replay whose values for them differ from the record's has not re-executed the recorded run; it has run against different configuration, different data, different dependencies or different code, and the report says which rather than leaving the reader to infer it from a differing result.
+- **The rows** (8.2), by cell name and, within a cell, by value name.
+
+It compares nothing else. Each of the three members of 7.1 that is not in the determinism contract is excluded for a reason of its own:
+
+- `environment` MUST NOT be compared, and two records differing only in `environment` MUST NOT be reported as a divergence. 7.2 requires this and says why: a contract that compared the platform, the runtime version and the accelerator would be satisfiable by no two machines.
+- `run_id` MUST NOT be compared. 7.1 makes it opaque and says that two records differing only in `run_id` describe the same re-execution; a replay is a new run with a new identifier, so comparing it would make every replay of every run diverge.
+- `class` MUST NOT be compared. It classifies how a run was made rather than what it produced, and the same commit replayed from a tree that has since been edited is classified `provenance-only` while reproducing the record's rows exactly. The report says whether the run reproduced; the recorded `class` says what the record claimed, and a reader weighs the two together, since a `provenance-only` run never promised a match (7.2).
+
+A replay does not compare `summary.json`. Every member of the summary is derived from the rows (8.4), and a reader has already refused a record whose stored summary disagrees with them, so comparing it would compare the rows a second time under another name.
+
+The **order of the rows is not compared**. 8.2 writes the rows in completion order, which is not a result: a run whose cells complete concurrently does not fix it, and a replay that called a reordering a divergence would report one against a run that reproduced every value it holds. Cells are matched by name, which 8.2 makes unique within a record.
+
+A re-execution whose experiment **raises** has produced no result to compare, and this section requires no report of it. The failure is a failed run: 8.5 raises it to the caller and 8.4 leaves its record unfinished, holding the rows the re-execution reached and no summary. An implementation MUST let that failure reach the caller rather than returning a report that calls the missing cells a divergence, and MUST NOT discard the partial record, which is what says how far the re-execution got. 9.1's requirement to produce the report is about a replay that ran; it is not a requirement to invent one for a replay that could not.
+
+The experiment a replay re-executes is identified by **the caller**, not by the record. A record's members are the determinism contract and the values the run produced; nothing in section 7 or section 8 names the entry point that produced them, and 8.6 keeps a destination out of an experiment's signature without recording which experiment the runner passed the record to. An implementation MUST therefore take the experiment's identity from its caller, and MUST NOT present a record alone as sufficient to re-execute the run it describes: a tool offered only a record would have to guess the entry point, and a guess that resolved to the wrong function would compare two different experiments while reporting that it had replayed one. Naming the entry point within a record is left to a later version of this specification.
+
+This section does not define how a run's external inputs are made available to a re-execution; freezing them is settled in a later version of this specification. A replay re-executes the experiment (8.6) and compares what this section says to compare. A replay whose inputs were not frozen and that matches is evidence that the experiment reproduced under the inputs the replay met; what carries the identity of those inputs is `data_hash`, which is compared like every other member of the determinism contract.
+
+9.2. A **difference report** carries whether the replay matched, whether the record it compared was unfinished, and the differences it found, in that order: `matched`, `record_unfinished`, the differences. A report **matched** if and only if it carries no difference: an implementation MUST NOT report a match alongside a difference, nor a divergence with none.
+
+`record_unfinished` is true exactly when the record the replay compared holds no summary, which 8.4 defines as unfinished. Such a record holds only the cells its run reached, so every cell the run never reached is a position only the re-execution holds and the report carries a difference for a value that never moved. Those differences MUST NOT be suppressed, because they are true statements about the two records, and the report MUST carry `record_unfinished` so that a reader can tell a cell that never ran from a value that appeared — 9.1 says a report names which values moved, and without this member a report of an unfinished record names cells that did not. A caller asking whether a run reproduced replays a finished record.
+
+Each **difference** names one **position** and the two values found there:
+
+| Member | Meaning |
+| --- | --- |
+| `cell` | Name of the cell the position is in, or `null` when the position is a member of the determinism contract |
+| `key` | Name of the value within that cell, or the name of the determinism-contract member when `cell` is `null` |
+| `recorded` | The value the record holds at that position, or `null` when it holds none |
+| `replayed` | The value the re-execution produced at that position, or `null` when it produced none |
+
+The positions compared are the four determinism-contract members and every `(cell, key)` pair that either side's rows hold. A position both sides hold, whose values differ under 9.3, is one difference carrying both values. A position only one side holds is one difference carrying that side's value with `null` on the other: a row value is never `null` (8.2), so a `null` at a row position says the position is absent rather than that the value recorded there was null.
+
+Both sides always hold all four determinism-contract positions, since 7.1 requires every record to carry every member. A `null` at one of those four is therefore the member's **value**, which 7.1 permits for `deps_hash` and for `code_sha`, and never an absence: a difference reading `deps_hash`, a hash, `null` says the re-execution had no lockfile.
+
+A cell only one side holds therefore appears as one difference per value it holds, which names every value that is unaccounted for. A cell holding no values — 8.2 permits an empty `values` — has no `(cell, key)` position at all, and MUST still be reported: it is one difference naming the cell, with `key`, `recorded` and `replayed` all `null`. A difference whose `recorded` and `replayed` are both `null` is exactly that case and no other.
+
+The differences are **ordered**, so that one replay reported twice reads the same way: the determinism-contract members first, in the order of 7.1's table; then the positions of the record's rows, in the order the rows and each row's `values` give them; then the positions only the re-execution holds, in the order its own rows give them. Every document in a record is canonical JSON (4.1, 8.1), so a row's `values` are in the member order 4.1 fixes rather than in whatever order the run produced them, and two implementations reading the same two records therefore order a report identically. A replay compares records as they were written, which is what makes that true of the re-execution's rows as well as the record's.
+
+A report says which values moved and no more. An implementation MUST NOT put a conclusion in it — a ranking, a cause, a verdict on whether the run is flaky — because the report is read by someone deciding exactly that, and the values are what they need.
+
+9.3. Two values at a position are compared **by kind first**. A string, a finite number and a non-finite value (8.2) are three of the four kinds, and a `null` is the fourth; two values of different kinds differ whatever they look like, so the string `"1.0"` and the number `1.0` are a difference, and so are `NaN` and any number.
+
+A **`null`** is a fourth kind. It occurs only at a determinism-contract position, because 7.1 makes `deps_hash` and `code_sha` the two members that may be `null` and 8.2 never lets a row value be one. A `null` is equal to a `null` and to nothing else. Two records that both had no lockfile, or whose code no git commit names, therefore **do not differ** at that member: there is no value either side ever had, and reporting one would be reporting a difference between two absences. This is not an edge case — 7.3 makes those nulls exactly what a `provenance-only` run carries, so it is every replay of the ordinary case, and an implementation that read the three kinds above as exhaustive would call each one diverged at `deps_hash`.
+
+- Two **strings** are equal if and only if they are the same sequence of code points. Nothing is normalised, trimmed or case-folded.
+- Two **non-finite values** are compared **by the value their wrapper names** (8.2). `{"nonfinite": "NaN"}` is therefore **equal to** `{"nonfinite": "NaN"}`, so **`NaN` compares equal to `NaN` for the purposes of a replay**, which is what IEEE 754 equality does not do. `Infinity` equals `Infinity`, `-Infinity` equals `-Infinity`, and `Infinity` and `-Infinity` differ. 8.2 carries a non-finite value so that a diverged loss can be recorded; a record exists to be compared against, and a value that did not compare equal to itself would make a replay report a difference between a run and that same run. This is the one comparison an implementation is all but guaranteed to get wrong by reaching for its language's `==`.
+- Two **finite numbers** are equal within the tolerance below, and only within it.
+
+**The float tolerance.** Two finite numbers `a` and `b` are equal if and only if
+
+```
+|a - b| <= max(1e-9 * max(|a|, |b|), 1e-12)
+```
+
+The tolerance is **both relative and absolute**, and the formula is symmetric in `a` and `b`, so a comparison does not depend on which side of it the record is. It is evaluated in **binary64**: `a` and `b` are the binary64 values the two records' canonical JSON denotes (4.3), and `|a - b|`, `1e-9 * max(|a|, |b|)`, the `max` and the comparison are binary64 operations. An implementation whose arithmetic is wider than binary64 — x87 extended precision, a contracted fused multiply-add, exact rational arithmetic — MUST still produce the binary64 verdict, because the verdict is part of the comparison this section defines rather than an artefact of a platform.
+
+- The **relative** part, `1e-9`, is what makes 7.2's contract satisfiable. Binary64 carries about 15.95 decimal digits, so `1e-9` is roughly seven orders of magnitude looser than the representation: it absorbs the reassociation that a different BLAS, a different thread count or a fused multiply-add introduces across a long reduction, which is exactly the difference 7.2 says a second machine may have while running the same run. It is at the same time far tighter than the precision a result is reported to; a number quoted to four significant figures cannot hide a change beneath `1e-9`, so the tolerance never conceals a moved value a reader would otherwise have seen.
+- The **absolute** part, `1e-12`, is there because a relative comparison is useless near zero. `0.0` against `1e-300` is an infinite relative error, so a loss that reached zero in one run and a denormal in the next would diverge forever. `1e-12` is below the precision of any number a result is reported to and above the scale at which a difference is arithmetic noise rather than a finding.
+- The two combine with `max`, so a pair is equal if it passes on either. Where both values are zero the relative part is zero and the absolute part decides; `0.0` and `-0.0` are equal, their difference being zero.
+
+An implementation MUST NOT loosen this tolerance per run, per cell or per value, and MUST NOT offer a mode in which a pair this clause calls different is reported as a match. A quantity whose reproduction needs a looser comparison than this is not a quantity a replay can speak about, and an experiment that produces one records alongside it something that can be.
+
+9.4. **What a match means, and what it does not.** Two things section 7 leaves open are discovered by a replay rather than by reading a record. They are named here rather than left silent, because a replay is the operation that meets them.
+
+First, **a record does not witness its own cleanliness.** 7.3's conditions hold *when the run starts*, and none of the seven members of 7.1 records that the working tree was clean, so a reader of a record cannot check that `deterministic` was assigned honestly. This is deliberate rather than an omission. A member saying "the tree was clean" would be one more self-assertion by the same implementation, with exactly the standing of the `class` it would be vouching for; a record cannot witness its own honesty. What tests the claim is a replay, which re-executes and compares, so that its report is evidence about the world rather than a restatement of what the record says about itself. An implementation MUST NOT present a recorded `deterministic` as a verified fact. A replay that matched is the nearest thing to one.
+
+Second, **a run that starts clean and is edited while it runs still qualifies.** 7.3 is checked when the run starts, so such a run is classified `deterministic` while its `code_sha` names a commit that is not the code that finished it. A replay is what finds this: all four determinism-contract members can match — the commit is the same, the lockfile is the same — while the rows differ, and a report of exactly that shape is the signature of a tree edited mid-run. An implementation MAY re-check the tree when a run ends. One that does MUST NOT rewrite the record's `class`, since 8.3 forbids rewriting a record, and records what it found as a run of its own rather than as an amendment to one that has finished.
+
+A **caller that needs a refusal** rather than a report — a continuous-integration gate asking whether a cited run still reproduces — derives it from the report, and `HEPH-LAB-409` is the registry code for it. That is a decision about what to do with a finding, and this section's requirement that a replay produce the report stands either way.
+
+## 10. Dataset manifests
+
+**Reserved. This section is not yet specified.**
+
+The digest scope of `data_hash` (7.1) — whether the hash is taken over raw bytes or over canonical JSON (4.1), and how the inputs of a multi-file dataset combine into one value — is settled here, together with the manifest a dataset carries.
+
+Until this section is written, an implementation records the `data_hash` it is given and MUST NOT choose a digest scope of its own (7.1).

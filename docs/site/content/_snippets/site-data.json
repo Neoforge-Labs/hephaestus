@@ -1,11 +1,16 @@
 {
   "_generated": "GENERATED FILE - do not edit by hand. Source: spec/modules.yaml, spec/errors.yaml, spec/heph-spec.md and the design's Rollout. Regenerate with `uv run tools/gen_site_pages.py`.",
-  "specVersion": "0.4.0",
+  "specVersion": "0.5.0",
   "currentPhase": 1,
-  "errorCodeCount": 13,
+  "errorCodeCount": 17,
   "shipped": [
     {
       "name": "mail",
+      "home": "compose",
+      "maturity": "experimental"
+    },
+    {
+      "name": "mlflow",
       "home": "compose",
       "maturity": "experimental"
     },
@@ -85,6 +90,36 @@
       "maturity": "experimental"
     },
     {
+      "name": "lab.config",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
+      "name": "lab.gates",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
+      "name": "lab.record",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
+      "name": "lab.replay",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
+      "name": "lab.repro",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
+      "name": "lab.track",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
       "name": "money",
       "home": "python",
       "maturity": "experimental"
@@ -120,11 +155,6 @@
       "name": "auth",
       "home": "python",
       "phase": 2
-    },
-    {
-      "name": "lab.repro",
-      "home": "python",
-      "phase": 3
     },
     {
       "name": "billing",

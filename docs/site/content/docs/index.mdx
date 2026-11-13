@@ -15,6 +15,19 @@ Every module is labelled `experimental`: the API may change and it is not for
 production, per [ADR 0015](/adrs/0015-maturity-levels). The [roadmap](/roadmap)
 shows what comes next.
 
+## The `hephkit` Python package
+
+`hephkit` is the Hephaestus correctness kit for Python: money, canonical JSON and
+content hashing, and Standard Webhooks signatures, bound to the Rust core. The
+entry points are `hephkit.money`, `hephkit.hashing` and `hephkit.signatures`;
+each is specified in [`heph-spec`](/spec) and listed with its maturity in the
+[module reference](/reference/modules).
+
+It is a [namespace package](/adrs/0021-hephkit-is-a-namespace-package), so
+nothing is importable from `hephkit` itself — reach every public name through a
+submodule. Read the installed version with
+`importlib.metadata.version("hephkit")`; there is no `hephkit.__version__`.
+
 ## What is documented here
 
 - [Error codes](/errors): every `HEPH-` error code, with what it means and how to respond.

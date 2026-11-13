@@ -1,0 +1,141 @@
+---
+title: "lab.track"
+---
+
+# lab.track
+
+`hephkit.lab.track` puts a run into MLflow and tags it with its provenance, so a
+dashboard row can be traced back to the record that produced it. It has one
+knob, `MLFLOW_TRACKING_URI`: unset means tracking is off and every call is a
+no-op. Nothing here ever fails a run on MLflow's behalf — a server that is down,
+an extra that is not installed and a dropped metric are warnings, because losing
+a dashboard row is not losing an experiment. The record is the run
+([`lab.record`](/modules/lab.record)); this is a view of it.
+
+Maturity: **`experimental`**. The API may change, and per
+[ADR 0015](/adrs/0015-maturity-levels) nothing below `stable` may sit in a
+production money path. Why MLflow is the tracker is
+[ADR 0007](/adrs/0007-mlflow-experiment-tracking).
+
+## Installing
+
+`hephkit-lab` is not on PyPI yet — [ADR 0023](/adrs/0023-hephkit-lab-ships-separately)
+records the precondition on publishing it — so install both portions of the
+`hephkit` namespace package out of a checkout of this repository. MLflow lives
+behind the `track` extra, so the spine installs without it:
+
+```bash
+uv add --editable ./python/hephkit ./python/hephkit-lab
+uv add mlflow
+```
+
+The second line is `uv add mlflow` rather than `hephkit-lab[track]` only because
+the first install is a path and not a published name: once the distribution is
+on PyPI, `hephkit-lab[track]` is the one line, and the extra is what declares
+the version floor.
+
+A tracking server is in the repository's `mlflow` Compose fragment, on host port
+54500.
+
+## An example
+
+Save this as `demo.py` and run it twice — once with no tracking server and once
+with one:
+
+```bash
+uv run python demo.py                                        # tracking off
+MLFLOW_TRACKING_URI=http://localhost:54500 uv run python demo.py
+```
+
+```python
+from pathlib import Path
+
+from hephkit.hashing import content_hash
+from hephkit.lab.record import RunRecord, register, run
+from hephkit.lab.repro import capture
+from hephkit.lab.track import is_enabled, provenance_tags, tracked_run
+
+provenance = capture(
+    run_id="demo-0001",
+    config_hash=content_hash({"alpha": 1.0}),
+    data_hash=content_hash({"rows": 96}),
+    repo=Path("."),
+)
+print("tracking enabled:", is_enabled())
+print("tags:", provenance_tags(provenance))
+
+
+@register("demo")
+def demo(record: RunRecord) -> None:
+    with tracked_run("demo-0001", provenance=provenance) as tracked:
+        tracked.log_params({"alpha": 1.0})
+        for step, rmse in enumerate([0.61, 0.55, 0.49]):
+            record.append_row(f"epoch-{step}", {"rmse": rmse})   # the record
+            tracked.log_metrics({"rmse": rmse}, step=step)        # the view
+        tracked.log_artifact(record.path / "provenance.json")
+        print("mlflow run id:", tracked.run_id)
+
+
+run("demo", Path("runs/demo-0001"), provenance=provenance)
+```
+
+With no `MLFLOW_TRACKING_URI` it prints `tracking enabled: False` and
+`mlflow run id: None`, writes the record, and reaches MLflow not at all. With
+one, the same code puts a run in MLflow carrying `heph.run_id`,
+`heph.run_class`, `heph.config_hash`, `heph.data_hash` and — when the run has
+them — `heph.deps_hash` and `heph.code_sha`. Either way the record on disk is
+identical, which is the property worth having: the numbers do not depend on
+whether anyone was watching.
+
+(Run the script in a directory with no `uv.lock` beside it, as above, and
+`deps_hash` is `null`, so no `heph.deps_hash` tag appears at all. That is the
+omission rule below, not a dropped tag.)
+
+## The tags
+
+The six scalar members of [spec 7.1](/spec#7-provenance-record), exported as
+constants — `TAG_RUN_ID`, `TAG_RUN_CLASS`, `TAG_CONFIG_HASH`, `TAG_DATA_HASH`,
+`TAG_DEPS_HASH`, `TAG_CODE_SHA` — so a consumer matches on a name this module
+owns rather than a string it spelled itself. They are prefixed `heph.` because
+MLflow's own tags live under `mlflow.` and an unprefixed `run_id` would read
+like one of them.
+
+A member that is `None` is **omitted rather than tagged**. A `provenance-only`
+run has no `code_sha` and no `deps_hash`, and a tag reading `"None"` is exactly
+the plausible wrong value this kit exists to refuse: absent says absent.
+`environment` is not tagged at all — it is descriptive, it is not compared, and
+it is the member [spec 7.5](/spec#7-provenance-record) keeps free of hostnames
+and paths.
+
+## One run at a time: an inner `tracked_run` is not tracked
+
+MLflow allows only one active run per process, and this module never passes
+`nested=True`. So a `tracked_run` entered **inside** another one is silently
+untracked: it enters, it warns, and its metrics go nowhere. The outer run is
+untouched and keeps its own metrics — that is the deliberate part, because the
+alternative was a cleanup that ended the outer run and marked it `FAILED`, which
+is a far worse failure than a missing inner row.
+
+It will bite anyone doing per-fold or per-trial tracking, and the answer is the
+one [`lab.record`](/modules/lab.record) already gives: **record the folds as
+cells in the one run** rather than nesting runs. A cell per fold in a single
+record is the shape this spine is built for — `read_record` gives them back as
+rows and [`lab.replay`](/modules/lab.replay) diffs them cell by cell, so a
+divergence says which fold moved. Nest `tracked_run` and you get neither that
+nor an MLflow row; use one tracked run around the whole thing and
+`log_metrics(..., step=fold)` for the per-fold numbers.
+
+## Nothing here raises on MLflow's behalf
+
+`tracked_run` always enters, whether or not anything is configured, so the body
+is written once and the `with` statement is not a conditional. Every method on
+the handle is best-effort: a failed `log_metrics` warns and the run continues.
+
+The one exception is the body itself. An exception out of your code closes the
+MLflow run as `FAILED` and then **propagates** — the experiment's failures are
+the experiment's, and only *tracking* failures are swallowed here.
+
+`is_enabled()` is a cheap probe: it reads one environment variable and imports
+nothing, so expensive artifact preparation can be guarded with it without paying
+for mlflow to decide. An URI exported as `MLFLOW_TRACKING_URI=`, which is how CI
+usually unsets one, means off rather than "track against the empty string".

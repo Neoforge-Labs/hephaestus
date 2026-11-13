@@ -1,0 +1,110 @@
+---
+title: "lab.config"
+---
+
+# lab.config
+
+`hephkit.lab.config` resolves an experiment's configuration from four layers —
+defaults, a JSON file, the environment, the command line, each beating the one
+before it — validates the result against a pydantic model, and gives you its
+content hash. That hash is what a run record stores as `config_hash`, so "which
+configuration produced this number" has an answer that is a digest rather than a
+memory.
+
+Maturity: **`experimental`**. The API may change, and per
+[ADR 0015](/adrs/0015-maturity-levels) nothing below `stable` may sit in a
+production money path. Why the research spine is its own distribution is
+[ADR 0023](/adrs/0023-hephkit-lab-ships-separately); why integrity comes before
+capability is [ADR 0022](/adrs/0022-research-integrity-is-the-spine).
+
+## Installing
+
+`hephkit-lab` is not on PyPI yet — [ADR 0023](/adrs/0023-hephkit-lab-ships-separately)
+records the precondition on publishing it — so install both portions of the
+`hephkit` namespace package out of a checkout of this repository:
+
+```bash
+uv add --editable ./python/hephkit ./python/hephkit-lab
+```
+
+Nothing heavy comes with it: the spine's only dependencies are `hephkit` and
+pydantic.
+
+## An example
+
+Save this as `demo.py` and run `uv run python demo.py --optim.lr=0.01`.
+
+```python
+import sys
+from pathlib import Path
+
+from hephkit.lab.config import ConfigError, ExperimentConfig, config_hash, resolve
+from pydantic import BaseModel
+
+
+class Optim(BaseModel):
+    lr: float = 0.001
+    momentum: float = 0.9
+
+
+class TrainConfig(ExperimentConfig):
+    seed: int = 7
+    epochs: int = 10
+    optim: Optim = Optim()
+
+
+Path("config.json").write_text('{"epochs": 40}')
+
+cfg = resolve(
+    TrainConfig,
+    file=Path("config.json"),      # beats the model defaults
+    env={"HEPH_LAB_SEED": "20261112"}, # beats the file
+    argv=sys.argv[1:],             # beats the environment
+)
+print(cfg)
+print("config_hash:", config_hash(cfg))
+
+try:
+    resolve(TrainConfig, env={"HEPH_LAB_OPTIM__LR": "not-a-number"})
+except ConfigError as exc:
+    print(f"refused: field={exc.field} layer={exc.layer}")
+```
+
+It prints the resolved config — `epochs=40` from the file, `seed=20261112` from
+the environment, `optim.lr=0.01` from the command line — then its hash, then the
+refusal, which names both the member at fault and the layer that supplied it.
+
+## The conventions it fixes
+
+The spec does not settle how a layer is spelled, so this module does:
+
+- **Environment.** Only `HEPH_LAB_`-prefixed names are read, and `__` separates
+  nesting levels: `HEPH_LAB_OPTIM__LR` sets `optim.lr`. The prefix is
+  `HEPH_LAB_` rather than `HEPH_` because `hephkit.settings` owns `HEPH_` for
+  service settings (`HEPH_ENV`, `HEPH_SERVICE_NAME`, `HEPH_DATABASE_URL`,
+  `HEPH_LOG_LEVEL`); a lab config that read the whole `HEPH_` namespace would
+  see those names, find that your model does not declare them, and refuse every
+  run in any process that has them set.
+- **Command line.** `--<dotted.path>=<value>` or `--<dotted.path> <value>`.
+  There are no implicit booleans — write `--flag=true` — and a repeated option
+  takes its last value, for the same reason a later layer beats an earlier one.
+- **Scalars** from either layer are read as JSON when they parse as JSON and as
+  the raw string otherwise, so `--seed=7` is the integer `7` and `--name=resnet`
+  is the string `"resnet"`.
+- **The file layer is JSON, and only JSON.** YAML is what a researcher reaches
+  for and it is deliberately absent: it would put a parser in the spine that
+  [ADR 0023](/adrs/0023-hephkit-lab-ships-separately) keeps out of it.
+
+## What it refuses
+
+Every refusal is a [HEPH-LAB-422](/errors/HEPH-LAB-422) carrying the dotted path
+of the member at fault and the layer that set it, because the fix belongs in the
+layer rather than in the resolved object. A config **file** that is absent rather
+than wrong is [HEPH-LAB-424](/errors/HEPH-LAB-424) — `MissingConfigError`, a
+subclass, so one `except ConfigError` covers both and `.code` tells them apart.
+
+`ExperimentConfig` is frozen and closed to extras. Frozen because resolution is
+the single point at which a config comes into being: the object `resolve`
+returns is the object `config_hash` hashes, and there is no later assignment the
+hash would not see. Closed so a typo cannot ride along as a member the model
+never declared.

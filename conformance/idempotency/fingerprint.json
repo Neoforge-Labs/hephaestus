@@ -1,6 +1,6 @@
 {
   "suite": "idempotency.fingerprint",
-  "spec": "0.4.0",
+  "spec": "0.5.0",
   "description": "Request fingerprints (heph-spec 2.2). Each case carries the JCS string as well as the fingerprint, so a failure says which of the four steps went wrong rather than only that a digest differed. A body is the parsed JSON value for a JSON media type, \"sha256:<hex of the raw bytes>\" for any other, and null when there is no body.",
   "source": "RFC 8785 (JCS) by way of the rfc8785 reference package, SHA-256 from the Python standard library, and heph-spec 2.2 including its worked example. No Hephaestus implementation was run; see tools/gen_idempotency_vectors.py.",
   "cases": [

@@ -20,6 +20,10 @@ MONEY_422: Final = "HEPH-MONEY-422"
 MONEY_409: Final = "HEPH-MONEY-409"
 WH_401: Final = "HEPH-WH-401"
 DB_503: Final = "HEPH-DB-503"
+LAB_422: Final = "HEPH-LAB-422"
+LAB_409: Final = "HEPH-LAB-409"
+LAB_424: Final = "HEPH-LAB-424"
+LAB_412: Final = "HEPH-LAB-412"
 
 # code -> (HTTP status, title)
 REGISTRY: dict[str, tuple[int, str]] = {
@@ -36,6 +40,10 @@ REGISTRY: dict[str, tuple[int, str]] = {
     "HEPH-MONEY-409": (409, "Currency mismatch"),
     "HEPH-WH-401": (401, "Webhook signature invalid or expired"),
     "HEPH-DB-503": (503, "Database connection unavailable"),
+    "HEPH-LAB-422": (422, "Experiment config failed validation"),
+    "HEPH-LAB-409": (409, "Replay diverged from its record"),
+    "HEPH-LAB-424": (424, "Required record, manifest or frozen input is missing"),
+    "HEPH-LAB-412": (412, "Integrity gate failed"),
 }
 
 # code -> guidance for the caller, used as the default problem `detail`
@@ -53,4 +61,8 @@ DETAIL_HINTS: dict[str, str] = {
     "HEPH-MONEY-409": "This operation mixes two different currencies; both amounts must use the same currency.",
     "HEPH-WH-401": "The webhook signature is invalid or has expired.",
     "HEPH-DB-503": "The service could not get a database connection in time. Retry the request in a few moments.",
+    "HEPH-LAB-422": "The experiment configuration failed validation. Each offending field and the rule it broke is listed under errors.",
+    "HEPH-LAB-409": "The replay did not reproduce the recorded run. The difference report names every value that differs.",
+    "HEPH-LAB-424": "A run record, dataset manifest or frozen input that this operation depends on is missing. Produce it, then retry.",
+    "HEPH-LAB-412": "An integrity gate failed, so the operation did not proceed. The response names the gate and what it found.",
 }

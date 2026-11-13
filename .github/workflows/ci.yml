@@ -74,6 +74,39 @@ jobs:
   docs:
     uses: ./.github/workflows/docs-ci.yml
 
+  # The in-repo replay gate: section 11 of the lab research-core design makes it
+  # that stream's whole phase gate. A fixture records a run, replays it with the
+  # network blocked and matches, a perturbed frozen input produces a diff naming
+  # the value that moved, and every lab.gates check refuses a violating fixture.
+  #
+  # Inline rather than a reusable workflow, and a job of its own rather than a
+  # step in python-ci: it is Docker-free and needs only uv, so it is the one
+  # part of that gate that can run on every pull request, and a failure here
+  # should name the gate rather than the Python job.
+  lab-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # lab.repro resolves HEAD in this checkout, and moon compares against
+          # the base branch on a pull_request; a shallow clone has no merge base
+          # to resolve and its git call fails with exit 128.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.6' # keep equal to uv in .prototools
+          python-version: '3.12'
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          moon-version: '2.6.5'
+      # The pinned toolchain in rust-toolchain.toml is installed by rustup on
+      # first use: the example depends on the hephkit portion of the namespace
+      # package, whose PyO3 extension is built from source.
+      - name: The in-repo replay gate
+        run: moon run examples-lab-replay:gate
+
   five-minute:
     uses: ./.github/workflows/five-minute.yml
     with:

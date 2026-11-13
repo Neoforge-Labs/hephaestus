@@ -1,0 +1,149 @@
+---
+title: "lab.replay"
+---
+
+# lab.replay
+
+`hephkit.lab.replay` is [spec section 9](/spec#9-replay-and-diff) in Python:
+re-execute a recorded run and diff the result. It compares the four
+determinism-contract members of the provenance record and the rows, by cell name
+and value name — and nothing else. The thing a reviewer actually reads is the
+diff report, which names every position that moved and the two values found
+there, so "it did not reproduce" becomes "`evaluate`/`rmse` was 0.2399 and is now
+0.2985".
+
+Maturity: **`experimental`**. The API may change, and per
+[ADR 0015](/adrs/0015-maturity-levels) nothing below `stable` may sit in a
+production money path. Why `environment` takes no part in the comparison is
+[ADR 0024](/adrs/0024-provenance-record-splits-hashes-from-environment).
+
+## Installing
+
+`hephkit-lab` is not on PyPI yet — [ADR 0023](/adrs/0023-hephkit-lab-ships-separately)
+records the precondition on publishing it — so install both portions of the
+`hephkit` namespace package out of a checkout of this repository:
+
+```bash
+uv add --editable ./python/hephkit ./python/hephkit-lab
+```
+
+## An example: the diff a perturbed input produces
+
+Save this as `demo.py` and run `uv run python demo.py`.
+
+```python
+import json
+from pathlib import Path
+
+from hephkit.hashing import content_hash
+from hephkit.lab.record import RunRecord, register, run
+from hephkit.lab.replay import ReplayError, replay
+from hephkit.lab.repro import capture
+
+DATA = {"values": [2.0, 4.0, 6.0, 8.0]}
+
+
+@register("mean")
+def mean(record: RunRecord) -> None:
+    values = DATA["values"]
+    record.append_row("mean", {"mean": sum(values) / len(values), "n": len(values)})
+
+
+def provenance(run_id: str):
+    # Captured by the caller, never taken from the record being replayed: the
+    # whole point is to compare what this execution is against what that one was.
+    return capture(
+        run_id=run_id,
+        config_hash=content_hash({"statistic": "mean"}),
+        data_hash=content_hash(DATA),
+        repo=Path("."),
+    )
+
+
+run("mean", Path("runs/first"), provenance=provenance("first"))
+
+matched = replay(
+    Path("runs/first"), experiment="mean", into=Path("runs/again"),
+    provenance=provenance("again"),
+)
+print("same input ->", matched.as_document())
+
+DATA["values"][-1] = 9.0          # one input value moves
+report = replay(
+    Path("runs/first"), experiment="mean", into=Path("runs/perturbed"),
+    provenance=provenance("perturbed"),
+)
+print("perturbed input ->")
+print(json.dumps(report.as_document(), indent=2))
+
+try:
+    report.raise_if_diverged()
+except ReplayError as exc:
+    print("refused:", exc)
+```
+
+The first replay matches and carries no difference. The second prints a report
+like this:
+
+```json
+{
+  "matched": false,
+  "record_unfinished": false,
+  "differences": [
+    {
+      "cell": null,
+      "key": "data_hash",
+      "recorded": "sha256:0e2c…",
+      "replayed": "sha256:7a41…"
+    },
+    {
+      "cell": "mean",
+      "key": "mean",
+      "recorded": 5.0,
+      "replayed": 5.25
+    }
+  ]
+}
+```
+
+Two positions, and together they are the finding: the frozen input is not the
+one the record names, and here is the number that moved because of it. A
+difference whose `cell` is `null` is a member of the determinism contract; one
+with both a `cell` and a `key` is a row value.
+
+## A replay reports; it does not refuse
+
+`replay` and `compare` return a report ([spec 9.1](/spec#9-replay-and-diff)).
+`raise_if_diverged()` is the one line a caller that needs a refusal writes — a
+CI gate asking whether a cited run still reproduces — and it raises
+[HEPH-LAB-409](/errors/HEPH-LAB-409) naming every position, because the naming
+is the finding. [`lab.gates`](/modules/lab.gates) takes such a callable as its
+`replay_check`.
+
+## What is compared, and what is deliberately not
+
+Compared: `config_hash`, `data_hash`, `deps_hash`, `code_sha`, and the rows by
+cell name and value name. Not compared, each for its own reason:
+
+- **`environment`** — descriptive, so two records that differ only in the
+  machine that produced them are not a divergence
+  ([ADR 0024](/adrs/0024-provenance-record-splits-hashes-from-environment)).
+- **`run_id`** — the re-execution is a different run and says so.
+- **`class`** — whether the re-execution could be promised to reproduce is not a
+  fact about whether it did.
+- **The summary** — every member of it is derived from the rows, and
+  `read_record` has already refused a record whose stored summary disagrees, so
+  comparing it would compare the rows a second time under another name.
+- **The order of the rows** — a record is a set of cells, not a sequence.
+
+Floats are compared with a relative tolerance of `1e-9` and an absolute floor of
+`1e-12`, and by kind first: a number and a string at one position are a
+difference, never a coercion.
+
+## The report is read off disk, not out of memory
+
+The re-execution's record is read back from the filesystem rather than compared
+as the live object `run` returned. A row's value order is canonical only once it
+has been written, reading it back is what the record will be read as when it is
+published, and it puts the re-execution through the same reader — summary check
+included — as the record it is compared against.

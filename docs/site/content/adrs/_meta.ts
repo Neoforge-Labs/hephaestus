@@ -24,7 +24,11 @@ const meta: MetaRecord = {
   "0017-full-iso-4217-currency-table": "0017. Generate the full ISO 4217 currency table, funds codes included",
   "0018-disambiguate-the-name-atlas": "0018. Disambiguate the name \"Atlas\" across ADRs 0013 and 0014",
   "0019-the-public-domain-is-hephkit-dev": "0019. The public domain is hephkit.dev",
-  "0020-idempotency-storage-boundaries": "0020. Idempotency storage boundaries"
+  "0020-idempotency-storage-boundaries": "0020. Idempotency storage boundaries",
+  "0021-hephkit-is-a-namespace-package": "0021. hephkit is a namespace package",
+  "0022-research-integrity-is-the-spine": "0022. Research integrity is the spine of hephkit.lab",
+  "0023-hephkit-lab-ships-separately": "0023. hephkit-lab ships separately and Ligase stays a leaf",
+  "0024-provenance-record-splits-hashes-from-environment": "0024. The provenance record splits normative hashes from a descriptive environment"
 }
 
 export default meta
