@@ -90,8 +90,19 @@ check "the record holds the evaluation metrics it produced" \
 # worktree (a developer running the gate mid-edit) classifies `provenance-only`
 # legitimately, so there either class is accepted -- and this check still runs
 # and can still fail, rather than quietly skipping itself.
+#
+# The condition tests two things because an empty `git status --porcelain` means
+# either of them: a clean tree, or no git work tree at all. Only the first earns
+# `deterministic` -- 7.1 nulls `code_sha` where no commit identifies the code and
+# 7.2 then makes the run `provenance-only` -- so testing emptiness alone would
+# demand `deterministic` from a run that cannot earn it. This gate is in-repo by
+# design (see the header: Docker-free, not checkout-free), and outside a work
+# tree most of its other checks fail anyway, so the second state is not a
+# supported mode and this costs the gate no strength. The condition simply says
+# what it means, rather than reading as "if the tree is dirty" and meaning less.
 earned_class() {
-  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
+    [ -n "$(git status --porcelain 2>/dev/null)" ]; then
     says '^RECORD run_id=fixture-baseline class=(deterministic|provenance-only) complete=yes' record
   else
     says '^RECORD run_id=fixture-baseline class=deterministic complete=yes' record

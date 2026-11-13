@@ -78,9 +78,13 @@ refusal, which names both the member at fault and the layer that supplied it.
 
 The spec does not settle how a layer is spelled, so this module does:
 
-- **Environment.** Only `HEPH_`-prefixed names are read, so an unrelated
-  variable is never a config value, and `__` separates nesting levels:
-  `HEPH_LAB_OPTIM__LR` sets `optim.lr`.
+- **Environment.** Only `HEPH_LAB_`-prefixed names are read, and `__` separates
+  nesting levels: `HEPH_LAB_OPTIM__LR` sets `optim.lr`. The prefix is
+  `HEPH_LAB_` rather than `HEPH_` because `hephkit.settings` owns `HEPH_` for
+  service settings (`HEPH_ENV`, `HEPH_SERVICE_NAME`, `HEPH_DATABASE_URL`,
+  `HEPH_LOG_LEVEL`); a lab config that read the whole `HEPH_` namespace would
+  see those names, find that your model does not declare them, and refuse every
+  run in any process that has them set.
 - **Command line.** `--<dotted.path>=<value>` or `--<dotted.path> <value>`.
   There are no implicit booleans — write `--flag=true` — and a repeated option
   takes its last value, for the same reason a later layer beats an earlier one.
