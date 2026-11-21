@@ -28,13 +28,12 @@ Reading frames, querying, and snapshots need the `data` extra (polars, DuckDB,
 PyArrow and DVC):
 
 ```bash
-uv add --editable ./python/hephkit ./python/hephkit-lab
-uv add polars duckdb pyarrow dvc
+uv add --editable ./python/hephkit "./python/hephkit-lab[data]"
 ```
 
-The second line is separate only because the first install is a path and not a
-published name: once the distribution is on PyPI, `hephkit-lab[data]` is the one
-line. Nothing in the extra is imported until a function that needs it is called,
+The extra is the authority: it is what `MissingExtraError` names, and it carries
+the version floors (polars, DuckDB, PyArrow and DVC today). Once the distribution
+is on PyPI the same extra is `hephkit-lab[data]`. Nothing in the extra is imported until a function that needs it is called,
 and one that cannot find it raises `MissingExtraError` naming the extra, so
 `import hephkit.lab.data` works on a spine-only install.
 
@@ -82,7 +81,8 @@ write_manifest(manifest, root.parent / "cohort.manifest.json")
 manifest = read_manifest(root.parent / "cohort.manifest.json")
 verify_manifest(manifest, root)
 print(read_frame(manifest, root=root, file="visits.csv").shape)
-print(query(manifest, root=root, sql='SELECT sum(visits) AS total FROM "visits.csv"'))
+total = query(manifest, root=root, sql='SELECT sum(visits)::BIGINT AS total FROM "visits.csv"')
+print(total["total"].item())
 
 # Date to release: the release that date would have seen, never a later one.
 releases = [
@@ -111,14 +111,7 @@ characters by the script; the full message names both digests):
 ```text
 data_hash: sha256:0fc3da3fae7ac9389ec082b86e24c5b82a2778e2e8404ca97bd815adebefeab1
 (3, 2)
-shape: (1, 1)
-┌───────────────┐
-│ total         │
-│ ---           │
-│ decimal[38,0] │
-╞═══════════════╡
-│ 12            │
-└───────────────┘
+12
 2026-q1
 refused: no release was published on or before 2026-03-01
 refused: 'visits.csv': the manifest says sha256 68a0335c4574420911122aff53746f6790eff4eda ...
@@ -145,6 +138,7 @@ refused: 'visits.csv': the manifest says sha256 68a0335c4574420911122aff53746f67
 ## Notes
 
 > Visit counts only.
+
 ```
 
 The `data_hash` is the value a run record stores. It is the same on any machine

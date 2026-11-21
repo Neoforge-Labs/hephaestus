@@ -26,13 +26,12 @@ and `choose_test` are arithmetic and data, and need nothing more. Only the
 bootstrap needs the `stats` extra (SciPy, which brings NumPy):
 
 ```bash
-uv add --editable ./python/hephkit ./python/hephkit-lab
-uv add scipy
+uv add --editable ./python/hephkit "./python/hephkit-lab[stats]"
 ```
 
-The second line is separate only because the first install is a path and not a
-published name: once the distribution is on PyPI, `hephkit-lab[stats]` is the one
-line. `bootstrap_ci` and `aggregate_seeds` import SciPy when they compute, not
+The extra is the authority: it is what `MissingExtraError` names, and it carries
+the SciPy version floor. Once the distribution is on PyPI the same extra is
+`hephkit-lab[stats]`. `bootstrap_ci` and `aggregate_seeds` import SciPy when they compute, not
 when the module loads, and refuse a bad sample *before* importing it, so a
 refusal works without the extra installed.
 
