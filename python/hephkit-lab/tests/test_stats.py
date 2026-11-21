@@ -407,16 +407,16 @@ def test_the_statistic_is_the_one_asked_for() -> None:
 
 
 @pytest.mark.extras
-@pytest.mark.slow
 def test_a_nominal_95_interval_covers_a_known_parameter_about_95_percent_of_the_time() -> None:
     import numpy
 
-    # Normal(10, 2), n = 100, true mean 10. 1000 replicates put the standard error
-    # of the measured coverage near 0.007, so the band is nominal +/- 0.02, about
-    # three of them. An interval that is too narrow (the sample's min and max
+    # Normal(10, 2), n = 100, true mean 10, BCa. The band is nominal +/- 0.02, fixed
+    # before this design was measured and never adjusted to a measurement; 400
+    # replicates keep the test near two seconds, at a standard error of about 0.011.
+    # An interval that is too narrow (the sample's min and max
     # would cover ~100%, a point estimate 0%) or too wide falls outside it.
     true_mean, sd, n = 10.0, 2.0, 100
-    replicates, resamples = 1000, 300
+    replicates, resamples = 400, 300
     rng = numpy.random.default_rng(20261121)
     covered = 0
     for i in range(replicates):

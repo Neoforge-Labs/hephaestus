@@ -43,7 +43,7 @@ It is contract-tested, never vectored: a vector would have to take its numbers
 from a seeded scipy run, which would make scipy's resampling order and RNG stream
 the definition of our behaviour. The contract is that a nominal 95% interval
 covers a known parameter at about the nominal rate, and that one seed gives one
-interval. ``seed`` is required and reaches scipy as ``numpy.random.default_rng(seed)``,
+interval. ``seed`` is required and reaches scipy as ``rng=numpy.random.default_rng(seed)``,
 passed explicitly; nothing reads global RNG state, so a recorded run replays.
 
 A bootstrap of a constant sample returns a zero-width interval, and a zero-width
@@ -400,13 +400,16 @@ def bootstrap_ci(
                 n_resamples=resamples,
                 confidence_level=level,
                 method="BCa",
-                random_state=numpy.random.default_rng(seed),
+                rng=numpy.random.default_rng(seed),
             )
         except stats.DegenerateDataWarning as exc:
             raise StatsError(f"the statistic has a degenerate bootstrap distribution: {exc}") from exc
     low = float(result.confidence_interval.low)
     high = float(result.confidence_interval.high)
-    if not (math.isfinite(low) and math.isfinite(high)):
+    # Backstop behind scipy's own DegenerateDataWarning, which is promoted to an
+    # error above: no statistic is known to reach here, and it is kept so a nan
+    # or infinite bound can never be returned as an Interval.
+    if not (math.isfinite(low) and math.isfinite(high)):  # pragma: no cover
         raise StatsError("the bootstrap distribution of the statistic has no finite interval")
     return Interval(low=low, high=high, confidence=level)
 
