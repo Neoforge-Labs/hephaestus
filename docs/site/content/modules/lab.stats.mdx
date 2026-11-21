@@ -185,9 +185,13 @@ d via numpy:      3.7
 same interval as from a list: True
 ```
 
-A `str` and a `bytes` stay refused, because iterating one would read characters
-as observations. A `bool` stays refused too, in a NumPy array as in a list: `True`
-as an observation is a mistake, not a 1.
+Three iterables stay refused, because iterating each yields something other than
+the observations: a `str` or `bytes` (characters), a mapping (its *keys* — pass
+`.values()`, since `{seed: metric}` is what
+[`aggregate_seeds`](#across-seeds) takes), and a `set` (which has already dropped
+every repeated observation, so its variance is not the sample's). A `bool` stays
+refused too, in a NumPy array as in a list: `True` as an observation is a
+mistake, not a 1.
 
 ## Choosing a test
 

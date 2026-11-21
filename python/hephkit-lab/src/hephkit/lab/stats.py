@@ -43,7 +43,9 @@ observation has no sample variance; two constant samples have a pooled deviation
 of 0, so *d* is ``0/0`` when the means agree and an infinity when they do not.
 Each is :class:`StatsError` (``HEPH-LAB-422``), as are an empty sample, a value
 that is not a finite real number (``nan``, ``inf``, a ``bool``, a string) and a
-sample that is itself a ``str`` or ``bytes``. A sample may be any other
+sample that is itself a ``str``, ``bytes``, mapping or set -- iterating any of
+those yields something other than the observations (characters, a mapping's
+keys, or a set that has already dropped every repeat). A sample may be any other
 iterable, so a polars ``Series`` or a NumPy array composes with these functions
 directly. Cliff's *delta* has no variance term, so a single observation or a
 fully tied pair is a defined value (0 for all ties), not a refusal; it still
@@ -122,7 +124,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence, Set as AbstractSet
 from enum import StrEnum
 from numbers import Real
 from statistics import fmean as mean
@@ -158,13 +160,22 @@ class StatsError(ValueError):
 def _sample(values: Iterable[float], name: str) -> list[float]:
     """Validate one sample and return it as floats: finite real numbers, in order.
 
-    Any iterable that is not a ``str`` or ``bytes`` is accepted and materialised
-    with ``list()``. That is deliberately wider than ``Sequence``: a polars
+    Any iterable is accepted and materialised with ``list()``, except the three
+    kinds below. That is deliberately wider than ``Sequence``: a polars
     ``Series`` and a NumPy ``ndarray`` are neither, so ``cohens_d(frame["a"],
     frame["b"])`` -- the obvious composition of :mod:`hephkit.lab.data` with
-    this module -- was refused, and so was ``.to_numpy()``. A ``str`` or
-    ``bytes`` stays refused: it is iterable, and iterating it would read
-    characters as observations.
+    this module -- was refused, and so was ``.to_numpy()``.
+
+    Three iterables are refused, each because iterating it yields something
+    other than the observations the caller meant:
+
+    * a ``str`` or ``bytes``, whose items are characters and bytes;
+    * a ``Mapping``, whose items are its *keys*. ``{seed: metric}`` is the
+      shape :func:`aggregate_seeds` takes, so passing one here is a real
+      mistake, and reading the seeds as the measurements would answer with a
+      number that is wrong and plausible at once. Pass ``.values()``;
+    * a ``set`` or ``frozenset``, which has already dropped every repeated
+      observation, so its variance is not the sample's.
 
     Each value must be a :class:`numbers.Real`, which ``numpy.int64`` and
     ``numpy.float64`` are and ``int``/``float`` alone are not, so
@@ -173,8 +184,11 @@ def _sample(values: Iterable[float], name: str) -> list[float]:
     observation even though it is an ``int``, and a non-finite value is not a
     measurement.
     """
-    if isinstance(values, str | bytes) or not isinstance(values, Iterable):
-        raise StatsError(f"sample {name!r} must be an iterable of numbers, not {type(values).__name__}")
+    if isinstance(values, str | bytes | Mapping | AbstractSet) or not isinstance(values, Iterable):
+        raise StatsError(
+            f"sample {name!r} must be an iterable of numbers in the order they were "
+            f"observed, not {type(values).__name__}"
+        )
     materialised = list(values)
     if not materialised:
         raise StatsError(f"sample {name!r} is empty")

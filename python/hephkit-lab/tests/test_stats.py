@@ -185,6 +185,28 @@ def test_a_string_is_not_a_sample() -> None:
         cliffs_delta(b"abc", [1, 2])  # type: ignore[arg-type]
 
 
+def test_a_mapping_or_a_set_is_not_a_sample() -> None:
+    """Iterable, and refused, because iterating either is not reading observations.
+
+    A `{seed: metric}` mapping is the shape `aggregate_seeds` takes, so handing
+    one to an effect size is a mistake somebody will make -- and iterating it
+    yields the *seeds*. A set has already dropped every repeated observation, so
+    its variance is not the sample's. Both would answer with a number that is
+    wrong and plausible at once, which is what this module exists not to do.
+    """
+    metrics = {0: 0.91, 1: 0.93, 2: 0.95}
+    for bad in (metrics, metrics.keys(), {2.0, 9.0}, frozenset({2.0, 9.0})):
+        with pytest.raises(StatsError, match="in the order they were observed"):
+            cohens_d(bad, [0.80, 0.82, 0.84])  # type: ignore[arg-type]
+        with pytest.raises(StatsError):
+            cliffs_delta(bad, [0.80, 0.82, 0.84])  # type: ignore[arg-type]
+    # `.values()` is the honest way to pass a mapping's measurements, and is not
+    # a set view, so it is accepted.
+    assert cohens_d(metrics.values(), [0.80, 0.82, 0.84]) == cohens_d(
+        [0.91, 0.93, 0.95], [0.80, 0.82, 0.84]
+    )
+
+
 def test_any_other_iterable_is_a_sample() -> None:
     """Wider than `Sequence`, which is what refused a frame column.
 
