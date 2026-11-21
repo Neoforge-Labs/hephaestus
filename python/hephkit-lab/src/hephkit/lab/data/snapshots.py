@@ -22,6 +22,22 @@ DVC lives behind the ``data`` extra (ADR 0023) and is imported inside the
 functions that need it, through :func:`~hephkit.lab._extras.require`, so a
 spine-only install can import this module.
 
+Which error means what: a file that arrived and disagrees with the manifest is
+``ManifestError`` (``HEPH-LAB-412``, the integrity gate found what it exists to
+find). A snapshot that could not be obtained at all -- no pointer, an
+unreachable remote, an object DVC cannot fetch -- is ``MissingManifestError``
+(``HEPH-LAB-424``, the dependency is absent, not corrupt). Only DVC's own
+exception family is translated; anything else propagates unchanged.
+
+Coupling to DVC: the snapshot pointer is stored beside DVC's object tree, at
+``<remote root>/snapshots/``, and the remote root is derived from the object
+store path DVC reports, which in DVC 3.x ends in ``files/md5``. A DVC release
+that moves that layout breaks :func:`push` and :func:`pull` at
+``_pointer_path``, which raises :class:`UnsupportedDvcLayoutError` naming the
+DVC version it found and the one the layout belongs to, rather than failing
+later with an unrelated lookup error. The pointer's md5 ids and the generated
+``.dvc`` text (``hash: md5``) are likewise DVC 3.x conventions.
+
 A snapshot is one directory of copies, so ``push`` needs room for the files it
 sends. Verification is not atomic with the copy out of scratch: a process that
 rewrites the scratch directory mid-pull is outside what this guards.
@@ -36,7 +52,7 @@ import re
 import shutil
 import tempfile
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -50,7 +66,13 @@ from hephkit.lab.data.manifest import (
     verify_manifest,
 )
 
-__all__ = ["pull", "push"]
+__all__ = ["UnsupportedDvcLayoutError", "pull", "push"]
+
+_LAYOUT_DVC = "3.x"
+
+
+class UnsupportedDvcLayoutError(RuntimeError):
+    """The installed DVC lays out its remote differently from the layout this module relies on."""
 
 _REMOTE = "snapshot"
 _DATA = "data"
@@ -83,10 +105,17 @@ def _scratch_repo(remote: str) -> Iterator[tuple[Any, Path]]:
 
 def _pointer_path(odb: Any, manifest: Manifest) -> str:
     """Where the pointer for ``manifest`` lives: beside DVC's ``files/md5`` tree, named by hash."""
+    objects = posixpath.normpath(str(odb.path))
+    files_dir = posixpath.dirname(objects)
+    if posixpath.basename(objects) != "md5" or posixpath.basename(files_dir) != "files":
+        installed = getattr(require("dvc", extra="data"), "__version__", "unknown")
+        raise UnsupportedDvcLayoutError(
+            f"DVC {installed} reports its object store at {odb.path!r}, not under "
+            f"'<remote>/files/md5' as DVC {_LAYOUT_DVC} lays it out; snapshot pointers "
+            "cannot be placed beside it"
+        )
     hex_digest = data_hash(manifest).split(":", 1)[-1]
-    return posixpath.join(
-        posixpath.dirname(posixpath.dirname(odb.path)), _POINTER_DIR, f"{hex_digest}.json"
-    )
+    return posixpath.join(posixpath.dirname(files_dir), _POINTER_DIR, f"{hex_digest}.json")
 
 
 def push(manifest: Manifest, *, root: Path, remote: str) -> None:
@@ -118,14 +147,21 @@ def push(manifest: Manifest, *, root: Path, remote: str) -> None:
         odb.fs.pipe_file(location, json.dumps(pointer, sort_keys=True).encode("utf-8"))
 
 
-def _read_pointer(odb: Any, manifest: Manifest) -> str:
-    """The DVC directory id of the snapshot of ``manifest``, or refuse (it is not trusted)."""
+def _read_pointer(repo: Any, manifest: Manifest, remote: str, dvc_exceptions: ModuleType) -> str:
+    """The DVC directory id of the snapshot of ``manifest``, or refuse (it is not trusted).
+
+    A remote DVC cannot open or read is a snapshot that is absent (424), not one
+    that is corrupt.
+    """
     try:
+        odb = repo.cloud.get_remote_odb(_REMOTE)
         raw = odb.fs.cat_file(_pointer_path(odb, manifest))
         md5 = json.loads(raw)["md5"]
+    except dvc_exceptions.DvcException as exc:
+        raise MissingManifestError(f"could not read a snapshot from remote {remote!r}: {exc}") from exc
     except FileNotFoundError as exc:
         raise MissingManifestError(
-            f"the remote holds no snapshot of data_hash {data_hash(manifest)}"
+            f"remote {remote!r} holds no snapshot of data_hash {data_hash(manifest)}"
         ) from exc
     except (ValueError, KeyError, TypeError) as exc:
         raise ManifestError(f"the remote's snapshot pointer is not valid: {exc}") from exc
@@ -166,12 +202,12 @@ def _place(source: Path, destination: Path) -> None:
         with os.fdopen(handle, "wb") as out, source.open("rb") as arrived:
             shutil.copyfileobj(arrived, out)
         os.replace(name, destination)
-    except BaseException:
+    except BaseException:  # pragma: no cover - cleanup of a half-copied temp file on an I/O failure
         Path(name).unlink(missing_ok=True)
         raise
 
 
-def _fetch(repo: Any, work: Path, md5: str, dvc_exceptions: ModuleType) -> Path:
+def _fetch(repo: Any, work: Path, md5: str, remote: str, dvc_exceptions: ModuleType) -> Path:
     """Check the snapshot ``md5`` out of the remote into ``work`` and return the directory."""
     (work / f"{_DATA}.dvc").write_text(
         # `hash: md5` is what makes DVC 3 look for the id as pushed; without it the
@@ -182,9 +218,11 @@ def _fetch(repo: Any, work: Path, md5: str, dvc_exceptions: ModuleType) -> Path:
     try:
         repo.pull()
     except dvc_exceptions.DvcException as exc:
-        # DVC re-hashes what it fetches, so a damaged object stops here, before
-        # anything reaches a verification of ours.
-        raise ManifestError(f"the snapshot did not arrive intact: {exc}") from exc
+        # Failing to obtain the snapshot is absence (424), not corruption: a
+        # digest disagreement is only ever found by `verify_manifest` (412).
+        raise MissingManifestError(
+            f"the snapshot could not be fetched from remote {remote!r}: {exc}"
+        ) from exc
     return work / _DATA
 
 
@@ -194,16 +232,23 @@ def pull(manifest: Manifest, *, into: Path, remote: str) -> None:
     What arrives is distrusted. It is fetched into scratch space and checked with
     ``verify_manifest`` there; a file whose bytes disagree with the manifest's
     digests, or that is missing, raises ``ManifestError`` (``HEPH-LAB-412``) and
-    ``into`` is left exactly as it was. A snapshot the remote never received is
-    ``MissingManifestError`` (``HEPH-LAB-424``). Every destination path is
+    ``into`` is left exactly as it was. A snapshot that cannot be obtained -- the
+    remote never received it, is unreachable, or lacks an object -- is
+    ``MissingManifestError`` (``HEPH-LAB-424``), never 412. Every destination path is
     resolved before anything is written, and one that leaves ``into`` (a symlink
     inside it points out) is refused with ``ManifestError``. Only files the
     manifest names are written.
     """
     dvc_exceptions = require("dvc.exceptions", extra="data")
-    with _scratch_repo(remote) as (repo, work):
-        md5 = _read_pointer(repo.cloud.get_remote_odb(_REMOTE), manifest)
-        arrived = _fetch(repo, work, md5, dvc_exceptions)
+    with ExitStack() as stack:
+        try:
+            repo, work = stack.enter_context(_scratch_repo(remote))
+        except dvc_exceptions.DvcException as exc:
+            # DVC refuses to configure a remote it does not understand: no
+            # snapshot can come from it, which is absence, not corruption.
+            raise MissingManifestError(f"remote {remote!r} cannot be used: {exc}") from exc
+        md5 = _read_pointer(repo, manifest, remote, dvc_exceptions)
+        arrived = _fetch(repo, work, md5, remote, dvc_exceptions)
         # Scratch is ours, but what DVC put in it came from the remote: a link in
         # it must not lead `verify_manifest` or the copy to a file outside it.
         base = arrived.resolve()

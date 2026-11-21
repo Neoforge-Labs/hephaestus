@@ -118,10 +118,123 @@ def test_a_pull_whose_remote_lost_an_object_is_refused(tmp_path: Path) -> None:
     victim = next(p for p in remote_objects(remote) if p.read_bytes() == FILES["raw/b.csv"])
     victim.chmod(0o644)
     victim.unlink()
-    with pytest.raises(ManifestError) as caught:
+    # An object DVC cannot fetch is a dependency that is absent (424), not a
+    # digest that disagrees (412).
+    with pytest.raises(MissingManifestError) as caught:
         pull(manifest, into=target, remote=str(remote))
-    assert caught.value.code == LAB_412
+    assert caught.value.code == LAB_424
     assert not target.exists() or listing(target) == {}
+
+
+@pytest.mark.extras
+def test_a_pull_from_a_remote_that_does_not_exist_is_missing_not_corrupt(tmp_path: Path) -> None:
+    from hephkit.lab.data.snapshots import pull
+
+    manifest = build(tmp_path / "src")
+    absent = tmp_path / "no-such-remote"
+    with pytest.raises(MissingManifestError) as caught:
+        pull(manifest, into=tmp_path / "dst", remote=str(absent))
+    assert caught.value.code == LAB_424
+    assert str(absent) in str(caught.value) or "no-such-remote" in str(caught.value)
+
+
+@pytest.mark.extras
+def test_a_pull_from_an_unreachable_remote_url_is_missing_not_corrupt(tmp_path: Path) -> None:
+    """A DVC failure while obtaining the snapshot is 424 whatever the transport."""
+    from hephkit.lab.data.snapshots import pull
+
+    manifest = build(tmp_path / "src")
+    with pytest.raises(MissingManifestError) as caught:
+        pull(manifest, into=tmp_path / "dst", remote="notaprotocol://nowhere/bucket")
+    assert caught.value.code == LAB_424
+    assert "notaprotocol://nowhere/bucket" in str(caught.value)
+
+
+@pytest.mark.extras
+def test_an_arrival_that_is_a_symlink_is_refused_even_if_its_bytes_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard between a caller's directory and a link that came off a remote."""
+    from hephkit.lab.data import snapshots
+
+    source, remote, target = tmp_path / "src", tmp_path / "remote", tmp_path / "dst"
+    manifest = build(source)
+    snapshots.push(manifest, root=source, remote=str(remote))
+    outside = tmp_path / "outside.csv"
+    outside.write_bytes(FILES["a.csv"])  # right bytes, wrong place: verification alone would pass
+    real_fetch = snapshots._fetch
+
+    def fetch_then_link(*args: object, **kwargs: object) -> Path:
+        arrived: Path = real_fetch(*args, **kwargs)  # type: ignore[arg-type]
+        (arrived / "a.csv").unlink()
+        (arrived / "a.csv").symlink_to(outside)
+        return arrived
+
+    monkeypatch.setattr(snapshots, "_fetch", fetch_then_link)
+    with pytest.raises(ManifestError, match="arrived as a link"):
+        snapshots.pull(manifest, into=target, remote=str(remote))
+    assert not target.exists() or listing(target) == {}
+
+
+@pytest.mark.extras
+def test_an_arrival_whose_directory_is_a_symlink_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hephkit.lab.data import snapshots
+
+    source, remote, target = tmp_path / "src", tmp_path / "remote", tmp_path / "dst"
+    manifest = build(source)
+    snapshots.push(manifest, root=source, remote=str(remote))
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere).mkdir()
+    (elsewhere / "b.csv").write_bytes(FILES["raw/b.csv"])
+    real_fetch = snapshots._fetch
+
+    def fetch_then_link(*args: object, **kwargs: object) -> Path:
+        arrived: Path = real_fetch(*args, **kwargs)  # type: ignore[arg-type]
+        for child in (arrived / "raw").iterdir():
+            child.unlink()
+        (arrived / "raw").rmdir()
+        (arrived / "raw").symlink_to(elsewhere, target_is_directory=True)
+        return arrived
+
+    monkeypatch.setattr(snapshots, "_fetch", fetch_then_link)
+    with pytest.raises(ManifestError, match="arrived as a link"):
+        snapshots.pull(manifest, into=target, remote=str(remote))
+
+
+@pytest.mark.extras
+def test_an_unexpected_remote_layout_fails_loudly_naming_the_dvc_version(tmp_path: Path) -> None:
+    import dvc
+
+    from hephkit.lab.data.snapshots import UnsupportedDvcLayoutError, _pointer_path
+
+    class Odb:
+        path = "bucket/some/other/layout"
+
+    manifest = build(tmp_path / "src")
+    with pytest.raises(UnsupportedDvcLayoutError) as caught:
+        _pointer_path(Odb(), manifest)
+    assert dvc.__version__ in str(caught.value)
+    assert "files/md5" in str(caught.value)
+
+
+@pytest.mark.extras
+def test_an_error_outside_dvc_propagates_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hephkit.lab.data import snapshots
+
+    source, remote = tmp_path / "src", tmp_path / "remote"
+    manifest = build(source)
+    snapshots.push(manifest, root=source, remote=str(remote))
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("not a DVC failure")
+
+    monkeypatch.setattr("dvc.repo.Repo.pull", boom)
+    with pytest.raises(RuntimeError, match="not a DVC failure"):
+        snapshots.pull(manifest, into=tmp_path / "dst", remote=str(remote))
 
 
 @pytest.mark.extras
