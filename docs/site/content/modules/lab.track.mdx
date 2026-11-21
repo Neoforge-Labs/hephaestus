@@ -25,14 +25,12 @@ records the precondition on publishing it — so install both portions of the
 behind the `track` extra, so the spine installs without it:
 
 ```bash
-uv add --editable ./python/hephkit ./python/hephkit-lab
-uv add mlflow
+uv add --editable ./python/hephkit "./python/hephkit-lab[track]"
 ```
 
-The second line is `uv add mlflow` rather than `hephkit-lab[track]` only because
-the first install is a path and not a published name: once the distribution is
-on PyPI, `hephkit-lab[track]` is the one line, and the extra is what declares
-the version floor.
+The extra is the authority: it is where the MLflow version floor lives, so a
+hand-listed `mlflow` would drop it. Once the distribution is on PyPI the same extra is
+`hephkit-lab[track]`.
 
 A tracking server is in the repository's `mlflow` Compose fragment, on host port
 54500.

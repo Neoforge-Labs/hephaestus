@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -24,9 +25,24 @@ import test_repro
 from pydantic import ValidationError, create_model
 
 from hephkit.lab.config import ConfigError, ExperimentConfig, config_hash, resolve
+from hephkit.lab.data.manifest import (
+    ManifestError,
+    data_hash,
+    parse_manifest,
+    verify_manifest,
+)
+from hephkit.lab.data.releases import Release, TemporalError, release_as_of
 from hephkit.lab.record import NONFINITE, NONFINITE_MEMBER, RunRecord, open_record, read_record
-from hephkit.lab.replay import compare
+from hephkit.lab.replay import ABSOLUTE_TOLERANCE, RELATIVE_TOLERANCE, compare
 from hephkit.lab.repro import Accelerator, ProvenanceRecord, capture
+from hephkit.lab.stats import (
+    StatsError,
+    TestRequest,
+    choose_test,
+    cliffs_delta,
+    cohens_d,
+    hedges_g,
+)
 
 ROOT = Path(__file__).resolve().parents[3] / "conformance"
 LAB = ROOT / "lab"
@@ -271,10 +287,104 @@ def run_diff(case: Case, tmp_path: Path) -> None:
     assert_member_order(report, expect)
 
 
+def run_manifest(case: Case, tmp_path: Path) -> None:
+    """One `lab.manifest` case: a manifest document in, a `data_hash` or a refusal out (spec 10)."""
+    i = case["input"]
+    expect = case["expect"]
+    for name, text in i.get("disk", {}).items():
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(text.encode("utf-8"))
+
+    def compute() -> str:
+        manifest = parse_manifest(i["manifest"])
+        if "disk" in i:
+            verify_manifest(manifest, tmp_path)
+        return data_hash(manifest)
+
+    if "error" in expect:
+        with pytest.raises(ManifestError) as exc:
+            compute()
+        assert exc.value.code == expect["error"]
+        return
+    assert compute() == expect["data_hash"]
+
+
+def run_releases(case: Case, _tmp_path: Path) -> None:
+    """One `lab.releases` case: a release table and a date in, a release label or a refusal out (spec 10.3).
+
+    Building the table is inside `compute`, not before it: a case may pin the
+    refusal of a release document (a `published` that is not a date, 10.4), and
+    that refusal is raised where the table is built.
+    """
+    i = case["input"]
+    expect = case["expect"]
+    when = date.fromisoformat(i["as_of"])
+
+    def compute() -> str:
+        table = [Release.model_validate(r) for r in i["releases"]]
+        return release_as_of(table, when).release
+
+    if "error" in expect:
+        with pytest.raises(TemporalError) as exc:
+            compute()
+        assert exc.value.code == expect["error"]
+        return
+    assert compute() == expect["release"]
+
+
+def within_tolerance(actual: float, expected: float) -> bool:
+    """Spec 9.3's float comparison: |a - b| <= max(1e-9 * max(|a|, |b|), 1e-12).
+
+    The same bound `hephkit.lab.replay` applies to a row value, with its two
+    constants imported rather than restated, so the two cannot drift apart.
+    """
+    bound = max(RELATIVE_TOLERANCE * max(abs(actual), abs(expected)), ABSOLUTE_TOLERANCE)
+    return abs(actual - expected) <= bound
+
+
+EFFECT_SIZES: dict[str, Callable[[Sequence[float], Sequence[float]], float]] = {
+    "cohens_d": cohens_d,
+    "hedges_g": hedges_g,
+    "cliffs_delta": cliffs_delta,
+}
+
+
+def run_effects(case: Case, _tmp_path: Path) -> None:
+    """One `lab.effects` case: two samples in, an effect size or a refusal out."""
+    i = case["input"]
+    expect = case["expect"]
+    statistic = EFFECT_SIZES[i["statistic"]]
+    if "error" in expect:
+        with pytest.raises(StatsError) as exc:
+            statistic(i["a"], i["b"])
+        assert exc.value.code == expect["error"]
+        return
+    actual = statistic(i["a"], i["b"])
+    assert within_tolerance(actual, expect["value"]), (actual, expect["value"])
+
+
+def run_selection(case: Case, _tmp_path: Path) -> None:
+    """One `lab.selection` case: a test request in, a test name or a refusal out."""
+    # JSON mode: a strict model takes an enum member from its JSON string, as a vector holds it.
+    request = TestRequest.model_validate_json(json.dumps(case["input"]["request"]))
+    expect = case["expect"]
+    if "error" in expect:
+        with pytest.raises(StatsError) as exc:
+            choose_test(request)
+        assert exc.value.code == expect["error"]
+        return
+    assert choose_test(request).test == expect["test"]
+
+
 RUNNERS: dict[str, Callable[[Case, Path], None]] = {
     "lab.config": run_config,
     "lab.provenance": run_record_case,
     "lab.diff": run_diff,
+    "lab.manifest": run_manifest,
+    "lab.releases": run_releases,
+    "lab.effects": run_effects,
+    "lab.selection": run_selection,
 }
 
 
@@ -382,3 +492,13 @@ def test_vector(suite: str, case: Case, tmp_path: Path) -> None:
     if runner is None:
         pytest.fail(f"no runner for suite {suite!r}")
     runner(case, tmp_path)
+
+
+def test_the_effect_comparison_is_tolerant_but_not_loose() -> None:
+    # Inside 9.3's bound: the last-digit noise an irrational constant carries.
+    assert within_tolerance(1.4142135623730951, 1.414213562373095)
+    # Outside it: |a - b| is 1e-6 against a bound of about 1e-9.
+    assert not within_tolerance(1.0, 1.000001)
+    # Near zero the absolute floor decides: 1e-13 passes, 1e-11 does not.
+    assert within_tolerance(1e-13, 0.0)
+    assert not within_tolerance(1e-11, 0.0)

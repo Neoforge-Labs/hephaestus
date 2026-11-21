@@ -30,6 +30,10 @@ MINIMUM_CASES = {
     "lab.config": 10,
     "lab.provenance": 12,
     "lab.diff": 8,
+    "lab.manifest": 10,
+    "lab.releases": 10,
+    "lab.effects": 8,
+    "lab.selection": 10,
 }
 
 
@@ -44,8 +48,10 @@ def test_all_vector_files_match_schema() -> None:
     files = sorted(p.relative_to(CONFORMANCE).as_posix() for p in CONFORMANCE.glob("*/*.json"))
     # A literal, not len(MINIMUM_CASES) + 1: this is meant to fail when a suite
     # is added, so that adding one is a decision somebody records here rather
-    # than something a derived count absorbs silently.
-    assert len(files) == 16, files  # fifteen suites plus the schema
+    # than something a derived count absorbs silently. Wave 2 of `hephkit.lab`
+    # added four -- lab.manifest, lab.releases, lab.effects, lab.selection --
+    # and this is where that is recorded.
+    assert len(files) == 20, files  # nineteen suites plus the schema
 
 
 def test_minimum_case_counts() -> None:
@@ -60,7 +66,9 @@ def _scratch(tmp_path: Path, file_suite: str, cases: object, **top: object) -> P
         (CONFORMANCE / "schema" / "vector-file.schema.json").read_text(encoding="utf-8"), encoding="utf-8"
     )
     (tmp_path / area).mkdir()
-    body = {"suite": file_suite, "spec": "0.5.0", "cases": cases}
+    # `source` is in the schema's `required`, so a well-formed scratch file
+    # carries one; `test_rejects_a_file_with_no_source` is what pins that.
+    body = {"suite": file_suite, "spec": "0.6.0", "source": "Hand-derived for this test.", "cases": cases}
     body.update(top)
     (tmp_path / area / f"{name}.json").write_text(json.dumps(body), encoding="utf-8")
     return tmp_path
@@ -75,6 +83,26 @@ GOOD = {"name": "a", "input": {"minor": "1", "currency": "KES"}, "expect": {"amo
 
 def test_accepts_well_formed_file(tmp_path: Path) -> None:
     assert _good(tmp_path, [GOOD]) == []
+
+
+def test_rejects_a_file_with_no_source(tmp_path: Path) -> None:
+    """CLAUDE.md rule 2 made checkable: a vector file must say where its numbers came from.
+
+    All nineteen suites carry one, so this costs nothing today and is what stops
+    the twentieth arriving without one.
+    """
+    root = _scratch(tmp_path, "money.format", [GOOD])
+    path = root / "money" / "format.json"
+    body = json.loads(path.read_text(encoding="utf-8"))
+    del body["source"]
+    path.write_text(json.dumps(body), encoding="utf-8")
+    findings = check_vectors(root, ERRORS, require_all=False)
+    assert any("source" in f for f in findings), findings
+
+
+def test_rejects_an_empty_source(tmp_path: Path) -> None:
+    findings = _good(tmp_path, [GOOD], source="")
+    assert any("source" in f for f in findings), findings
 
 
 def test_rejects_unknown_suite(tmp_path: Path) -> None:

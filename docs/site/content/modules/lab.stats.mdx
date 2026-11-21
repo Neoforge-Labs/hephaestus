@@ -1,0 +1,260 @@
+---
+title: "lab.stats"
+---
+
+# lab.stats
+
+`hephkit.lab.stats` gives a number for how large a difference is, names the test
+a design calls for, and puts an interval around a mean, and it is built around
+the cases where those answers would be wrong. A selector that always answers lets
+a researcher run a test whose assumptions the design does not meet and report the
+p-value anyway, and an effect size that divides by a zero deviation turns
+`0/0` into a figure nobody can challenge. So where no honest answer exists these
+functions raise `StatsError` ([HEPH-LAB-422](/errors/HEPH-LAB-422)) and say why.
+
+Maturity: **`experimental`**. The API may change, and per
+[ADR 0015](/adrs/0015-maturity-levels) nothing below `stable` may sit in a
+production money path. Why integrity comes before capability is
+[ADR 0022](/adrs/0022-research-integrity-is-the-spine).
+
+## Installing
+
+`hephkit-lab` is not on PyPI yet — [ADR 0023](/adrs/0023-hephkit-lab-ships-separately)
+records the precondition on publishing it — so install both portions of the
+`hephkit` namespace package out of a checkout of this repository. Effect sizes
+and `choose_test` are arithmetic and data, and need nothing more. Only the
+bootstrap needs the `stats` extra (SciPy, which brings NumPy):
+
+```bash
+uv add --editable ./python/hephkit "./python/hephkit-lab[stats]"
+```
+
+The extra is the authority: it is what `MissingExtraError` names, and it carries
+the SciPy version floor. Once the distribution is on PyPI the same extra is
+`hephkit-lab[stats]`. `bootstrap_ci` and `aggregate_seeds` import SciPy when they compute, not
+when the module loads, and refuse a bad sample *before* importing it, so a
+refusal works without the extra installed.
+
+## An example
+
+Save this as `demo.py` and run `uv run python demo.py`. It needs the `stats`
+extra, for the interval and the across-seeds summary.
+
+```python
+from statistics import fmean
+
+from hephkit.lab.stats import (
+    Scale,
+    StatsError,
+    TestRequest,
+    aggregate_seeds,
+    bootstrap_ci,
+    choose_test,
+    cliffs_delta,
+    cohens_d,
+    hedges_g,
+)
+
+baseline = [0.71, 0.74, 0.69, 0.73, 0.70]
+treated = [0.78, 0.81, 0.76, 0.80, 0.79]
+
+print("d     ", round(cohens_d(treated, baseline), 3))
+print("g     ", round(hedges_g(treated, baseline), 3))
+print("delta ", cliffs_delta(treated, baseline))
+
+design = TestRequest(
+    scale=Scale.interval, groups=2, paired=False, normal=True, equal_variance=False, n_min=5
+)
+print(choose_test(design))
+
+try:
+    choose_test(TestRequest(
+        scale=Scale.nominal, groups=2, paired=True, normal=False, equal_variance=False, n_min=9
+    ))
+except StatsError as exc:
+    print("refused:", exc)
+
+try:
+    cohens_d([1.0, 1.0, 1.0], [1.0, 1.0, 1.0])
+except StatsError as exc:
+    print("refused:", exc)
+
+# The properties, not the bounds: see the note under the output.
+interval = bootstrap_ci(treated, seed=7, resamples=2000)
+print("brackets the mean:  ", interval.low < fmean(treated) < interval.high)
+print("confidence:         ", interval.confidence)
+print("one seed, one answer:", interval == bootstrap_ci(treated, seed=7, resamples=2000))
+
+summary = aggregate_seeds({0: 0.78, 1: 0.81, 2: 0.76, 3: 0.80}, seed=7)
+print("seeds:              ", summary.n)
+print("mean and sd:        ", round(summary.mean, 4), round(summary.sd, 4))
+print("interval of the mean brackets it:", summary.interval.low < summary.mean < summary.interval.high)
+try:
+    aggregate_seeds({0: 0.8, 1: 0.8, 2: 0.8}, seed=7)
+except StatsError as exc:
+    print("refused:", exc)
+```
+
+It prints:
+
+```text
+d      3.7
+g      3.342
+delta  1.0
+test='welch_t' reason='two independent groups, interval outcome, normal, unequal variance'
+refused: a paired nominal design is not covered by the table (for two groups, McNemar's test)
+refused: both samples are constant: the pooled standard deviation is 0
+brackets the mean:   True
+confidence:          0.95
+one seed, one answer: True
+seeds:               4
+mean and sd:         0.7875 0.0222
+interval of the mean brackets it: True
+refused: the sample is constant: a bootstrap of it is a zero-width interval
+```
+
+**Why this page does not print the interval's bounds.** They would be BCa output
+over SciPy's resampling order and NumPy's RNG stream, so a SciPy upgrade that
+changed either would make this page wrong with nothing failing anywhere. That is
+the same reason the bootstrap is contract-tested and never vectored, and it would
+be odd for the page to do what it says a vector must not. The effect sizes, the
+mean and the standard deviation above are printed because they are arithmetic
+over the inputs: they are the same on every machine and in every release. What
+the interval is shown doing is what it promises — it brackets the mean, it
+reports the confidence it was asked for, and one seed gives one answer.
+
+## Effect sizes
+
+`cohens_d(a, b)` is `(mean(a) - mean(b)) / s_pooled` with sample variances, so
+its sign follows `a - b`. `hedges_g` is `d` times the small-sample correction
+`1 - 3 / (4 (n_a + n_b) - 9)`, computed from `cohens_d` and not alongside it.
+`cliffs_delta` is `(#(x > y) - #(x < y)) / (n_a n_b)` over every pair, where a tie
+counts in the denominator only, so ties pull it toward 0. Each is pinned by
+vectors worked from those definitions by hand, in `conformance/lab/effects.json`.
+
+What is refused, rather than returned as a plausible number: an empty sample, a
+value that is not a finite real number (`nan`, `inf`, a `bool`, a string), and a
+sample given as a bare `str` or `bytes`. For Cohen's *d* and Hedges' *g* also a
+sample of one observation, which has no sample variance, and two constant samples,
+whose pooled deviation is 0. Cliff's *delta* has no variance term, so one
+observation per sample, or all ties (which is 0), is a defined value.
+
+These statistics are **descriptive**. Each summarises the two samples in front of
+it: none tests a hypothesis, produces a p-value, or says anything about a
+population. *d* and *g* standardise by a *pooled* deviation, which assumes the two
+groups have roughly a common variance; where they plainly do not, the pooled
+figure describes neither group, and Cliff's *delta* — which needs no variance at
+all — is the honest summary. The *g* factor is the standard closed-form
+approximation to the small-sample correction, not the exact gamma-function form,
+and the gap is widest where it matters most: about 1.3% at `n = 4`, 0.1% by
+`n = 10`.
+
+### A sample is any iterable
+
+A sample may be a list, a tuple, a `polars` `Series`, a NumPy array, or anything
+else iterable that is not a `str` or `bytes`, and its values may be any
+`numbers.Real` — `numpy.float64` and `numpy.int64` included. So the two modules
+this wave shipped compose directly: a frame read through
+[`lab.data`](/modules/lab.data) goes straight into an effect size, with no
+`.to_list()` in between. This block needs the `data` extra as well as `stats`:
+
+```python
+import polars as pl
+
+from hephkit.lab.stats import bootstrap_ci, cohens_d
+
+frame = pl.DataFrame(
+    {
+        "baseline": [0.71, 0.74, 0.69, 0.73, 0.70],
+        "treated": [0.78, 0.81, 0.76, 0.80, 0.79],
+    }
+)
+
+print("d from the frame:", round(cohens_d(frame["treated"], frame["baseline"]), 3))
+print("d via numpy:     ", round(cohens_d(frame["treated"].to_numpy(), frame["baseline"].to_numpy()), 3))
+
+interval = bootstrap_ci(frame["treated"], seed=7, resamples=2000)
+print("same interval as from a list:", interval == bootstrap_ci(frame["treated"].to_list(), seed=7, resamples=2000))
+```
+
+It prints:
+
+```text
+d from the frame: 3.7
+d via numpy:      3.7
+same interval as from a list: True
+```
+
+Three iterables stay refused, because iterating each yields something other than
+the observations: a `str` or `bytes` (characters), a mapping (its *keys* — pass
+`.values()`, since `{seed: metric}` is what
+[`aggregate_seeds`](#across-seeds) takes), and a `set` (which has already dropped
+every repeated observation, so its variance is not the sample's). A `bool` stays
+refused too, in a NumPy array as in a list: `True` as an observation is a
+mistake, not a 1.
+
+## Choosing a test
+
+`choose_test(TestRequest(...))` returns the name of a test and the properties of
+the design that decided it. It runs nothing and needs no extra. The table, every
+row of which is pinned by `conformance/lab/selection.json`:
+
+| Design | Test |
+| --- | --- |
+| Two interval groups, normal, independent, equal variance | `independent_t` |
+| ... unequal variance | `welch_t` |
+| Two interval groups, normal, paired | `paired_t` |
+| Two groups, not normal or ordinal, independent | `mann_whitney_u` |
+| ... paired | `wilcoxon_signed_rank` |
+| Three or more independent interval groups, normal, equal variance | `one_way_anova` |
+| ... unequal variance | `welch_anova` |
+| Three or more independent groups, otherwise (not normal, or ordinal) | `kruskal_wallis` |
+| Nominal, independent, smallest expected cell count `n_min` at least 5 | `chi_square` |
+| ... `n_min` below 5 | `fisher_exact` |
+
+Not normal decides before equal variance is read, so there is never a Welch test
+on ranks. A `fisher_exact` choice is a test of the full contingency table, the
+Freeman-Halton generalisation when it is larger than 2x2: a request carries no
+outcome categories, so it cannot say which.
+
+The refusals are the other half of the table: fewer than two groups, a paired
+nominal design, and a paired design of three or more groups. The last is a
+repeated-measures design, whose test depends on assumptions such as sphericity
+that a `TestRequest` has no field to state. That is the request type being too
+small to carry the choice, and the message says so.
+
+`TestRequest` is strict: pass `Scale.interval`, not the string `"interval"`.
+
+## Bootstrap intervals
+
+`bootstrap_ci(sample, statistic=statistics.fmean, *, seed, confidence=0.95, resamples=10_000)`
+returns a BCa interval from `scipy.stats.bootstrap`. `statistic` takes any callable
+over a list of floats, and the default is the mean. `seed` is required, and
+reaches SciPy as an explicit `numpy.random.default_rng(seed)`; nothing reads
+global random state, so two calls with the same arguments give the same interval
+and a recorded run replays.
+
+A zero-width 95% interval reads as certainty, so these are refused: a sample of
+one observation, a constant sample, an empty or non-finite sample, a `confidence`
+outside the open interval (0, 1), `resamples` below 1, a negative `seed`, and a
+statistic whose bootstrap distribution is degenerate. All but the last are checked
+before SciPy is imported.
+
+The bootstrap is **contract-tested, not vectored**. A vector would have to take
+its numbers from a seeded SciPy run, which would make SciPy's resampling order the
+definition of this module's behaviour. The contract instead is that a nominal 95%
+interval covers a known parameter at about the nominal rate, and that one seed
+gives one interval.
+
+## Across seeds
+
+`aggregate_seeds({seed: metric, ...}, seed=...)` summarises one metric measured
+under several seeds as `n`, the mean, the sample standard deviation and a
+bootstrap interval of the mean. Values are taken in sorted seed order, so the
+summary does not depend on how the mapping was built. It needs at least two seeds
+and takes every refusal of `bootstrap_ci`, so identical values under every seed
+are refused. Its `seed` drives the bootstrap only and has nothing to do with the
+keys of `values`.
+
+An interval from a handful of seeds is wide for a reason: it is reporting how
+little those seeds say, and the width is the finding.

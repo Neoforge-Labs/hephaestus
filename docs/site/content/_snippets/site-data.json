@@ -1,6 +1,6 @@
 {
   "_generated": "GENERATED FILE - do not edit by hand. Source: spec/modules.yaml, spec/errors.yaml, spec/heph-spec.md and the design's Rollout. Regenerate with `uv run tools/gen_site_pages.py`.",
-  "specVersion": "0.5.0",
+  "specVersion": "0.6.0",
   "currentPhase": 1,
   "errorCodeCount": 17,
   "shipped": [
@@ -95,6 +95,11 @@
       "maturity": "experimental"
     },
     {
+      "name": "lab.data",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
       "name": "lab.gates",
       "home": "python",
       "maturity": "experimental"
@@ -111,6 +116,16 @@
     },
     {
       "name": "lab.repro",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
+      "name": "lab.sources",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
+      "name": "lab.stats",
       "home": "python",
       "maturity": "experimental"
     },

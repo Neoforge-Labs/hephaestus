@@ -1,0 +1,358 @@
+{
+  "suite": "lab.releases",
+  "spec": "0.6.0",
+  "description": "Date-to-release resolution, spec section 10.3. `input.releases` is the release table, in the order given (the order is part of the case: an implementation must resolve the same whichever way round it is listed). Each release is `{release, published}` with `published` an RFC 3339 `full-date`. `input.as_of` is the date d, also a `full-date`. `expect.release` is the label of the release d resolves to; `expect.error` is the registry code of the refusal: HEPH-LAB-424 where no release was published on or before d, HEPH-LAB-412 where more than one release shares the latest published date at or before d, and HEPH-LAB-412 where a `published` is not the `full-date` 10.3 gives, which 10.4 makes invalid rather than a date.",
+  "source": "Spec section 10.3 and 10.1 (release is opaque), read from the clause alone; no implementation was run. Every expected label or code is read off the clause: the latest `published` that is less than or equal to d (by calendar date), a refusal where none is, a refusal where the latest is shared, and no reach to a release published after d. Releases ordered by label rather than date would resolve the r9/r10 cases differently, which is what they pin. The `published`-is-not-a-date cases come from 10.4's type clause and are the most consequential refusal in section 10, because 10.3 orders releases by `published` and by nothing else: an implementation whose JSON-to-date coercion reads 0 as 1970-01-01 or 1764028800 as 2026-11-25 answers with a release instead of refusing, and the answer looks like any other. The first case puts the bad release beside a good one so that an implementation which validates only the release it would return still has to refuse.",
+  "cases": [
+    {
+      "name": "latest-of-several-eligible",
+      "input": {
+        "releases": [
+          {
+            "release": "2026-01",
+            "published": "2026-01-15"
+          },
+          {
+            "release": "2026-02",
+            "published": "2026-02-15"
+          },
+          {
+            "release": "2026-03",
+            "published": "2026-03-15"
+          }
+        ],
+        "as_of": "2026-03-01"
+      },
+      "expect": {
+        "release": "2026-02"
+      }
+    },
+    {
+      "name": "a-date-after-every-release-resolves-to-the-newest",
+      "input": {
+        "releases": [
+          {
+            "release": "2026-01",
+            "published": "2026-01-15"
+          },
+          {
+            "release": "2026-02",
+            "published": "2026-02-15"
+          },
+          {
+            "release": "2026-03",
+            "published": "2026-03-15"
+          }
+        ],
+        "as_of": "2030-01-01"
+      },
+      "expect": {
+        "release": "2026-03"
+      }
+    },
+    {
+      "name": "published-equal-to-the-date-resolves",
+      "input": {
+        "releases": [
+          {
+            "release": "2026-01",
+            "published": "2026-01-15"
+          },
+          {
+            "release": "2026-02",
+            "published": "2026-02-15"
+          },
+          {
+            "release": "2026-03",
+            "published": "2026-03-15"
+          }
+        ],
+        "as_of": "2026-02-15"
+      },
+      "expect": {
+        "release": "2026-02"
+      }
+    },
+    {
+      "name": "the-day-before-a-publication-does-not-reach-it",
+      "input": {
+        "releases": [
+          {
+            "release": "2026-01",
+            "published": "2026-01-15"
+          },
+          {
+            "release": "2026-02",
+            "published": "2026-02-15"
+          },
+          {
+            "release": "2026-03",
+            "published": "2026-03-15"
+          }
+        ],
+        "as_of": "2026-02-14"
+      },
+      "expect": {
+        "release": "2026-01"
+      }
+    },
+    {
+      "name": "a-later-release-is-unreachable-given-newest-first",
+      "input": {
+        "releases": [
+          {
+            "release": "2026-03",
+            "published": "2026-03-15"
+          },
+          {
+            "release": "2026-02",
+            "published": "2026-02-15"
+          },
+          {
+            "release": "2026-01",
+            "published": "2026-01-15"
+          }
+        ],
+        "as_of": "2026-03-14"
+      },
+      "expect": {
+        "release": "2026-02"
+      }
+    },
+    {
+      "name": "a-later-release-is-unreachable-given-unsorted",
+      "input": {
+        "releases": [
+          {
+            "release": "2026-02",
+            "published": "2026-02-15"
+          },
+          {
+            "release": "2026-03",
+            "published": "2026-03-15"
+          },
+          {
+            "release": "2026-01",
+            "published": "2026-01-15"
+          }
+        ],
+        "as_of": "2026-03-14"
+      },
+      "expect": {
+        "release": "2026-02"
+      }
+    },
+    {
+      "name": "a-date-before-every-release-is-refused",
+      "input": {
+        "releases": [
+          {
+            "release": "2026-01",
+            "published": "2026-01-15"
+          },
+          {
+            "release": "2026-02",
+            "published": "2026-02-15"
+          },
+          {
+            "release": "2026-03",
+            "published": "2026-03-15"
+          }
+        ],
+        "as_of": "2026-01-14"
+      },
+      "expect": {
+        "error": "HEPH-LAB-424"
+      }
+    },
+    {
+      "name": "an-empty-release-table-is-refused",
+      "input": {
+        "releases": [],
+        "as_of": "2026-01-01"
+      },
+      "expect": {
+        "error": "HEPH-LAB-424"
+      }
+    },
+    {
+      "name": "a-collision-at-the-latest-eligible-date-is-refused",
+      "input": {
+        "releases": [
+          {
+            "release": "2026-01",
+            "published": "2026-01-15"
+          },
+          {
+            "release": "r9",
+            "published": "2026-02-15"
+          },
+          {
+            "release": "r10",
+            "published": "2026-02-15"
+          }
+        ],
+        "as_of": "2026-02-20"
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "a-collision-at-the-latest-eligible-date-is-refused-newest-first",
+      "input": {
+        "releases": [
+          {
+            "release": "r10",
+            "published": "2026-02-15"
+          },
+          {
+            "release": "r9",
+            "published": "2026-02-15"
+          },
+          {
+            "release": "2026-01",
+            "published": "2026-01-15"
+          }
+        ],
+        "as_of": "2026-02-15"
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "a-collision-after-the-date-still-resolves",
+      "input": {
+        "releases": [
+          {
+            "release": "2026-01",
+            "published": "2026-01-15"
+          },
+          {
+            "release": "r9",
+            "published": "2026-02-15"
+          },
+          {
+            "release": "r10",
+            "published": "2026-02-15"
+          }
+        ],
+        "as_of": "2026-02-14"
+      },
+      "expect": {
+        "release": "2026-01"
+      }
+    },
+    {
+      "name": "a-collision-below-an-unambiguous-latest-still-resolves",
+      "input": {
+        "releases": [
+          {
+            "release": "r9",
+            "published": "2026-02-15"
+          },
+          {
+            "release": "r10",
+            "published": "2026-02-15"
+          },
+          {
+            "release": "2026-03",
+            "published": "2026-03-15"
+          }
+        ],
+        "as_of": "2026-03-20"
+      },
+      "expect": {
+        "release": "2026-03"
+      }
+    },
+    {
+      "name": "r9-and-r10-on-different-dates-resolve-by-date-not-by-label",
+      "input": {
+        "releases": [
+          {
+            "release": "r9",
+            "published": "2026-05-01"
+          },
+          {
+            "release": "r10",
+            "published": "2026-04-01"
+          }
+        ],
+        "as_of": "2026-06-01"
+      },
+      "expect": {
+        "release": "r9"
+      }
+    },
+    {
+      "name": "r10-newer-than-r9-resolves-to-r10",
+      "input": {
+        "releases": [
+          {
+            "release": "r9",
+            "published": "2026-04-01"
+          },
+          {
+            "release": "r10",
+            "published": "2026-05-01"
+          }
+        ],
+        "as_of": "2026-06-01"
+      },
+      "expect": {
+        "release": "r10"
+      }
+    },
+    {
+      "name": "published-as-a-number",
+      "input": {
+        "releases": [
+          {
+            "release": "2026-01",
+            "published": "2026-01-15"
+          },
+          {
+            "release": "epoch",
+            "published": 0
+          }
+        ],
+        "as_of": "2026-06-01"
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "published-as-a-unix-timestamp",
+      "input": {
+        "releases": [
+          {
+            "release": "2026-11",
+            "published": 1764028800
+          }
+        ],
+        "as_of": "2026-12-01"
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "published-as-null",
+      "input": {
+        "releases": [
+          {
+            "release": "2026-01",
+            "published": null
+          }
+        ],
+        "as_of": "2026-06-01"
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    }
+  ]
+}

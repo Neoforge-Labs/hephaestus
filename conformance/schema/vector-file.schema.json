@@ -2,11 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hephkit.dev/conformance/vector-file.schema.json",
   "title": "Hephaestus conformance vector file",
-  "description": "Contract for every conformance/<area>/<suite>.json. An error expectation is {\"error\": \"<HEPH code>\"}; the checker also confirms the code is in spec/errors.yaml.",
+  "description": "Contract for every conformance/<area>/<suite>.json. An error expectation is {\"error\": \"<HEPH code>\"}; the checker also confirms the code is in spec/errors.yaml. `source` is required: CLAUDE.md rule 2 says a vector's expectations come from an independent source -- an RFC, a reference package, or hand-derived values -- and never from running our own implementation, and a file that cannot name where its numbers came from cannot be audited against that rule.",
   "type": "object",
   "required": [
     "suite",
     "spec",
+    "source",
     "cases"
   ],
   "additionalProperties": false,
@@ -27,17 +28,23 @@
         "idempotency.fingerprint",
         "lab.config",
         "lab.provenance",
-        "lab.diff"
+        "lab.diff",
+        "lab.manifest",
+        "lab.releases",
+        "lab.effects",
+        "lab.selection"
       ]
     },
     "spec": {
-      "const": "0.5.0"
+      "const": "0.6.0"
     },
     "description": {
       "type": "string"
     },
     "source": {
-      "type": "string"
+      "description": "Where this file's expectations come from, specifically enough to check: the RFC and section, the reference package and its pinned version, or the arithmetic a human worked. Never our own implementation (CLAUDE.md rule 2).",
+      "type": "string",
+      "minLength": 1
     },
     "cases": {
       "type": "array",

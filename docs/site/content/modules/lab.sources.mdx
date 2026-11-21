@@ -1,0 +1,154 @@
+---
+title: "lab.sources"
+---
+
+# lab.sources
+
+`hephkit.lab.sources` freezes an input that came off the network, so it is still
+there, byte for byte, when the run is replayed a year later. A response is stored
+under a key computed from the request **and the version of the upstream it was
+made against**, so a hit whose upstream has moved is a miss and is never served
+stale, and a run that may not reach the network says so by refusing rather than
+by quietly fetching something new.
+
+[`lab.data`](/modules/lab.data) identifies a dataset you already hold. This
+module is for the input you do not hold yet.
+
+Maturity: **`experimental`**. The API may change, and per
+[ADR 0015](/adrs/0015-maturity-levels) nothing below `stable` may sit in a
+production money path. Why integrity comes before capability is
+[ADR 0022](/adrs/0022-research-integrity-is-the-spine).
+
+## Installing
+
+`hephkit-lab` is not on PyPI yet — [ADR 0023](/adrs/0023-hephkit-lab-ships-separately)
+records the precondition on publishing it — so install both portions of the
+`hephkit` namespace package out of a checkout of this repository:
+
+```bash
+uv add --editable ./python/hephkit ./python/hephkit-lab
+```
+
+Nothing heavy comes with it, and this module needs no extra: it is the standard
+library and pydantic.
+
+## An example: freeze, replay offline, notice a change
+
+Save this as `demo.py` and run `uv run python demo.py`. No extra is needed, and
+the "network" is a function the script writes itself.
+
+```python
+import tempfile
+from pathlib import Path
+
+from hephkit.lab.sources import (
+    CorruptSourceError,
+    MissingSourceError,
+    Request,
+    SourceCache,
+    cache_key,
+)
+
+calls = []
+
+
+def fetcher(request: Request) -> bytes:
+    # The caller owns the transport. A real one would reach the network here.
+    calls.append(request.url)
+    return b'{"rate": 0.0412}'
+
+
+directory = Path(tempfile.mkdtemp()) / "frozen"
+request = Request(method="GET", url="https://api.example.org/rate", body=None)
+
+online = SourceCache(directory, upstream_version="2026.10")
+print(online.fetch(request, fetcher))     # a miss: fetched and frozen
+print(online.fetch(request, fetcher))     # a hit: served from disk
+print("network calls:", len(calls))
+
+offline = SourceCache(directory, upstream_version="2026.10", offline=True)
+print("replayed offline:", offline.fetch(request, fetcher))
+
+# The upstream moved. Same request, new version: a different key, so a miss.
+print(cache_key(request, upstream_version="2026.10") == cache_key(request, upstream_version="2026.11"))
+moved = SourceCache(directory, upstream_version="2026.11", offline=True)
+try:
+    moved.fetch(request, fetcher)
+except MissingSourceError as exc:
+    print("refused:", exc)
+
+# The frozen bytes change on disk: refused, and not repaired by fetching again.
+body = next(directory.glob("*.body"))
+body.write_bytes(b'{"rate": 0.9999}')
+try:
+    online.fetch(request, fetcher)
+except CorruptSourceError as exc:
+    print("refused:", exc)
+print("network calls:", len(calls))
+```
+
+It prints:
+
+```text
+b'{"rate": 0.0412}'
+b'{"rate": 0.0412}'
+network calls: 1
+replayed offline: b'{"rate": 0.0412}'
+False
+refused: GET https://api.example.org/rate is not frozen for upstream version '2026.11' and this run may not fetch it
+refused: frozen body b3cc5059f253e9deabef5e295315863202da6b02e57aa0f5ada3b8ab90c6b8d6.body no longer matches the digest recorded when it was frozen
+network calls: 1
+```
+
+The last line is the property worth having: the corrupt body was **not**
+refetched. A silent refetch would hide the very change that replay exists to
+find.
+
+## The key carries the version
+
+`cache_key(request, upstream_version=...)` is the content hash
+([spec 4.2](/spec#4-canonical-json-and-hashing)) of the method, the URL, the body
+and the upstream version. The body enters as standard base64, or JSON `null`, so
+`body=None` and `body=b""` are different requests. The version is whatever string
+identifies the upstream's algorithm or release; the module does not interpret it.
+
+This is the reason the cache is not transport interception. Intercepting HTTP
+would key on the request alone, so a response frozen against last quarter's
+upstream would answer this quarter's request. Interception would also patch the
+HTTP client process-wide, where the caller's own `fetcher` is a plain function the
+caller controls and can test.
+
+## Which error means what
+
+| Situation | Raised as | Code |
+| --- | --- | --- |
+| Not frozen, and the cache is `offline=True` | `MissingSourceError` | [HEPH-LAB-424](/errors/HEPH-LAB-424) |
+| A frozen body no longer matches the digest recorded when it was frozen, or its record is unreadable | `CorruptSourceError` | [HEPH-LAB-412](/errors/HEPH-LAB-412) |
+
+Both subclass `SourceError`, this module's error base, so one
+`except SourceError` covers "this frozen input is unusable" and `.code` is what
+tells the two apart.
+
+Offline, a miss raises before the fetcher is called, so an offline run cannot
+reach the network by accident. A corrupt entry is refused online as well as
+offline. A fetcher that raises propagates unchanged and freezes nothing, and one
+that returns anything but `bytes` is a `TypeError`.
+
+## On disk
+
+Each entry is two files in the cache directory: `<hex>.body` holds the response,
+and `<hex>.json` is a readable record of the key, the request, the upstream
+version and the body's SHA-256. The body is written first and the record last,
+each through a temporary file and an atomic rename, so a record never names a
+body that is not there. `frozen()` lists the keys on disk for the cache's
+upstream version, read from the disk each time rather than from the object's
+memory.
+
+## Limits
+
+The cache trusts its directory only as far as the recorded digest reaches:
+someone who rewrites a body and its record together is not detected. Entries are
+never evicted. Concurrent writers of one key are not locked; the same key holds
+the same bytes and the rename is atomic, so for a deterministic source the race
+is benign. If you need the frozen files themselves to be tamper-evident, put the
+cache directory under a manifest with [`lab.data`](/modules/lab.data).

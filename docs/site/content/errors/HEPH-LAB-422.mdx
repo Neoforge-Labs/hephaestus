@@ -1,12 +1,12 @@
 ---
 # GENERATED FILE - do not edit by hand. Source: spec/errors.yaml.
 # Regenerate with `uv run tools/gen_error_pages.py`; CI runs --check.
-title: "HEPH-LAB-422 — Experiment config failed validation"
+title: "HEPH-LAB-422 — Experiment config or statistical request was refused"
 ---
 
 # HEPH-LAB-422
 
-**Experiment config failed validation**
+**Experiment config or statistical request was refused**
 
 | | |
 | --- | --- |
@@ -18,7 +18,7 @@ title: "HEPH-LAB-422 — Experiment config failed validation"
 
 This is the default `detail` sent in the problem+json response, verbatim:
 
-The experiment configuration failed validation. Each offending field and the rule it broke is listed under errors.
+The experiment configuration, or a statistical request or sample, was refused. The response names each offending field, or the condition the input could not meet.
 
 ## What to do as a developer
 
@@ -26,7 +26,7 @@ Guidance for the engineer who hit this code. It is non-normative: it is never
 sent on the wire and does not constrain an implementation. Wire behaviour is
 defined only by `spec/heph-spec.md` and the conformance vectors.
 
-A run was asked to start from a configuration that does not satisfy its schema, so the run was refused before any work happened and before any record was written. The response lists each field and the rule it broke; fix the offending key in the config layer that supplied it rather than at the point of use, because the layered config resolves once and a value patched after resolution is not the value that would be hashed into config\_hash. Reach for this code for the configuration of a run. Input data that fails a manifest or a gate is HEPH-LAB-412, and a config file that is absent rather than wrong is HEPH-LAB-424.
+A run asked to start from something it cannot start from, and was refused before any work happened and before any record was written. Two kinds of input reach this code. A configuration that does not satisfy its schema is the first; the response lists each field and the rule it broke, and the fix goes in the config layer that supplied the value rather than at the point of use, because the layered config resolves once and a value patched after resolution is not the value that would be hashed into config\_hash. A statistical request or sample that no honest answer fits is the second, such as a sample with no variance to standardise by, a sample of one observation, a non-finite value, a confidence outside the open interval (0, 1), or a design whose assumptions no test in the table meets. There the response names the condition rather than a field, and the fix is to change the design or the data rather than to coax a number out of the call. Reach for this code for what a run was asked to do. Input data that fails a manifest or a gate is HEPH-LAB-412, and a config file that is absent rather than wrong is HEPH-LAB-424.
 
 ---
 

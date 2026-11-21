@@ -4,15 +4,15 @@
 title: "heph-spec"
 ---
 
-> **Two version numbers.** This page is version 0.5.0 of the specification. The packages (`hephkit`, `hephkit-core` and the Go module) are versioned independently: a change to the specification bumps the spec version, while package releases follow their own commit history, so the two numbers need not match. Package versions are published with the project's releases.
+> **Two version numbers.** This page is version 0.6.0 of the specification. The packages (`hephkit`, `hephkit-core` and the Go module) are versioned independently: a change to the specification bumps the spec version, while package releases follow their own commit history, so the two numbers need not match. Package versions are published with the project's releases.
 
 # heph-spec
 
-- **Version:** 0.5.0
+- **Version:** 0.6.0
 - **Status:** Draft for implementation in Phase 1; every module implementing it is `experimental`.
 - **Registries:** `spec/errors.yaml` (error codes), `conventions/attributes.yaml` (telemetry attributes), `spec/currencies.yaml` (ISO 4217 minor units, with its publication pinned by `spec/currencies.source.yaml`).
 
-The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119 and RFC 8174. Where this document profiles a standard, the standard governs everything this document does not restate. Six parts are original: the error-code registry (section 1), idempotency storage and replay (section 2), money on the wire (section 3), the provenance record (section 7), the run record (section 8) and the replay and diff of a run (section 9).
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119 and RFC 8174. Where this document profiles a standard, the standard governs everything this document does not restate. Seven parts are original: the error-code registry (section 1), idempotency storage and replay (section 2), money on the wire (section 3), the provenance record (section 7), the run record (section 8), the replay and diff of a run (section 9) and the dataset manifest (section 10).
 
 ## Decisions this version settles
 
@@ -45,7 +45,10 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 - `NaN` compares **equal** to `NaN` for the purposes of a replay, because 8.2's wrapper is compared by the value it names and a record must compare equal to itself (9.3).
 - Two finite numbers are equal exactly when `|a - b| <= max(1e-9 * max(|a|, |b|), 1e-12)`: relative so that 7.2's second machine can satisfy the contract, absolute so that a value near zero is comparable at all, symmetric, and not loosenable per run, cell or value (9.3).
 - A divergence is reported, never raised: a replay produces its difference report, and a caller that needs a refusal derives one from it under `HEPH-LAB-409` (9.1, 9.4).
-- Section 10 is reserved: dataset manifests, and with them the digest scope of `data_hash`, are not yet specified, and an implementation chooses no scope of its own meanwhile (10, 7.1).
+- The digest scope of `data_hash` is the content hash of the canonical JSON of the `{path, sha256, bytes}` array sorted by `path` byte-wise, each `sha256` taken over the file as the extractor wrote it; concatenated bytes and directory-walk order are forbidden (10.2).
+- A date resolves to the latest release published on or before it and to no later one, and is refused where more than one release shares that latest date, because `release` is opaque and no ordering of labels is a tiebreak (10.1, 10.3).
+- A manifest with an empty `files`, a duplicate `path`, a `path` that is not a relative path within the dataset, a malformed `sha256`, a member whose type is not the one section 10 gives for it, or a `files` entry with an undefined or missing member is refused rather than repaired; each of those is decided from the document alone (10.1, 10.3, 10.4).
+- A `bytes` or a `sha256` that disagrees with the file it names is refused where that file is available to check; those two are the only refusals of 10.4 that are facts about a directory rather than about the document, and the availability caveat is on both (10.4).
 
 ## 1. Errors
 
@@ -400,8 +403,35 @@ A **caller that needs a refusal** rather than a report — a continuous-integrat
 
 ## 10. Dataset manifests
 
-**Reserved. This section is not yet specified.**
+10.1. A dataset manifest describes one dataset as one extractor wrote it. A manifest MUST carry every member of this table, with the type given, and MUST NOT carry a top-level member this section does not define.
 
-The digest scope of `data_hash` (7.1) — whether the hash is taken over raw bytes or over canonical JSON (4.1), and how the inputs of a multi-file dataset combine into one value — is settled here, together with the manifest a dataset carries.
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `dataset` | string | Name of the dataset |
+| `source` | string | Where the dataset came from upstream |
+| `release` | string | The upstream release the extractor read |
+| `extractor_version` | string | Version of the extractor that wrote the files |
+| `captured_at` | string | The date the extractor captured the release, as an RFC 3339 `full-date` |
+| `files` | array | Non-empty array of file entries |
 
-Until this section is written, an implementation records the `data_hash` it is given and MUST NOT choose a digest scope of its own (7.1).
+Each entry of `files` MUST carry every member of this table, and MUST NOT carry a member this section does not define.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `path` | string | Path of the file within the dataset: a relative path of one or more non-empty segments separated by `/`, with no leading `/` and no segment equal to `.` or `..` |
+| `sha256` | string | Lowercase hex SHA-256 of the file's bytes, 64 characters |
+| `bytes` | non-negative integer | Length of the file in bytes |
+
+`release` is opaque: implementations MUST NOT derive meaning from its form, and in particular MUST NOT derive an ordering from it. Releases are ordered by `published` (10.3) and by nothing else.
+
+10.2. **The digest scope.** `data_hash` (7.1) is the content hash (4.2) of the canonical JSON (4.1) of the array of `{path, sha256, bytes}` objects, one per file of the manifest, sorted by `path` under byte-wise comparison. Each `sha256` is the lowercase hex SHA-256 of that file's bytes **as written by the extractor**, not of the upstream source.
+
+An implementation MUST NOT concatenate file bytes and hash the result, and MUST NOT take the order of a directory walk as the order of the array. A single-file dataset is an array of one.
+
+10.3. **Date-to-release resolution.** Given releases that each carry a `published` date, resolving as of a date *d* MUST yield the latest release whose `published` is less than or equal to *d*. Both `published` and *d* are RFC 3339 `full-date`s, and the comparison is on that calendar date. An implementation MUST refuse when no release satisfies that, and MUST refuse when more than one release shares the latest `published` at or before *d*, because `release` is opaque (10.1) and the resolution is then ambiguous. A release published after *d* MUST NOT be reachable from *d*.
+
+10.4. **Refusals.** A manifest with an empty `files` or a duplicate `path` is invalid. A `sha256` that is not 64 lowercase hex characters is invalid. A `files` entry whose `path` is not a relative path within the dataset, as 10.1 defines it, is invalid. A `files` entry carrying a member this section does not define, or missing one it does, is invalid. A member whose type is not the type this section gives for it is invalid, and an implementation MUST NOT read such a member as a value of that type: a `captured_at` (10.1) or a `published` (10.3) that is not a string is not a date, and a `bytes` that is not a non-negative integer is not a length.
+
+A `bytes` that disagrees with the length of the file it names, or a `sha256` that disagrees with the bytes of the file it names, is invalid where that file is available to check.
+
+Those are two layers, and the second paragraph is the whole of the second: every refusal of the first paragraph is a fact about the manifest document alone, and the two in the second are facts about a directory, so they are decided only where the dataset root the `path`s are relative to is known. An implementation MUST refuse an invalid manifest rather than repair it.

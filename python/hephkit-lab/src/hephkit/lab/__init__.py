@@ -15,6 +15,37 @@ This is a portion of the PEP 420 `hephkit` namespace supplied by the separate
 `hephkit-lab` distribution (ADR 0021). Nothing is re-exported here: every
 public name is reached through a submodule.
 
+How every module in this package raises
+---------------------------------------
+
+One shape, so a reader who has met one module's errors has met them all. A
+module that refuses anything declares:
+
+* **One base class**, named for the module (`ConfigError`, `GateError`,
+  `ManifestError`, `TemporalError`, `SourceError`, `StatsError`), carrying the
+  registry code for that module's ordinary refusal -- "this input exists and
+  says the wrong thing" -- as a class attribute `code`. It subclasses a builtin
+  (`ValueError`, `RuntimeError`, `LookupError`) chosen for what the module does,
+  and *every* error the module raises subclasses it. Never two unrelated classes
+  in one module: `except <ModuleBase>` must be the one way to catch "this input
+  is unusable", and two different builtin bases make `except ValueError` or
+  `except LookupError` miss half of them.
+* **A subclass per specific refusal**, named for what was refused
+  (`AmbiguousReleaseError`, `CorruptSourceError`), each carrying its own `code`.
+  The base may be raised bare for the module's general case, and a module whose
+  refusals are all of one kind needs no subclass at all (`lab.stats`).
+* **Any absence case as a `Missing*` subclass carrying `HEPH-LAB-424`**
+  (`MissingConfigError`, `MissingSubjectError`, `MissingManifestError`,
+  `MissingSourceError`; `NoEligibleReleaseError` where "missing" would not read
+  as English). A required input that is not there at all is never the same error
+  as one that is there and wrong, and the base must not be the class that
+  carries 424 while a subclass carries some other code: `.code` is what tells
+  the two apart, and inverting them makes the general `except` the narrow one.
+
+Codes are never spelled as literals; they are imported from `hephkit.errors`,
+which `tools/gen_errors.py` generates from `spec/errors.yaml`, and
+`tests/test_error_codes.py` fails any module that writes one by hand.
+
 Maturity: experimental.
 """
 
