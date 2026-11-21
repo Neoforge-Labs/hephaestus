@@ -32,8 +32,9 @@ module that refuses anything declares:
   `except LookupError` miss half of them.
 * **A subclass per specific refusal**, named for what was refused
   (`AmbiguousReleaseError`, `CorruptSourceError`), each carrying its own `code`.
-  The base may be raised bare for the module's general case.
-* **The absence case as a `Missing*` subclass carrying `HEPH-LAB-424`**
+  The base may be raised bare for the module's general case, and a module whose
+  refusals are all of one kind needs no subclass at all (`lab.stats`).
+* **Any absence case as a `Missing*` subclass carrying `HEPH-LAB-424`**
   (`MissingConfigError`, `MissingSubjectError`, `MissingManifestError`,
   `MissingSourceError`; `NoEligibleReleaseError` where "missing" would not read
   as English). A required input that is not there at all is never the same error

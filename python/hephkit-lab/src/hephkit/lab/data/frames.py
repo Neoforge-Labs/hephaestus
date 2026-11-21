@@ -117,7 +117,9 @@ def query(manifest: Manifest, *, root: Path, sql: str) -> pl.DataFrame:
                 # `raw/a.csv`, the shape the docs page itself uses -- is read as
                 # schema `raw`, table `a` and fails with "Schema with name raw/a
                 # does not exist" (verified on duckdb 2.0.0). The quoted
-                # CREATE TABLE below is what gets the path in verbatim.
+                # CREATE TABLE is what gets the path in verbatim, and every
+                # table it makes carries a .csv or .parquet suffix, so the
+                # internal name can never be one of them.
                 connection.register(_SOURCE_VIEW, relation)
                 try:
                     connection.execute(
