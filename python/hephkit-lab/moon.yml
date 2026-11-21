@@ -8,8 +8,12 @@ tasks:
     # `../hephkit` -- that one does compile the PyO3 extension.
     # The coverage gate lives here and in `test-fast`, never in `test-spine`: the
     # gate measures code, and `lab.data.frames` can only execute where polars
-    # and duckdb import. This wave's extras are installed so it is measured.
-    script: 'uv run --extra data --extra causal --extra stats pytest --cov=hephkit.lab --cov-fail-under=90'
+    # and duckdb import. The extras this wave's code reaches for -- `data`
+    # (polars, duckdb, pyarrow, dvc) and `stats` (scipy, numpy) -- are installed
+    # so it is measured. `causal` is not: nothing on this branch imports dowhy,
+    # causal-learn or causalphylo, and the task that adds `lab.causal` brings the
+    # extra back here beside the licence gate that guards it.
+    script: 'uv run --extra data --extra stats pytest --cov=hephkit.lab --cov-fail-under=90'
     inputs:
       - 'src/**/*'
       - 'tests/**/*'
@@ -22,7 +26,7 @@ tasks:
     # CI default, mirroring `hephkit:test-fast`: everything except the
     # `slow`-marked tests. No lab test is slow yet; the deselection is here so
     # the two task sets stay identical as the suite grows.
-    script: 'uv run --extra data --extra causal --extra stats pytest -m "not slow" --cov=hephkit.lab --cov-fail-under=90'
+    script: 'uv run --extra data --extra stats pytest -m "not slow" --cov=hephkit.lab --cov-fail-under=90'
     inputs:
       - 'src/**/*'
       - 'tests/**/*'
@@ -49,13 +53,14 @@ tasks:
       - '/core/hephkit-core/**/*'
       - '/core/hephkit-py/**/*'
   typecheck:
-    # The same extras as `test` and `test-fast`, and for two reasons. Moon runs
+    # The same extras as `test` and `test-fast` (`data` and `stats`, not
+    # `causal`), and for two reasons. Moon runs
     # these tasks concurrently against the one shared `.venv`; a plain `uv run`
     # here would sync it to a different set than they do, and either side could
     # resync it out from under the other. And mypy then checks `lab.data.frames`
     # against the real polars and duckdb rather than through the
     # ignore-missing-imports overrides.
-    command: 'uv run --extra data --extra causal --extra stats mypy --strict src'
+    command: 'uv run --extra data --extra stats mypy --strict src'
     inputs:
       - 'src/**/*'
       - 'pyproject.toml'
