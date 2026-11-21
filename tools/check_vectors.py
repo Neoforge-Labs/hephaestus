@@ -53,6 +53,23 @@ MIN_CASES = {
     # report shapes of 9.2 including a position only one side holds, and 9.3's
     # kinds, non-finite wrapper and float tolerance on both sides of each bound.
     "lab.diff": 8,
+    # Spec 10. The minimum covers the digest scope of 10.2 (sorted order, a
+    # single file, bytes as the extractor wrote them), each refusal of 10.4 and
+    # the unknown-member rule of 10.1.
+    "lab.manifest": 10,
+    # Design 9.3, effect sizes. The minimum covers each of the three statistics
+    # at a value derivable by hand -- Cohen's d at zero and at a pooled
+    # deviation that divides cleanly, Hedges' g where the correction factor is
+    # a clean fraction, Cliff's delta fully separated, reversed and identical --
+    # plus the degenerate samples the module must refuse.
+    "lab.effects": 8,
+    # Design 9.3, statistical test selection (not release resolution, which is
+    # spec 10.3). The minimum covers one row per branch of the decision table --
+    # paired and unpaired interval designs, equal and unequal variance, the
+    # non-normal and ordinal fallbacks, three or more interval groups parametric
+    # and not, and the two nominal tests -- plus each refusal the table leaves
+    # uncovered.
+    "lab.selection": 10,
 }
 
 

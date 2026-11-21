@@ -1,10 +1,10 @@
 # heph-spec
 
-- **Version:** 0.5.0
+- **Version:** 0.6.0
 - **Status:** Draft for implementation in Phase 1; every module implementing it is `experimental`.
 - **Registries:** `spec/errors.yaml` (error codes), `conventions/attributes.yaml` (telemetry attributes), `spec/currencies.yaml` (ISO 4217 minor units, with its publication pinned by `spec/currencies.source.yaml`).
 
-The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119 and RFC 8174. Where this document profiles a standard, the standard governs everything this document does not restate. Six parts are original: the error-code registry (section 1), idempotency storage and replay (section 2), money on the wire (section 3), the provenance record (section 7), the run record (section 8) and the replay and diff of a run (section 9).
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119 and RFC 8174. Where this document profiles a standard, the standard governs everything this document does not restate. Seven parts are original: the error-code registry (section 1), idempotency storage and replay (section 2), money on the wire (section 3), the provenance record (section 7), the run record (section 8), the replay and diff of a run (section 9) and the dataset manifest (section 10).
 
 ## Decisions this version settles
 
@@ -37,7 +37,7 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 - `NaN` compares **equal** to `NaN` for the purposes of a replay, because 8.2's wrapper is compared by the value it names and a record must compare equal to itself (9.3).
 - Two finite numbers are equal exactly when `|a - b| <= max(1e-9 * max(|a|, |b|), 1e-12)`: relative so that 7.2's second machine can satisfy the contract, absolute so that a value near zero is comparable at all, symmetric, and not loosenable per run, cell or value (9.3).
 - A divergence is reported, never raised: a replay produces its difference report, and a caller that needs a refusal derives one from it under `HEPH-LAB-409` (9.1, 9.4).
-- Section 10 is reserved: dataset manifests, and with them the digest scope of `data_hash`, are not yet specified, and an implementation chooses no scope of its own meanwhile (10, 7.1).
+- The digest scope of `data_hash` is the content hash of the canonical JSON of the `{path, sha256, bytes}` array sorted by `path`, each `sha256` taken over the file as the extractor wrote it; concatenated bytes and directory-walk order are forbidden, a date resolves to the latest release published on or before it and to no later one, and a manifest with an empty `files`, a duplicate `path`, a malformed `sha256`, a `bytes` that disagrees with its file, or a `files` entry with an undefined or missing member is refused rather than repaired (10.1 to 10.4).
 
 ## 1. Errors
 
@@ -392,8 +392,29 @@ A **caller that needs a refusal** rather than a report — a continuous-integrat
 
 ## 10. Dataset manifests
 
-**Reserved. This section is not yet specified.**
+10.1. A dataset manifest describes one dataset as one extractor wrote it. A manifest MUST carry every member of this table, with the type given, and MUST NOT carry a top-level member this section does not define.
 
-The digest scope of `data_hash` (7.1) — whether the hash is taken over raw bytes or over canonical JSON (4.1), and how the inputs of a multi-file dataset combine into one value — is settled here, together with the manifest a dataset carries.
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `dataset` | string | Name of the dataset |
+| `source` | string | Where the dataset came from upstream |
+| `release` | string | The upstream release the extractor read |
+| `extractor_version` | string | Version of the extractor that wrote the files |
+| `captured_at` | string | The date the extractor captured the release, as an RFC 3339 `full-date` |
+| `files` | array | Non-empty array of file entries |
 
-Until this section is written, an implementation records the `data_hash` it is given and MUST NOT choose a digest scope of its own (7.1).
+Each entry of `files` MUST carry every member of this table, and MUST NOT carry a member this section does not define.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `path` | string | Path of the file within the dataset |
+| `sha256` | string | Lowercase hex SHA-256 of the file's bytes, 64 characters |
+| `bytes` | non-negative integer | Length of the file in bytes |
+
+10.2. **The digest scope.** `data_hash` (7.1) is the content hash (4.2) of the canonical JSON (4.1) of the array of `{path, sha256, bytes}` objects, one per file of the manifest, sorted by `path` under byte-wise comparison. Each `sha256` is the lowercase hex SHA-256 of that file's bytes **as written by the extractor**, not of the upstream source.
+
+An implementation MUST NOT concatenate file bytes and hash the result, and MUST NOT take the order of a directory walk as the order of the array. A single-file dataset is an array of one.
+
+10.3. **Date-to-release resolution.** Given releases that each carry a `published` date, resolving as of a date *d* MUST yield the latest release whose `published` is less than or equal to *d*. Both `published` and *d* are RFC 3339 `full-date`s, and the comparison is on that calendar date. An implementation MUST refuse when no release satisfies that. A release published after *d* MUST NOT be reachable from *d*.
+
+10.4. **Refusals.** A manifest with an empty `files`, a duplicate `path`, a `sha256` that is not 64 lowercase hex characters, or a `bytes` that disagrees with the file it names is invalid. A `files` entry carrying a member this section does not define, or missing one it does, is invalid. An implementation MUST refuse an invalid manifest rather than repair it.
