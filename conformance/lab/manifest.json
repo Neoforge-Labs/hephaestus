@@ -1,8 +1,8 @@
 {
   "suite": "lab.manifest",
   "spec": "0.6.0",
-  "description": "Dataset manifests and the digest scope, spec section 10. `input.manifest` is a manifest document (10.1). `input.disk`, when present, maps a path to the exact UTF-8 text of a file written under a scratch root before the manifest is checked against it, so a case can pin a `bytes` that disagrees with the file it names (10.4). `expect.data_hash` is the manifest's `data_hash` (10.2): the content hash (4.2) of the canonical JSON (4.1) of the `{path, sha256, bytes}` array sorted by `path` byte-wise. `expect.error` is the registry code of the refusal (10.4). Every `sha256` in an input is a literal stated by the case, never read back from an implementation.",
-  "source": "Spec section 10 and the Wave 2 plan (docs/superpowers/plans/). Derived without this kit's code. Each file's `sha256` is hashlib.sha256 over the UTF-8 bytes of the literal text the case names (a.csv = 'id,value\\n1,2\\n', whose digest `shasum -a 256` reproduces: c15097c4...d93c), and `bytes` is the length of those bytes. Each `expect.data_hash` is 'sha256:' + hashlib.sha256 over rfc8785.dumps (the RFC 8785 reference package, pinned by conformance/hashing/) of the array of {path, sha256, bytes} objects sorted by path.encode('utf-8'), with no concatenation of file bytes. The refusal cases are the seven of 10.4 plus the unknown and missing top-level members of 10.1; each is invalid by reading the clause, not by running a parser.",
+  "description": "Dataset manifests and the digest scope, spec section 10. `input.manifest` is a manifest document (10.1). `input.disk`, when present, maps a path to the exact UTF-8 text of a file written under a scratch root before the manifest is checked against it, so a case can pin a `bytes` that disagrees with the file it names (10.4). `expect.data_hash` is the manifest's `data_hash` (10.2): the content hash (4.2) of the canonical JSON (4.1) of the `{path, sha256, bytes}` array sorted by `path` byte-wise. `expect.error` is the registry code of the refusal (10.4). A case whose `captured_at` is not a string pins 10.4's type clause: 10.1 gives that member as an RFC 3339 `full-date` string, so a number must not be read as a date, because an implementation that coerces one reports a capture that never happened. Every `sha256` in an input is a literal stated by the case, never read back from an implementation.",
+  "source": "Spec section 10 and the Wave 2 plan (docs/superpowers/plans/). Derived without this kit's code. Each file's `sha256` is hashlib.sha256 over the UTF-8 bytes of the literal text the case names (a.csv = 'id,value\\n1,2\\n', whose digest `shasum -a 256` reproduces: c15097c4...d93c), and `bytes` is the length of those bytes. Each `expect.data_hash` is 'sha256:' + hashlib.sha256 over rfc8785.dumps (the RFC 8785 reference package, pinned by conformance/hashing/) of the array of {path, sha256, bytes} objects sorted by path.encode('utf-8'), with no concatenation of file bytes. The refusal cases are the seven of 10.4, the unknown and missing top-level members of 10.1, and 10.4's type clause (a `captured_at` that is a number or null); each is invalid by reading the clause, not by running a parser. The numeric cases expect no date at all, which is the point: 0 and 1764028800 are there because a lax JSON-to-date coercion reads them as 1970-01-01 and 2026-11-25, and 10.4 says such a member is invalid rather than either of those dates.",
   "cases": [
     {
       "name": "single-file",
@@ -718,6 +718,72 @@
       },
       "expect": {
         "data_hash": "sha256:0053236c261700212396e25811b44581f5c36421001bc8b5dbee449deaa5b302"
+      }
+    },
+    {
+      "name": "captured-at-as-a-number",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": 0,
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": 13
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "captured-at-as-a-unix-timestamp",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": 1764028800,
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": 13
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "captured-at-as-null",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": null,
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": 13
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
       }
     }
   ]
