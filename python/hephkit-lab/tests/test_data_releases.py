@@ -13,8 +13,8 @@ from datetime import date, datetime
 import pytest
 from pydantic import ValidationError
 
-from hephkit.errors import LAB_424
-from hephkit.lab.data.releases import Release, TemporalError, release_as_of
+from hephkit.errors import LAB_412, LAB_424
+from hephkit.lab.data.releases import AmbiguousReleaseError, Release, TemporalError, release_as_of
 
 JAN = Release(release="2026-01", published=date(2026, 1, 15))
 FEB = Release(release="2026-02", published=date(2026, 2, 15))
@@ -30,7 +30,6 @@ def test_a_release_published_after_the_date_is_unreachable() -> None:
     day_before_newest = date(2026, 3, 14)
     for order in ([JAN, FEB, MAR], [MAR, FEB, JAN], [FEB, MAR, JAN]):
         assert release_as_of(order, day_before_newest) == FEB
-        assert release_as_of(order, day_before_newest) != MAR
 
 
 def test_a_date_equal_to_a_publication_date_resolves_to_that_release() -> None:
@@ -59,11 +58,26 @@ B = Release(release="r10", published=date(2026, 2, 15))
 
 def test_two_releases_sharing_the_latest_eligible_date_are_refused() -> None:
     for order in ([A, B], [B, A]):
-        with pytest.raises(TemporalError) as excinfo:
-            release_as_of(order, date(2026, 2, 15))
-        assert excinfo.value.code == LAB_424
+        with pytest.raises(AmbiguousReleaseError) as excinfo:
+            release_as_of(order, date(2026, 2, 20))
+        assert excinfo.value.code == LAB_412
         message = str(excinfo.value)
-        assert "2026-02-15" in message and "r9" in message and "r10" in message
+        assert "2026-02-20" in message  # the date asked about
+        assert "2026-02-15" in message  # the date they share
+        assert "r9" in message and "r10" in message
+
+
+def test_the_ambiguity_refusal_is_a_temporal_error_with_its_own_code() -> None:
+    with pytest.raises(TemporalError):
+        release_as_of([A, B], date(2026, 2, 20))
+    assert AmbiguousReleaseError.code == LAB_412
+    assert TemporalError.code == LAB_424
+
+
+def test_two_releases_with_the_same_label_on_the_same_date_are_still_refused() -> None:
+    twin = Release(release="r9", published=date(2026, 2, 15))
+    with pytest.raises(AmbiguousReleaseError, match="r9, r9"):
+        release_as_of([A, twin], date(2026, 2, 15))
 
 
 def test_a_collision_after_the_date_does_not_matter() -> None:
@@ -75,7 +89,7 @@ def test_a_collision_that_is_not_the_latest_eligible_does_not_matter() -> None:
     assert release_as_of([MAR, A, B], date(2026, 3, 20)) == MAR
 
 
-def test_the_comparison_is_on_the_calendar_date_not_an_instant() -> None:
+def test_a_datetime_is_refused_with_a_type_error() -> None:
     with pytest.raises(TypeError):
         release_as_of([JAN], datetime(2026, 1, 15, 0, 0))
 

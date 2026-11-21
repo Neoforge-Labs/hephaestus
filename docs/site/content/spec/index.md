@@ -45,7 +45,7 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are used as in RFC 2119
 - `NaN` compares **equal** to `NaN` for the purposes of a replay, because 8.2's wrapper is compared by the value it names and a record must compare equal to itself (9.3).
 - Two finite numbers are equal exactly when `|a - b| <= max(1e-9 * max(|a|, |b|), 1e-12)`: relative so that 7.2's second machine can satisfy the contract, absolute so that a value near zero is comparable at all, symmetric, and not loosenable per run, cell or value (9.3).
 - A divergence is reported, never raised: a replay produces its difference report, and a caller that needs a refusal derives one from it under `HEPH-LAB-409` (9.1, 9.4).
-- The digest scope of `data_hash` is the content hash of the canonical JSON of the `{path, sha256, bytes}` array sorted by `path`, each `sha256` taken over the file as the extractor wrote it; concatenated bytes and directory-walk order are forbidden, a date resolves to the latest release published on or before it and to no later one, and a manifest with an empty `files`, a duplicate `path`, a `path` that is not a relative path within the dataset, a malformed `sha256`, a `bytes` or `sha256` that disagrees with its file, or a `files` entry with an undefined or missing member is refused rather than repaired (10.1 to 10.4).
+- The digest scope of `data_hash` is the content hash of the canonical JSON of the `{path, sha256, bytes}` array sorted by `path`, each `sha256` taken over the file as the extractor wrote it; concatenated bytes and directory-walk order are forbidden, a date resolves to the latest release published on or before it and to no later one, and is refused where more than one release shares that latest date, `release` being opaque (10.1, 10.3), and a manifest with an empty `files`, a duplicate `path`, a `path` that is not a relative path within the dataset, a malformed `sha256`, a `bytes` or `sha256` that disagrees with its file, or a `files` entry with an undefined or missing member is refused rather than repaired (10.1 to 10.4).
 
 ## 1. Errors
 
@@ -418,6 +418,8 @@ Each entry of `files` MUST carry every member of this table, and MUST NOT carry 
 | `path` | string | Path of the file within the dataset: a relative path of one or more non-empty segments separated by `/`, with no leading `/` and no segment equal to `.` or `..` |
 | `sha256` | string | Lowercase hex SHA-256 of the file's bytes, 64 characters |
 | `bytes` | non-negative integer | Length of the file in bytes |
+
+`release` is opaque: implementations MUST NOT derive meaning from its form, and in particular MUST NOT derive an ordering from it. Releases are ordered by `published` (10.3) and by nothing else.
 
 10.2. **The digest scope.** `data_hash` (7.1) is the content hash (4.2) of the canonical JSON (4.1) of the array of `{path, sha256, bytes}` objects, one per file of the manifest, sorted by `path` under byte-wise comparison. Each `sha256` is the lowercase hex SHA-256 of that file's bytes **as written by the extractor**, not of the upstream source.
 

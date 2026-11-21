@@ -57,6 +57,12 @@ MIN_CASES = {
     # single file, bytes as the extractor wrote them), each refusal of 10.4 and
     # the unknown-member rule of 10.1.
     "lab.manifest": 10,
+    # Spec 10.3. The minimum covers the latest of several eligible, a date equal
+    # to a publication date, a later release unreachable from any input order,
+    # both refusals (no release at or before d: 424; a shared latest date: 412),
+    # a collision that does not matter (after d, or below a unique latest), and
+    # opaque labels (r9 and r10) that a lexical ordering would resolve wrongly.
+    "lab.releases": 10,
     # Design 9.3, effect sizes. The minimum covers each of the three statistics
     # at a value derivable by hand -- Cohen's d at zero and at a pooled
     # deviation that divides cleanly, Hedges' g where the correction factor is

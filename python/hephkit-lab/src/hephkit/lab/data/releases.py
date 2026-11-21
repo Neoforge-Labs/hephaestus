@@ -24,15 +24,32 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from hephkit.errors import LAB_424
+from hephkit.errors import LAB_412, LAB_424
 
-__all__ = ["Release", "TemporalError", "release_as_of"]
+__all__ = ["AmbiguousReleaseError", "Release", "TemporalError", "release_as_of"]
 
 
 class TemporalError(LookupError):
-    """No release was published on or before the date (``HEPH-LAB-424``)."""
+    """A date does not resolve to exactly one release (spec 10.3).
+
+    Raised bare, with ``HEPH-LAB-424``, when no release was published on or
+    before the date: the release asked for does not exist, the same "required
+    input is absent" that :class:`~hephkit.lab.data.manifest.MissingManifestError`
+    carries. :class:`AmbiguousReleaseError` is the subclass for the other
+    refusal, so ``except TemporalError`` catches both.
+    """
 
     code = LAB_424
+
+
+class AmbiguousReleaseError(TemporalError):
+    """More than one release shares the latest eligible date (``HEPH-LAB-412``).
+
+    Every input is present and a guard fired, which the registry routes to 412
+    as it does :class:`~hephkit.lab.data.manifest.ManifestError`.
+    """
+
+    code = LAB_412
 
 
 class Release(BaseModel):
@@ -48,8 +65,8 @@ def release_as_of(releases: Sequence[Release], when: date) -> Release:
     """Return the latest release published on or before ``when`` (10.3).
 
     Input order is irrelevant. Raises :class:`TemporalError` when nothing
-    qualifies (including an empty table) and when more than one release shares
-    the latest eligible ``published``. A collision among releases that are not
+    qualifies (including an empty table) and :class:`AmbiguousReleaseError` when
+    more than one release shares the latest eligible ``published``. A collision among releases that are not
     the latest eligible, or among releases published after ``when``, does not
     matter and does not refuse.
 
@@ -67,7 +84,7 @@ def release_as_of(releases: Sequence[Release], when: date) -> Release:
     latest = max(r.published for r in eligible)
     tied = sorted(r.release for r in eligible if r.published == latest)
     if len(tied) > 1:
-        raise TemporalError(
+        raise AmbiguousReleaseError(
             f"as of {when.isoformat()} the latest published date {latest.isoformat()} is shared by "
             f"releases {', '.join(tied)}; the resolution is ambiguous"
         )

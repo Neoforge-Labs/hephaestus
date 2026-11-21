@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ from hephkit.lab.data.manifest import (
     parse_manifest,
     verify_manifest,
 )
+from hephkit.lab.data.releases import Release, TemporalError, release_as_of
 from hephkit.lab.record import NONFINITE, NONFINITE_MEMBER, RunRecord, open_record, read_record
 from hephkit.lab.replay import compare
 from hephkit.lab.repro import Accelerator, ProvenanceRecord, capture
@@ -300,11 +302,26 @@ def run_manifest(case: Case, tmp_path: Path) -> None:
     assert compute() == expect["data_hash"]
 
 
+def run_releases(case: Case, _tmp_path: Path) -> None:
+    """One `lab.releases` case: a release table and a date in, a release label or a refusal out (spec 10.3)."""
+    i = case["input"]
+    expect = case["expect"]
+    table = [Release.model_validate(r) for r in i["releases"]]
+    when = date.fromisoformat(i["as_of"])
+    if "error" in expect:
+        with pytest.raises(TemporalError) as exc:
+            release_as_of(table, when)
+        assert exc.value.code == expect["error"]
+        return
+    assert release_as_of(table, when).release == expect["release"]
+
+
 RUNNERS: dict[str, Callable[[Case, Path], None]] = {
     "lab.config": run_config,
     "lab.provenance": run_record_case,
     "lab.diff": run_diff,
     "lab.manifest": run_manifest,
+    "lab.releases": run_releases,
 }
 
 

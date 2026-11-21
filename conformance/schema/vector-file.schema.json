@@ -29,6 +29,7 @@
         "lab.provenance",
         "lab.diff",
         "lab.manifest",
+        "lab.releases",
         "lab.effects",
         "lab.selection"
       ]
