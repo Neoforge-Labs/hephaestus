@@ -41,7 +41,13 @@ the "network" is a function the script writes itself.
 import tempfile
 from pathlib import Path
 
-from hephkit.lab.sources import CorruptSourceError, Request, SourceCache, SourceError, cache_key
+from hephkit.lab.sources import (
+    CorruptSourceError,
+    MissingSourceError,
+    Request,
+    SourceCache,
+    cache_key,
+)
 
 calls = []
 
@@ -68,7 +74,7 @@ print(cache_key(request, upstream_version="2026.10") == cache_key(request, upstr
 moved = SourceCache(directory, upstream_version="2026.11", offline=True)
 try:
     moved.fetch(request, fetcher)
-except SourceError as exc:
+except MissingSourceError as exc:
     print("refused:", exc)
 
 # The frozen bytes change on disk: refused, and not repaired by fetching again.
@@ -116,8 +122,12 @@ caller controls and can test.
 
 | Situation | Raised as | Code |
 | --- | --- | --- |
-| Not frozen, and the cache is `offline=True` | `SourceError` | [HEPH-LAB-424](/errors/HEPH-LAB-424) |
+| Not frozen, and the cache is `offline=True` | `MissingSourceError` | [HEPH-LAB-424](/errors/HEPH-LAB-424) |
 | A frozen body no longer matches the digest recorded when it was frozen, or its record is unreadable | `CorruptSourceError` | [HEPH-LAB-412](/errors/HEPH-LAB-412) |
+
+Both subclass `SourceError`, this module's error base, so one
+`except SourceError` covers "this frozen input is unusable" and `.code` is what
+tells the two apart.
 
 Offline, a miss raises before the fetcher is called, so an offline run cannot
 reach the network by accident. A corrupt entry is refused online as well as

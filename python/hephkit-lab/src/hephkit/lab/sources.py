@@ -26,12 +26,14 @@ never names a body that is not there. The disk is consulted on every call, so
 :meth:`SourceCache.frozen` reports what is on disk, not what the object remembers.
 
 Which error means what: an input that is not frozen, in a run that may not
-reach the network (``offline=True``), is :class:`SourceError` (``HEPH-LAB-424``,
-a frozen input is missing). A frozen body whose bytes no longer match the digest
-recorded when it was frozen, or a sidecar that cannot be read, exists but says
-the wrong thing: :class:`CorruptSourceError` (``HEPH-LAB-412``). It is refused
-online too and is not repaired by fetching again, because a silent refetch would
-hide the very change replay exists to find.
+reach the network (``offline=True``), is :class:`MissingSourceError`
+(``HEPH-LAB-424``, a frozen input is missing). A frozen body whose bytes no
+longer match the digest recorded when it was frozen, or a sidecar that cannot be
+read, exists but says the wrong thing: :class:`CorruptSourceError`
+(``HEPH-LAB-412``). It is refused online too and is not repaired by fetching
+again, because a silent refetch would hide the very change replay exists to
+find. Both are :class:`SourceError`, the module's base, so one ``except``
+covers "this frozen input is unusable" and ``.code`` is what tells them apart.
 
 Limits: the cache trusts its directory only as far as the recorded digest
 reaches; someone who rewrites body and sidecar together is not detected. The
@@ -58,19 +60,40 @@ from pydantic import BaseModel, ConfigDict
 from hephkit.errors import LAB_412, LAB_424
 from hephkit.hashing import content_hash
 
-__all__ = ["CorruptSourceError", "Request", "SourceCache", "SourceError", "cache_key"]
+__all__ = [
+    "CorruptSourceError",
+    "MissingSourceError",
+    "Request",
+    "SourceCache",
+    "SourceError",
+    "cache_key",
+]
 
 
-class SourceError(LookupError):
-    """A frozen input is not in the cache and the run may not fetch it (``HEPH-LAB-424``)."""
+class SourceError(ValueError):
+    """A frozen input cannot be used (``HEPH-LAB-412``).
 
-    code = LAB_424
+    This module's error base. Its subclasses name the specific refusals, and
+    :class:`MissingSourceError` is the absence case at ``HEPH-LAB-424``, so one
+    ``except SourceError`` covers every refusal here -- "this frozen input is
+    unusable" -- and ``.code`` is what tells them apart. That is the shape
+    ``lab.config``, ``lab.gates`` and ``lab.data.manifest`` already use (see
+    ``hephkit.lab``'s module docstring for the convention).
+    """
+
+    code = LAB_412
 
 
-class CorruptSourceError(ValueError):
+class CorruptSourceError(SourceError):
     """A frozen input exists but no longer matches what was recorded (``HEPH-LAB-412``)."""
 
     code = LAB_412
+
+
+class MissingSourceError(SourceError):
+    """A frozen input is not in the cache and the run may not fetch it (``HEPH-LAB-424``)."""
+
+    code = LAB_424
 
 
 class Request(BaseModel):
@@ -151,14 +174,15 @@ class SourceCache:
     def fetch(self, request: Request, fetcher: Callable[[Request], bytes]) -> bytes:
         """The frozen response to ``request``, fetching and freezing it on a miss.
 
-        Offline, a miss raises :class:`SourceError` and ``fetcher`` is not called.
+        Offline, a miss raises :class:`MissingSourceError` and ``fetcher`` is
+        not called.
         """
         key = cache_key(request, upstream_version=self._version)
         frozen = self._lookup(key)
         if frozen is not None:
             return frozen
         if self._offline:
-            raise SourceError(
+            raise MissingSourceError(
                 f"{request.method} {request.url} is not frozen for upstream version "
                 f"{self._version!r} and this run may not fetch it"
             )

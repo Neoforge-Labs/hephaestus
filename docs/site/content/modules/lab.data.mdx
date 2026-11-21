@@ -49,8 +49,8 @@ from pathlib import Path
 
 from hephkit.lab.data import (
     ManifestError,
+    NoEligibleReleaseError,
     Release,
-    TemporalError,
     data_card,
     data_hash,
     manifest_for,
@@ -92,7 +92,7 @@ releases = [
 print(release_as_of(releases, date(2026, 6, 30)).release)
 try:
     release_as_of(releases, date(2026, 3, 1))
-except TemporalError as exc:
+except NoEligibleReleaseError as exc:
     print("refused:", exc)
 
 # One byte moves: the frame is refused, not read.
@@ -171,12 +171,16 @@ the date they were published.
 | A manifest that is invalid: empty `files`, a duplicate `path`, a malformed `sha256`, a `path` that leaves the dataset, an undefined or missing member | `ManifestError` | [HEPH-LAB-412](/errors/HEPH-LAB-412) |
 | A file whose bytes or length disagree with the manifest, or a file the manifest names that is not there | `ManifestError` | [HEPH-LAB-412](/errors/HEPH-LAB-412) |
 | No manifest file at the path | `MissingManifestError` | [HEPH-LAB-424](/errors/HEPH-LAB-424) |
-| No release was published on or before the date | `TemporalError` | [HEPH-LAB-424](/errors/HEPH-LAB-424) |
+| A `captured_at` or a `published` that is not a date, such as a number | `ManifestError` / `TemporalError` | [HEPH-LAB-412](/errors/HEPH-LAB-412) |
+| No release was published on or before the date | `NoEligibleReleaseError` | [HEPH-LAB-424](/errors/HEPH-LAB-424) |
 | Two releases share the latest eligible date | `AmbiguousReleaseError` | [HEPH-LAB-412](/errors/HEPH-LAB-412) |
 
-`MissingManifestError` is a `ManifestError`, and `AmbiguousReleaseError` is a
-`TemporalError`, so `except ManifestError` and `except TemporalError` catch the
-family. An ambiguous resolution is refused rather than broken by sorting labels,
+Each module has one error base and names its specific refusals under it, so
+`except ManifestError` and `except TemporalError` each catch their module's
+whole family and `.code` is what tells the refusals apart. The absence cases are
+the `HEPH-LAB-424` subclasses: `MissingManifestError` for a manifest file that
+is not there, `NoEligibleReleaseError` for a date no release reaches.
+An ambiguous resolution is refused rather than broken by sorting labels,
 because `release` is opaque and any tiebreak would be a silent wrong answer
 ([spec 10.3](/spec#10-dataset-manifests)).
 

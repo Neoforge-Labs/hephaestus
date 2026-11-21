@@ -27,7 +27,13 @@ from hephkit.lab.data.manifest import (
     verify_manifest,
     write_manifest,
 )
-from hephkit.lab.data.releases import AmbiguousReleaseError, Release, TemporalError, release_as_of
+from hephkit.lab.data.releases import (
+    AmbiguousReleaseError,
+    NoEligibleReleaseError,
+    Release,
+    TemporalError,
+    release_as_of,
+)
 from hephkit.lab.data.snapshots import UnsupportedDvcLayoutError, pull, push
 
 __all__ = [
@@ -36,6 +42,7 @@ __all__ = [
     "Manifest",
     "ManifestError",
     "MissingManifestError",
+    "NoEligibleReleaseError",
     "Release",
     "TemporalError",
     "UnsupportedDvcLayoutError",

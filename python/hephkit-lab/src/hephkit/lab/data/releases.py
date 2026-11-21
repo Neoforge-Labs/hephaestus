@@ -26,17 +26,39 @@ from pydantic import BaseModel, ConfigDict
 
 from hephkit.errors import LAB_412, LAB_424
 
-__all__ = ["AmbiguousReleaseError", "Release", "TemporalError", "release_as_of"]
+__all__ = [
+    "AmbiguousReleaseError",
+    "NoEligibleReleaseError",
+    "Release",
+    "TemporalError",
+    "release_as_of",
+]
 
 
 class TemporalError(LookupError):
-    """A date does not resolve to exactly one release (spec 10.3).
+    """A release table or a date does not resolve to exactly one release (spec 10.3).
 
-    Raised bare, with ``HEPH-LAB-424``, when no release was published on or
-    before the date: the release asked for does not exist, the same "required
-    input is absent" that :class:`~hephkit.lab.data.manifest.MissingManifestError`
-    carries. :class:`AmbiguousReleaseError` is the subclass for the other
-    refusal, so ``except TemporalError`` catches both.
+    This module's error base, carrying ``HEPH-LAB-412``: every refusal here is
+    about a release table that exists and says something unusable, which is what
+    the registry routes to 412. Its subclasses name the specific refusals, and
+    :class:`NoEligibleReleaseError` is the absence case at ``HEPH-LAB-424``, so
+    one ``except TemporalError`` catches every refusal this module makes and
+    ``.code`` is what tells them apart. That is the shape ``lab.config``,
+    ``lab.gates`` and :mod:`~hephkit.lab.data.manifest` already use
+    (see ``hephkit.lab``'s module docstring for the convention).
+
+    A ``LookupError`` because resolution is what this module does.
+    """
+
+    code = LAB_412
+
+
+class NoEligibleReleaseError(TemporalError):
+    """No release was published on or before the date (``HEPH-LAB-424``).
+
+    The release asked for does not exist, the same "required input is absent"
+    that :class:`~hephkit.lab.data.manifest.MissingManifestError` carries. A
+    date that precedes every release is this, not the earliest release.
     """
 
     code = LAB_424
@@ -64,11 +86,12 @@ class Release(BaseModel):
 def release_as_of(releases: Sequence[Release], when: date) -> Release:
     """Return the latest release published on or before ``when`` (10.3).
 
-    Input order is irrelevant. Raises :class:`TemporalError` when nothing
-    qualifies (including an empty table) and :class:`AmbiguousReleaseError` when
-    more than one release shares the latest eligible ``published``. A collision among releases that are not
-    the latest eligible, or among releases published after ``when``, does not
-    matter and does not refuse.
+    Input order is irrelevant. Raises :class:`NoEligibleReleaseError` when
+    nothing qualifies (including an empty table) and
+    :class:`AmbiguousReleaseError` when more than one release shares the latest
+    eligible ``published``; both are :class:`TemporalError`. A collision among
+    releases that are not the latest eligible, or among releases published after
+    ``when``, does not matter and does not refuse.
 
     A ``datetime`` is a subclass of ``date`` whose comparison against a ``date``
     raises, so the guard below names the caller's mistake with a ``TypeError``
@@ -80,7 +103,7 @@ def release_as_of(releases: Sequence[Release], when: date) -> Release:
         raise TypeError("release_as_of takes a calendar date, not a datetime")
     eligible = [r for r in releases if r.published <= when]
     if not eligible:
-        raise TemporalError(f"no release was published on or before {when.isoformat()}")
+        raise NoEligibleReleaseError(f"no release was published on or before {when.isoformat()}")
     latest = max(r.published for r in eligible)
     tied = sorted(r.release for r in eligible if r.published == latest)
     if len(tied) > 1:

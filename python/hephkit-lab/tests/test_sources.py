@@ -12,7 +12,14 @@ from pathlib import Path
 import pytest
 
 from hephkit.errors import LAB_412, LAB_424
-from hephkit.lab.sources import CorruptSourceError, Request, SourceCache, SourceError, cache_key
+from hephkit.lab.sources import (
+    CorruptSourceError,
+    MissingSourceError,
+    Request,
+    SourceCache,
+    SourceError,
+    cache_key,
+)
 
 
 class Fetcher:
@@ -72,12 +79,31 @@ def test_offline_mode_serves_a_hit(tmp_path: Path) -> None:
 def test_offline_mode_refuses_a_miss_rather_than_fetching(tmp_path: Path) -> None:
     fetcher = Fetcher()
     cache = SourceCache(tmp_path, upstream_version="v1", offline=True)
-    with pytest.raises(SourceError) as info:
+    with pytest.raises(MissingSourceError) as info:
         cache.fetch(REQ, fetcher)
     assert info.value.code == LAB_424
-    assert isinstance(info.value, LookupError)
     assert fetcher.calls == []
     assert cache.frozen() == ()
+
+
+def test_every_refusal_is_a_source_error_and_code_tells_them_apart(tmp_path: Path) -> None:
+    """One base to catch, `.code` to distinguish (`hephkit.lab`'s convention).
+
+    The two refusals sat under unrelated builtin bases before this, so no single
+    `except` covered "this frozen input is unusable" and `except LookupError`
+    missed corruption outright.
+    """
+    SourceCache(tmp_path, upstream_version="v1").fetch(REQ, Fetcher())
+    _only(tmp_path, ".body").write_bytes(b"tampered")
+    offline = SourceCache(tmp_path, upstream_version="v1", offline=True)
+    with pytest.raises(SourceError):  # corrupt
+        offline.fetch(REQ, Fetcher())
+    with pytest.raises(SourceError):  # not frozen
+        offline.fetch(Request(method="GET", url="https://x/absent", body=None), Fetcher())
+    assert issubclass(CorruptSourceError, SourceError)
+    assert issubclass(MissingSourceError, SourceError)
+    assert SourceError.code == CorruptSourceError.code == LAB_412
+    assert MissingSourceError.code == LAB_424
 
 
 def test_a_body_distinguishes_two_posts_to_one_url(tmp_path: Path) -> None:
@@ -125,7 +151,7 @@ def test_a_corrupted_frozen_body_is_refused_rather_than_served(tmp_path: Path) -
 def test_a_sidecar_without_its_body_is_a_miss(tmp_path: Path) -> None:
     SourceCache(tmp_path, upstream_version="v1").fetch(REQ, Fetcher())
     _only(tmp_path, ".body").unlink()
-    with pytest.raises(SourceError):
+    with pytest.raises(MissingSourceError):
         SourceCache(tmp_path, upstream_version="v1", offline=True).fetch(REQ, Fetcher())
 
 

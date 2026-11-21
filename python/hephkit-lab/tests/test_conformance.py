@@ -311,17 +311,26 @@ def run_manifest(case: Case, tmp_path: Path) -> None:
 
 
 def run_releases(case: Case, _tmp_path: Path) -> None:
-    """One `lab.releases` case: a release table and a date in, a release label or a refusal out (spec 10.3)."""
+    """One `lab.releases` case: a release table and a date in, a release label or a refusal out (spec 10.3).
+
+    Building the table is inside `compute`, not before it: a case may pin the
+    refusal of a release document (a `published` that is not a date, 10.4), and
+    that refusal is raised where the table is built.
+    """
     i = case["input"]
     expect = case["expect"]
-    table = [Release.model_validate(r) for r in i["releases"]]
     when = date.fromisoformat(i["as_of"])
+
+    def compute() -> str:
+        table = [Release.model_validate(r) for r in i["releases"]]
+        return release_as_of(table, when).release
+
     if "error" in expect:
         with pytest.raises(TemporalError) as exc:
-            release_as_of(table, when)
+            compute()
         assert exc.value.code == expect["error"]
         return
-    assert release_as_of(table, when).release == expect["release"]
+    assert compute() == expect["release"]
 
 
 def within_tolerance(actual: float, expected: float) -> bool:
