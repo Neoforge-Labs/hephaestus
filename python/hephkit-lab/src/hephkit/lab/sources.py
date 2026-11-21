@@ -41,6 +41,15 @@ fetcher's exceptions propagate unchanged and freeze nothing. Entries are never
 evicted, and concurrent writers of one key are not locked (same key, same
 bytes, atomic replace, so the race is benign for a deterministic source).
 
+And the limit that can serve a wrong body: the key covers the method, the URL,
+the request body and the upstream version, and nothing else. A ``fetcher`` whose
+response varies on anything the key cannot see -- a header, a negotiated
+``Accept``, an authenticated identity, a locale -- collides with itself, and the
+first body frozen is the one served from then on. :class:`Request` cannot
+express a header, so a caller has no honest way to tell two such requests apart;
+a caller whose transport varies that way must put the distinguishing part into
+``upstream_version``, or into the URL, or use a cache directory per variant.
+
 Maturity: experimental.
 """
 
@@ -219,6 +228,12 @@ class SourceCache:
                 continue
             if isinstance(doc, dict) and doc.get("upstream_version") == self._version:
                 key = doc.get("key")
-                if isinstance(key, str):
+                # The key must be the one these two files are named after, not
+                # merely a key the record claims. `fetch` finds an entry by the
+                # hex of the key it computed, so a renamed sidecar would
+                # otherwise make `frozen()` report a key no `fetch` can find --
+                # and a report that lies about what is frozen is worse than a
+                # fetch that misses, which fails safe.
+                if isinstance(key, str) and key.split(":", 1)[-1] == sidecar.stem:
                     keys.append(key)
         return tuple(sorted(keys))

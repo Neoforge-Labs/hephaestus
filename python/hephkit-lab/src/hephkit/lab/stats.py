@@ -2,8 +2,25 @@
 
 An effect size says how large a difference is, which a p-value does not. This
 module holds the three the kit reports: Cohen's *d*, Hedges' *g* and Cliff's
-*delta*. They are arithmetic over sequences, so nothing here needs an extra and
-nothing here imports ``numpy`` or ``scipy``.
+*delta*. They are arithmetic over the values handed in, so nothing here needs an
+extra and nothing here imports ``numpy`` or ``scipy``.
+
+What these statistics are, and are not. Every one of them is **descriptive**: it
+summarises the two samples in front of it and makes no inference about a
+population, tests no hypothesis and produces no p-value. Cohen's *d* and Hedges'
+*g* standardise by a *pooled* deviation, which assumes the two groups have
+roughly a common variance; where they plainly do not, the pooled figure
+describes neither group and Cliff's *delta* -- which needs no variance at all --
+is the honest summary. Hedges' *g* applies ``1 - 3 / (4 n - 9)``, the standard
+closed-form approximation to the small-sample correction, not the exact
+correction ``J = gamma(m/2) / (sqrt(m/2) gamma((m-1)/2))`` with ``m = n - 2``
+that it approximates. The gap is widest exactly where the correction matters
+most: about 1.3% of *J* at ``n = 4``, 0.3% at ``n = 6``, 0.1% at ``n = 10`` and
+0.01% by ``n = 50``. The approximation is nonetheless what is reported, because
+it is what the published definition gives and what
+``conformance/lab/effects.json`` pins by hand; a reader comparing *g* against a
+tool that uses the gamma form should expect a difference of that order at a tiny
+sample, and neither is wrong.
 
 Definitions (the vectors in ``conformance/lab/effects.json`` are worked from
 these by hand):
@@ -26,10 +43,11 @@ observation has no sample variance; two constant samples have a pooled deviation
 of 0, so *d* is ``0/0`` when the means agree and an infinity when they do not.
 Each is :class:`StatsError` (``HEPH-LAB-422``), as are an empty sample, a value
 that is not a finite real number (``nan``, ``inf``, a ``bool``, a string) and a
-sample that is itself a ``str`` or ``bytes``. Cliff's *delta* has no variance
-term, so a single observation or a fully tied pair is a defined value (0 for
-all ties), not a refusal; it still refuses an empty sample, which would divide
-by zero.
+sample that is itself a ``str`` or ``bytes``. A sample may be any other
+iterable, so a polars ``Series`` or a NumPy array composes with these functions
+directly. Cliff's *delta* has no variance term, so a single observation or a
+fully tied pair is a defined value (0 for all ties), not a refusal; it still
+refuses an empty sample, which would divide by zero.
 
 Limits: the arithmetic is double precision, with means and sums of squares
 accumulated by ``math.fsum``. A constant sample is recognised by its minimum
@@ -104,11 +122,13 @@ from __future__ import annotations
 
 import math
 import warnings
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from enum import StrEnum
+from numbers import Real
 from statistics import fmean as mean
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from hephkit.errors import LAB_422
 from hephkit.lab._extras import require
@@ -126,7 +146,6 @@ __all__ = [
     "cliffs_delta",
     "cohens_d",
     "hedges_g",
-    "mean",
 ]
 
 
@@ -136,16 +155,33 @@ class StatsError(ValueError):
     code = LAB_422
 
 
-def _sample(values: Sequence[float], name: str) -> list[float]:
-    """Validate one sample and return it as floats: a sequence of finite real numbers."""
-    if isinstance(values, str | bytes) or not isinstance(values, Sequence):
-        raise StatsError(f"sample {name!r} must be a sequence of numbers, not {type(values).__name__}")
-    if not values:
+def _sample(values: Iterable[float], name: str) -> list[float]:
+    """Validate one sample and return it as floats: finite real numbers, in order.
+
+    Any iterable that is not a ``str`` or ``bytes`` is accepted and materialised
+    with ``list()``. That is deliberately wider than ``Sequence``: a polars
+    ``Series`` and a NumPy ``ndarray`` are neither, so ``cohens_d(frame["a"],
+    frame["b"])`` -- the obvious composition of :mod:`hephkit.lab.data` with
+    this module -- was refused, and so was ``.to_numpy()``. A ``str`` or
+    ``bytes`` stays refused: it is iterable, and iterating it would read
+    characters as observations.
+
+    Each value must be a :class:`numbers.Real`, which ``numpy.int64`` and
+    ``numpy.float64`` are and ``int``/``float`` alone are not, so
+    ``list(numpy.array([1, 2, 3]))`` works too. The two refusals that are
+    *judgements* rather than type narrowness are unchanged: a ``bool`` is not an
+    observation even though it is an ``int``, and a non-finite value is not a
+    measurement.
+    """
+    if isinstance(values, str | bytes) or not isinstance(values, Iterable):
+        raise StatsError(f"sample {name!r} must be an iterable of numbers, not {type(values).__name__}")
+    materialised = list(values)
+    if not materialised:
         raise StatsError(f"sample {name!r} is empty")
     out: list[float] = []
-    for i, v in enumerate(values):
+    for i, v in enumerate(materialised):
         # bool is an int subclass, and True as an observation is a mistake, not a 1.
-        if isinstance(v, bool) or not isinstance(v, int | float):
+        if isinstance(v, bool) or not isinstance(v, Real):
             raise StatsError(f"sample {name!r}[{i}] is not a real number: {v!r}")
         x = float(v)
         if not math.isfinite(x):
@@ -160,7 +196,7 @@ def _sum_of_squares(xs: list[float]) -> float:
     return math.fsum((x - mean) ** 2 for x in xs)
 
 
-def cohens_d(a: Sequence[float], b: Sequence[float]) -> float:
+def cohens_d(a: Iterable[float], b: Iterable[float]) -> float:
     """Cohen's *d* for ``a`` against ``b``: the mean difference over the pooled standard deviation.
 
     Refuses (``StatsError``) an empty sample, a sample of fewer than two
@@ -184,17 +220,23 @@ def cohens_d(a: Sequence[float], b: Sequence[float]) -> float:
     return d
 
 
-def hedges_g(a: Sequence[float], b: Sequence[float]) -> float:
+def hedges_g(a: Iterable[float], b: Iterable[float]) -> float:
     """Hedges' *g*: Cohen's *d* times ``1 - 3 / (4 (n_a + n_b) - 9)``.
 
     Takes every refusal of :func:`cohens_d`, which it calls.
+
+    Each sample is validated here and the lists are what reach
+    :func:`cohens_d`, rather than the caller's objects being read twice: an
+    argument may be any iterable, and a one-pass one would be empty by the time
+    a second read of it asked for its length.
     """
-    d = cohens_d(a, b)
-    n = len(a) + len(b)
+    xa, xb = _sample(a, "a"), _sample(b, "b")
+    d = cohens_d(xa, xb)
+    n = len(xa) + len(xb)
     return d * (1.0 - 3.0 / (4.0 * n - 9.0))
 
 
-def cliffs_delta(a: Sequence[float], b: Sequence[float]) -> float:
+def cliffs_delta(a: Iterable[float], b: Iterable[float]) -> float:
     """Cliff's *delta*: ``(#(x > y) - #(x < y)) / (n_a n_b)`` over all pairs, ties in neither count.
 
     Refuses an empty sample and non-finite input. Unlike Cohen's *d* it needs
@@ -333,13 +375,28 @@ def choose_test(request: TestRequest) -> TestChoice:
 
 
 class Interval(BaseModel):
-    """A confidence interval: ``low <= high``, at a ``confidence`` strictly between 0 and 1."""
+    """A confidence interval: ``low <= high``, at a ``confidence`` strictly between 0 and 1.
+
+    Both halves of that sentence are enforced, because this is an exported model
+    a caller constructs, not only what :func:`bootstrap_ci` returns: an interval
+    built the wrong way round would read as a valid one and bracket nothing.
+    A ``confidence`` outside (0, 1) is refused by the field, inverted bounds by
+    the validator below; each is a ``ValidationError``, as a model's own
+    constraint is, rather than a :class:`StatsError` (which is what the
+    functions raise about a *sample*).
+    """
 
     model_config = ConfigDict(frozen=True)
 
     low: float
     high: float
-    confidence: float
+    confidence: Annotated[float, Field(gt=0.0, lt=1.0)]
+
+    @model_validator(mode="after")
+    def _low_is_not_above_high(self) -> Interval:
+        if self.low > self.high:
+            raise ValueError(f"an interval needs low <= high, not low={self.low} high={self.high}")
+        return self
 
 
 def _confidence(confidence: float) -> float:
@@ -357,7 +414,7 @@ def _seed(seed: int) -> int:
 
 
 def bootstrap_ci(
-    sample: Sequence[float],
+    sample: Iterable[float],
     statistic: Callable[[Sequence[float]], float] = mean,
     *,
     confidence: float = 0.95,
@@ -366,6 +423,7 @@ def bootstrap_ci(
 ) -> Interval:
     """A bootstrap (BCa) confidence interval of ``statistic`` over ``sample``.
 
+    ``sample`` may be any iterable that is not a ``str`` or ``bytes``, and
     ``statistic`` receives each resample as a ``list`` of floats. Refuses
     (``StatsError``) a sample of fewer than two observations, a constant sample
     (a zero-width interval would read as certainty), an empty or non-finite
@@ -409,6 +467,13 @@ def bootstrap_ci(
     # Backstop behind scipy's own DegenerateDataWarning, which is promoted to an
     # error above: no statistic is known to reach here, and it is kept so a nan
     # or infinite bound can never be returned as an Interval.
+    #
+    # The `inf` path was tried and does not reach here either: a statistic that
+    # returns `inf` (always, or only for the resamples holding two or more
+    # zeros) makes scipy's BCa computation raise its own DegenerateDataWarning
+    # -- "The BCa confidence interval cannot be calculated" -- which the block
+    # above promotes to a StatsError. So scipy refuses first, and this stays a
+    # backstop rather than a reachable branch.
     if not (math.isfinite(low) and math.isfinite(high)):  # pragma: no cover
         raise StatsError("the bootstrap distribution of the statistic has no finite interval")
     return Interval(low=low, high=high, confidence=level)

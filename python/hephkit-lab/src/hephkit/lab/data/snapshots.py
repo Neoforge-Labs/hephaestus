@@ -13,10 +13,16 @@ SHA-256 digests, and no digest is derived here.
 
 :func:`pull` is the one function in this package that handles bytes it did not
 write, so it distrusts them twice: everything is fetched into a scratch
-directory and verified there, and only then copied into ``into``, so a refused
-pull leaves ``into`` as it found it. Each destination path is resolved first and
-refused if it leaves ``into``: ``verify_manifest`` checks a path lexically
-(spec 10.1 forbids ``.`` and ``..``), which a symlink inside ``into`` defeats.
+directory and verified there, and only then copied into ``into``, so a **refused**
+pull leaves ``into`` as it found it -- every refusal this module makes happens
+before the first byte is written there. A **failed copy** is a weaker promise:
+the copies run one destination at a time, each atomic in itself, so an I/O
+error partway through leaves the destinations already copied in place and the
+rest absent. Nothing half-written, but not all-or-nothing either; a caller that
+needs that must pull into a directory it can discard. Each destination path is
+resolved first and refused if it leaves ``into``: ``verify_manifest`` checks a
+path lexically (spec 10.1 forbids ``.`` and ``..``), which a symlink inside
+``into`` defeats.
 
 DVC lives behind the ``data`` extra (ADR 0023) and is imported inside the
 functions that need it, through :func:`~hephkit.lab._extras.require`, so a
@@ -241,9 +247,16 @@ def _fetch(repo: Any, work: Path, md5: str, remote: str, dvc_exceptions: ModuleT
     )
     try:
         repo.pull()
-    except dvc_exceptions.DvcException as exc:
+    except (dvc_exceptions.DvcException, OSError) as exc:
         # Failing to obtain the snapshot is absence (424), not corruption: a
         # digest disagreement is only ever found by `verify_manifest` (412).
+        #
+        # `OSError` for the same reason `_read_pointer` catches it, and
+        # symmetrically with it: a host that answered the pointer read can die
+        # mid-fetch (connection reset, a timeout, a provider's I/O error), and a
+        # raw OSError reaching the caller is the uncoded outcome the 412/424
+        # split exists to prevent. Narrow on purpose -- this one call, and only
+        # DVC's family and OSError.
         raise MissingManifestError(
             f"the snapshot could not be fetched from remote {remote!r}: {exc}"
         ) from exc
@@ -256,7 +269,10 @@ def pull(manifest: Manifest, *, into: Path, remote: str) -> None:
     What arrives is distrusted. It is fetched into scratch space and checked with
     ``verify_manifest`` there; a file whose bytes disagree with the manifest's
     digests, or that is missing, raises ``ManifestError`` (``HEPH-LAB-412``) and
-    ``into`` is left exactly as it was. A snapshot that cannot be obtained -- the
+    ``into`` is left exactly as it was, because every refusal happens before the
+    first byte is written there. An I/O error during the copy itself is not a
+    refusal and makes no such promise -- the destinations already copied stay.
+    A snapshot that cannot be obtained -- the
     remote never received it, is unreachable, or lacks an object -- is
     ``MissingManifestError`` (``HEPH-LAB-424``), never 412. Every destination path is
     resolved before anything is written, and one that leaves ``into`` (a symlink

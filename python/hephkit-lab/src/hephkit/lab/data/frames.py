@@ -33,6 +33,11 @@ __all__ = ["query", "read_frame"]
 
 _FORMATS = (".csv", ".parquet")
 
+#: The name :func:`query` registers each file's relation under while it copies
+#: it into a table. One file at a time, unregistered straight after, so it never
+#: collides with a manifest ``path`` and is never visible to the caller's SQL.
+_SOURCE_VIEW = "_hephkit_manifest_source"
+
 
 def _only(manifest: Manifest, entry: FileDigest) -> Manifest:
     """``manifest`` narrowed to one entry, so verification touches only that file."""
@@ -101,9 +106,26 @@ def query(manifest: Manifest, *, root: Path, sql: str) -> pl.DataFrame:
                     if suffix == ".parquet"
                     else connection.read_csv(handle)
                 )
-                connection.execute(
-                    f"CREATE TABLE {_sql_identifier(entry.path)} AS SELECT * FROM relation"
-                )
+                # Registered under a fixed internal name rather than left to
+                # DuckDB's replacement scan, which would resolve the bare word
+                # `relation` out of this frame's locals: the query would then
+                # depend on a binding nothing reads, and a linter that removed
+                # the "unused" local would break it.
+                #
+                # Not `relation.create(entry.path)`: that does not quote its
+                # argument, so a manifest path with a directory in it --
+                # `raw/a.csv`, the shape the docs page itself uses -- is read as
+                # schema `raw`, table `a` and fails with "Schema with name raw/a
+                # does not exist" (verified on duckdb 2.0.0). The quoted
+                # CREATE TABLE below is what gets the path in verbatim.
+                connection.register(_SOURCE_VIEW, relation)
+                try:
+                    connection.execute(
+                        f"CREATE TABLE {_sql_identifier(entry.path)} "
+                        f"AS SELECT * FROM {_SOURCE_VIEW}"
+                    )
+                finally:
+                    connection.unregister(_SOURCE_VIEW)
         # Loaded as tables, then the door is shut: with external access on, DuckDB
         # resolves a bare file name or `read_csv('...')` straight from disk, so a
         # file the manifest omits (or any file the process can read) would be

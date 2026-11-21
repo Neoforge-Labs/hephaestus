@@ -9,7 +9,15 @@ because that release is itself from the future of the date.
 The resolver filters first and chooses second, so a release published after
 the date is never a candidate and no ordering of the input can make it one.
 Both sides are RFC 3339 ``full-date``s compared as calendar dates; a
-``datetime`` is not a date and is refused rather than silently truncated.
+``datetime`` is not a date and is refused rather than silently truncated, on
+the date asked for and on each release's ``published`` alike.
+
+``published`` is the only thing 10.3 orders releases by, so a ``published`` the
+model would read as some other date is the one input that can make this module
+answer wrongly with no refusal and no warning. A number is the case that bites:
+pydantic's lax mode reads ``0`` as 1970-01-01, which would resolve every date
+against an epoch nobody published on. :class:`Release` therefore refuses a
+``published`` whose type is not 10.3's (10.4) rather than coercing it.
 
 Two releases sharing the latest eligible ``published`` are ambiguous: ``release``
 is an opaque label (10.1), so no ordering of labels is a meaningful tiebreak and
@@ -22,7 +30,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from hephkit.errors import LAB_412, LAB_424
 
@@ -47,7 +55,11 @@ class TemporalError(LookupError):
     ``lab.gates`` and :mod:`~hephkit.lab.data.manifest` already use
     (see ``hephkit.lab``'s module docstring for the convention).
 
-    A ``LookupError`` because resolution is what this module does.
+    A ``LookupError`` because resolution is what this module does, and because
+    a ``ValueError`` could not be raised from :class:`Release`'s validator and
+    reach the caller: pydantic converts a ``ValueError`` or ``AssertionError``
+    raised in a validator into a ``ValidationError``, which carries no ``.code``,
+    and lets anything else through unchanged.
     """
 
     code = LAB_412
@@ -81,6 +93,27 @@ class Release(BaseModel):
 
     release: str
     published: date
+
+    @field_validator("published", mode="before")
+    @classmethod
+    def _published_is_a_date_not_a_number(cls, value: object) -> object:
+        """10.4: a ``published`` whose type is not 10.3's is invalid, not a date.
+
+        ``strict=True`` is not the way to get this. The JSON string form is
+        required -- a release table arrives decoded from JSON or YAML -- and
+        strict mode would reject it. So the gate is on the type that arrives:
+        the ``full-date`` string, or a ``date`` from Python, and nothing else.
+
+        A ``datetime`` is refused with the rest, although it is a ``date``
+        subclass: pydantic would truncate one at midnight to a calendar date,
+        and this module's whole subject is that a date is not a moment.
+        """
+        if isinstance(value, datetime) or not isinstance(value, str | date):
+            raise TemporalError(
+                f"published must be an RFC 3339 full-date string or a date, "
+                f"not {type(value).__name__}: {value!r}"
+            )
+        return value
 
 
 def release_as_of(releases: Sequence[Release], when: date) -> Release:

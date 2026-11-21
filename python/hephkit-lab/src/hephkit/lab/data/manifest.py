@@ -11,21 +11,30 @@ walk never reaches the hash.
 
 Every refusal of an invalid manifest (10.4) is a :class:`ManifestError` carrying
 ``HEPH-LAB-412``: the registry routes "an artefact that exists but says the
-wrong thing" there, and 422 is for experiment configs. A manifest file that is
-absent altogether is ``HEPH-LAB-424``, as :class:`MissingManifestError`.
+wrong thing" there, and 422 is for what a run was asked to do -- its config,
+or a statistical request. A manifest file that is absent altogether is
+``HEPH-LAB-424``, as :class:`MissingManifestError`.
 
-Which layer refuses what: the models refuse everything a document can be wrong
-about on its own (an empty ``files``, a duplicate ``path``, a malformed
-``sha256``, a negative or non-integer ``bytes``, an undefined or missing
-member). Whether ``bytes`` agrees with a file is a fact about a directory, so
-:func:`verify_manifest` refuses that, given the root the paths are relative to.
+Which layer refuses what, which is the layering 10.4 states: the models refuse
+everything a document can be wrong about on its own (an empty ``files``, a
+duplicate ``path``, a malformed ``sha256``, a negative or non-integer ``bytes``,
+an undefined or missing member, a member whose type is not 10.1's). Whether
+``bytes`` or ``sha256`` agrees with a file is a fact about a directory, so
+:func:`verify_manifest` refuses those two, given the root the paths are relative
+to, and only where the file is there to check.
+
+Why the type check is a refusal and not a coercion: 10.1 gives ``captured_at``
+as an RFC 3339 ``full-date`` string, and pydantic's lax mode would read a number
+as a date in 1970. A manifest that says it was captured at an epoch nobody
+captured anything at is the kind of plausible wrong value this kit exists to
+refuse, so :class:`Manifest` refuses the type instead (10.4).
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -96,6 +105,30 @@ class Manifest(BaseModel):
     captured_at: date
     files: tuple[FileDigest, ...]
 
+    @field_validator("captured_at", mode="before")
+    @classmethod
+    def _captured_at_is_a_date_not_a_number(cls, value: object) -> object:
+        """10.4: a ``captured_at`` whose type is not 10.1's is invalid, not a date.
+
+        ``strict=True`` on this model is not the way to get this, as it is on
+        :class:`FileDigest`. 10.1 gives ``captured_at`` as an RFC 3339
+        ``full-date`` string, a manifest arrives decoded from JSON, and strict
+        mode would reject that string. So the gate is on the type that arrives:
+        the string form, or a ``date`` from Python, and nothing else. Without it
+        pydantic's lax mode reads ``0`` as 1970-01-01, and the manifest then
+        describes a capture that never happened.
+
+        A ``datetime`` is refused with the rest, although it is a ``date``
+        subclass: pydantic would truncate one at midnight, and 10.1's type is a
+        calendar date rather than a moment.
+        """
+        if isinstance(value, datetime) or not isinstance(value, str | date):
+            raise ValueError(
+                f"captured_at must be an RFC 3339 full-date string or a date, "
+                f"not {type(value).__name__}: {value!r}"
+            )
+        return value
+
     @field_validator("files")
     @classmethod
     def _files_are_non_empty_and_unique(cls, files: tuple[FileDigest, ...]) -> tuple[FileDigest, ...]:
@@ -149,7 +182,16 @@ def digest_file(path: Path, *, relative_to: Path) -> FileDigest:
 
 
 def _walk(directory: Path) -> list[Path]:
-    """Every file under ``directory``. Order is the filesystem's and means nothing."""
+    """Every file under ``directory``. Order is the filesystem's and means nothing.
+
+    A symlinked *directory* is not descended into, so a link cannot make the
+    walk leave the dataset or loop. A symlinked *file* is included, and is
+    digested as its target's bytes under the link's own path: describing a
+    dataset you assembled that way is legitimate, and the digest still names
+    exactly the bytes a reader will get. The asymmetry is deliberate but worth
+    knowing, because it does not survive a round trip through
+    :func:`~hephkit.lab.data.snapshots.pull`, which refuses a link on arrival.
+    """
     found: list[Path] = []
     for entry in directory.iterdir():
         if entry.is_file():
