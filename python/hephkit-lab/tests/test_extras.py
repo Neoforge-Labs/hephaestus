@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -33,3 +34,13 @@ def test_a_module_that_fails_inside_its_own_import_is_not_reported_as_absent(
     with pytest.raises(ModuleNotFoundError) as exc:
         require("hephkit_broken_mod", extra="data")
     assert not isinstance(exc.value, MissingExtraError)
+
+
+def test_a_missing_extra_names_the_extra_to_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    # `None` in sys.modules is the interpreter's own "this import is blocked": it
+    # raises ModuleNotFoundError whether or not the library is installed, so the
+    # test means the same thing in the spine environment and the full one.
+    monkeypatch.setitem(sys.modules, "polars", None)
+    with pytest.raises(MissingExtraError) as exc:
+        require("polars", extra="data")
+    assert "hephkit-lab[data]" in str(exc.value)

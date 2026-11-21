@@ -95,7 +95,13 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 # Registered for parity with `hephkit`, whose `test-fast` task deselects it. No
 # lab test is slow yet; the marker exists so the two task sets stay identical.
-markers = ["slow: long-running tests; deselect with -m 'not slow'"]
+markers = [
+    "slow: long-running tests; deselect with -m 'not slow'",
+    # A test that imports a library from an extra (polars, duckdb, ...). The
+    # spine-only task `test-spine` deselects these; the tasks that carry the
+    # coverage gate install the extras and run them.
+    "extras: needs a library from an optional extra; deselected by `test-spine`",
+]
 filterwarnings = ["error"]
 
 [tool.coverage.run]
@@ -154,4 +160,14 @@ ignore_missing_imports = true
 # this module invents raises `AttributeError` instead of passing silently.
 [[tool.mypy.overrides]]
 module = ["mlflow", "mlflow.*"]
+ignore_missing_imports = true
+
+# `lab.data.frames` reaches polars and duckdb only through `require(...)`, which
+# returns a bare `ModuleType`, so no attribute of either is checked here whether
+# or not they are installed. The only direct reference is the `pl.DataFrame`
+# annotation under `TYPE_CHECKING`; this override lets that import resolve in the
+# spine environment, where neither is installed (ADR 0023). With the `data` extra
+# installed, both ship their own types and the override is inert.
+[[tool.mypy.overrides]]
+module = ["polars", "polars.*", "duckdb", "duckdb.*"]
 ignore_missing_imports = true
