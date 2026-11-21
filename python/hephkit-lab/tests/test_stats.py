@@ -410,21 +410,26 @@ def test_the_statistic_is_the_one_asked_for() -> None:
 def test_a_nominal_95_interval_covers_a_known_parameter_about_95_percent_of_the_time() -> None:
     import numpy
 
-    # Normal(10, 2), n = 100, true mean 10, BCa. The band is nominal +/- 0.02, fixed
-    # before this design was measured and never adjusted to a measurement; 400
-    # replicates keep the test near two seconds, at a standard error of about 0.011.
-    # An interval that is too narrow (the sample's min and max
-    # would cover ~100%, a point estimate 0%) or too wide falls outside it.
+    # Normal(10, 2), n = 100, true mean 10, BCa. The tolerance is derived, not chosen:
+    # the measured coverage of `replicates` independent intervals has Monte Carlo
+    # standard error sqrt(p (1 - p) / replicates) at p = 0.95, which is about 0.0109
+    # at 400 replicates; three of them is 0.0327, so the band is 0.95 +/- 0.0327
+    # and a correct interval falls outside it about 0.3% of the time. Changing
+    # `replicates` moves the band with it. An interval that is too narrow or too
+    # wide by any meaningful amount lands many SE outside (the sample's min and max
+    # would cover ~100%, a point estimate 0%).
     true_mean, sd, n = 10.0, 2.0, 100
     replicates, resamples = 400, 300
     rng = numpy.random.default_rng(20261121)
+    nominal = 0.95
+    tolerance = 3 * math.sqrt(nominal * (1 - nominal) / replicates)
     covered = 0
     for i in range(replicates):
         draw = rng.normal(true_mean, sd, size=n).tolist()
         ci = bootstrap_ci(draw, resamples=resamples, confidence=0.95, seed=i)
         covered += ci.low <= true_mean <= ci.high
     coverage = covered / replicates
-    assert 0.93 <= coverage <= 0.97, coverage
+    assert abs(coverage - nominal) <= tolerance, (coverage, tolerance)
 
 
 @pytest.mark.extras
