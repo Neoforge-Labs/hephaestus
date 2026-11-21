@@ -179,6 +179,15 @@ def test_bytes_disagreeing_with_the_file_is_refused(tmp_path: Path) -> None:
     verify_manifest(parse_manifest(document([digest("a.csv", b"12345")])), tmp_path)
 
 
+def test_a_sha256_disagreeing_with_the_file_is_refused(tmp_path: Path) -> None:
+    write_tree(tmp_path, {"a.csv": b"12345"})
+    wrong = parse_manifest(document([digest("a.csv", b"12346")]))
+    assert wrong.files[0].bytes == 5
+    with pytest.raises(ManifestError, match="sha256") as exc:
+        verify_manifest(wrong, tmp_path)
+    assert exc.value.code == LAB_412
+
+
 def test_a_file_the_manifest_names_but_the_root_lacks_is_refused(tmp_path: Path) -> None:
     manifest = parse_manifest(document([digest("gone.csv", b"1")]))
     with pytest.raises(ManifestError, match="gone.csv"):

@@ -180,7 +180,7 @@ def data_hash(manifest: Manifest) -> str:
 
 
 def verify_manifest(manifest: Manifest, root: Path) -> None:
-    """Refuse a manifest whose ``bytes`` disagrees with the file it names (10.4).
+    """Refuse a manifest whose ``bytes`` or ``sha256`` disagrees with the file it names (10.4).
 
     A file the manifest names that ``root`` does not hold is refused too: the
     manifest then describes a dataset that is not the one on disk.
@@ -189,10 +189,14 @@ def verify_manifest(manifest: Manifest, root: Path) -> None:
         target = root / entry.path
         if not target.is_file():
             raise ManifestError(f"the manifest names {entry.path!r}, which {root} does not hold")
-        actual = target.stat().st_size
-        if actual != entry.bytes:
+        actual = digest_file(target, relative_to=root)
+        if actual.bytes != entry.bytes:
             raise ManifestError(
-                f"{entry.path!r}: the manifest says {entry.bytes} bytes, the file is {actual}"
+                f"{entry.path!r}: the manifest says {entry.bytes} bytes, the file is {actual.bytes}"
+            )
+        if actual.sha256 != entry.sha256:
+            raise ManifestError(
+                f"{entry.path!r}: the manifest says sha256 {entry.sha256}, the file hashes to {actual.sha256}"
             )
 
 

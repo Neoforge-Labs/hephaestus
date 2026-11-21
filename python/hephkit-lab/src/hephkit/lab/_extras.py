@@ -4,8 +4,6 @@ The spine installs with no scientific stack (ADR 0023), so a module that needs
 one -- pandas, polars, DVC -- imports it lazily through :func:`require`, which
 turns a bare ``ModuleNotFoundError`` into one that names the extra to install.
 Nothing else lives here.
-
-Maturity: experimental.
 """
 
 from __future__ import annotations

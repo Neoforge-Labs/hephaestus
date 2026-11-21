@@ -34,7 +34,6 @@
 - {name: lab.gates, home: python, status: shipped, maturity: experimental, spec_section: null}
 - {name: lab.track, home: python, status: shipped, maturity: experimental, spec_section: null}
 - {name: lab.data, home: python, status: shipped, maturity: experimental, spec_section: "10"}
-- {name: lab.extras, home: python, status: shipped, maturity: experimental, spec_section: null}
 
 # Rust core
 - {name: hephkit-core, home: rust, status: shipped, maturity: experimental, spec_section: null}

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from hephkit.lab.extras import MissingExtraError, require
+from hephkit.lab._extras import MissingExtraError, require
 
 
 def test_require_returns_an_importable_module() -> None:

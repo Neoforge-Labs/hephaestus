@@ -2,7 +2,7 @@
   "suite": "lab.manifest",
   "spec": "0.6.0",
   "description": "Dataset manifests and the digest scope, spec section 10. `input.manifest` is a manifest document (10.1). `input.disk`, when present, maps a path to the exact UTF-8 text of a file written under a scratch root before the manifest is checked against it, so a case can pin a `bytes` that disagrees with the file it names (10.4). `expect.data_hash` is the manifest's `data_hash` (10.2): the content hash (4.2) of the canonical JSON (4.1) of the `{path, sha256, bytes}` array sorted by `path` byte-wise. `expect.error` is the registry code of the refusal (10.4). Every `sha256` in an input is a literal stated by the case, never read back from an implementation.",
-  "source": "Spec section 10 and the Wave 2 plan (docs/superpowers/plans/). Derived without this kit's code. Each file's `sha256` is hashlib.sha256 over the UTF-8 bytes of the literal text the case names (a.csv = 'id,value\\n1,2\\n', whose digest `shasum -a 256` reproduces: c15097c4...d93c), and `bytes` is the length of those bytes. Each `expect.data_hash` is 'sha256:' + hashlib.sha256 over rfc8785.dumps (the RFC 8785 reference package, pinned by conformance/hashing/) of the array of {path, sha256, bytes} objects sorted by path.encode('utf-8'), with no concatenation of file bytes. The refusal cases are the five of 10.4 plus the unknown and missing top-level members of 10.1; each is invalid by reading the clause, not by running a parser.",
+  "source": "Spec section 10 and the Wave 2 plan (docs/superpowers/plans/). Derived without this kit's code. Each file's `sha256` is hashlib.sha256 over the UTF-8 bytes of the literal text the case names (a.csv = 'id,value\\n1,2\\n', whose digest `shasum -a 256` reproduces: c15097c4...d93c), and `bytes` is the length of those bytes. Each `expect.data_hash` is 'sha256:' + hashlib.sha256 over rfc8785.dumps (the RFC 8785 reference package, pinned by conformance/hashing/) of the array of {path, sha256, bytes} objects sorted by path.encode('utf-8'), with no concatenation of file bytes. The refusal cases are the six of 10.4 plus the unknown and missing top-level members of 10.1; each is invalid by reading the clause, not by running a parser.",
   "cases": [
     {
       "name": "single-file",
@@ -353,6 +353,31 @@
               "path": "a.csv",
               "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
               "bytes": 14
+            }
+          ]
+        },
+        "disk": {
+          "a.csv": "id,value\n1,2\n"
+        }
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "sha256-disagrees-with-the-file",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "d6f890cb2a8c65fda240a95fefbfd11508d2e7dc3951cff8d77750988bc6526a",
+              "bytes": 13
             }
           ]
         },
