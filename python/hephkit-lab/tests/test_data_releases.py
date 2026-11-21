@@ -53,10 +53,26 @@ def test_releases_out_of_chronological_order_resolve_the_same() -> None:
     assert release_as_of([MAR, JAN, FEB], when) == release_as_of([JAN, FEB, MAR], when) == FEB
 
 
-def test_two_releases_published_on_the_same_date_resolve_regardless_of_order() -> None:
-    a = Release(release="2026-02a", published=date(2026, 2, 15))
-    b = Release(release="2026-02b", published=date(2026, 2, 15))
-    assert release_as_of([a, b], date(2026, 2, 15)) == release_as_of([b, a], date(2026, 2, 15)) == b
+A = Release(release="r9", published=date(2026, 2, 15))
+B = Release(release="r10", published=date(2026, 2, 15))
+
+
+def test_two_releases_sharing_the_latest_eligible_date_are_refused() -> None:
+    for order in ([A, B], [B, A]):
+        with pytest.raises(TemporalError) as excinfo:
+            release_as_of(order, date(2026, 2, 15))
+        assert excinfo.value.code == LAB_424
+        message = str(excinfo.value)
+        assert "2026-02-15" in message and "r9" in message and "r10" in message
+
+
+def test_a_collision_after_the_date_does_not_matter() -> None:
+    assert release_as_of([A, B, JAN], date(2026, 2, 14)) == JAN
+
+
+def test_a_collision_that_is_not_the_latest_eligible_does_not_matter() -> None:
+    assert release_as_of([A, B, MAR], date(2026, 3, 20)) == MAR
+    assert release_as_of([MAR, A, B], date(2026, 3, 20)) == MAR
 
 
 def test_the_comparison_is_on_the_calendar_date_not_an_instant() -> None:

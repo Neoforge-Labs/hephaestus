@@ -10,6 +10,11 @@ The resolver filters first and chooses second, so a release published after
 the date is never a candidate and no ordering of the input can make it one.
 Both sides are RFC 3339 ``full-date``s compared as calendar dates; a
 ``datetime`` is not a date and is refused rather than silently truncated.
+
+Two releases sharing the latest eligible ``published`` are ambiguous: ``release``
+is an opaque label (10.1), so no ordering of labels is a meaningful tiebreak and
+picking one would be a silent wrong answer. That is refused too, naming the
+colliding releases so the caller can narrow the sequence.
 """
 
 from __future__ import annotations
@@ -42,14 +47,28 @@ class Release(BaseModel):
 def release_as_of(releases: Sequence[Release], when: date) -> Release:
     """Return the latest release published on or before ``when`` (10.3).
 
-    Input order is irrelevant. Two releases published on the same date resolve
-    to the one whose ``release`` label sorts last, so the answer does not depend
-    on which was listed first. Raises :class:`TemporalError` when nothing
-    qualifies, including for an empty table.
+    Input order is irrelevant. Raises :class:`TemporalError` when nothing
+    qualifies (including an empty table) and when more than one release shares
+    the latest eligible ``published``. A collision among releases that are not
+    the latest eligible, or among releases published after ``when``, does not
+    matter and does not refuse.
+
+    A ``datetime`` is a subclass of ``date`` whose comparison against a ``date``
+    raises, so the guard below names the caller's mistake with a ``TypeError``
+    instead of letting an obscure comparison error surface. It is not a coded
+    refusal: a wrong argument type is a programming error, not a fact about the
+    data.
     """
     if isinstance(when, datetime):
         raise TypeError("release_as_of takes a calendar date, not a datetime")
     eligible = [r for r in releases if r.published <= when]
     if not eligible:
         raise TemporalError(f"no release was published on or before {when.isoformat()}")
-    return max(eligible, key=lambda r: (r.published, r.release))
+    latest = max(r.published for r in eligible)
+    tied = sorted(r.release for r in eligible if r.published == latest)
+    if len(tied) > 1:
+        raise TemporalError(
+            f"as of {when.isoformat()} the latest published date {latest.isoformat()} is shared by "
+            f"releases {', '.join(tied)}; the resolution is ambiguous"
+        )
+    return next(r for r in eligible if r.published == latest)
