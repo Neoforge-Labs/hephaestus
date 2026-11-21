@@ -179,6 +179,40 @@ def test_bytes_disagreeing_with_the_file_is_refused(tmp_path: Path) -> None:
     verify_manifest(parse_manifest(document([digest("a.csv", b"12345")])), tmp_path)
 
 
+@pytest.mark.parametrize(
+    "bad",
+    ["/etc/passwd", "../a.csv", "d/../a.csv", "./a.csv", "d/./a.csv", "d//a.csv", "d/", ""],
+    ids=["absolute", "dotdot", "dotdot-inside", "dot", "dot-inside", "empty-segment", "trailing", "empty"],
+)
+def test_a_path_that_is_not_relative_within_the_dataset_is_refused(bad: str) -> None:
+    with pytest.raises(ManifestError) as exc:
+        parse_manifest(document([{**digest("a.csv", b"1"), "path": bad}]))
+    assert exc.value.code == LAB_412
+    with pytest.raises(ValidationError):
+        FileDigest(path=bad, sha256="a" * 64, bytes=0)
+
+
+def test_a_dotted_name_is_not_a_dot_segment() -> None:
+    for ok in ("..a", "a..", ".hidden", "d/.hidden/f", "a b/c"):
+        FileDigest(path=ok, sha256="a" * 64, bytes=0)
+
+
+def test_digest_file_outside_the_root_is_a_manifest_error(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (tmp_path / "outside.bin").write_bytes(b"x")
+    with pytest.raises(ManifestError) as exc:
+        digest_file(tmp_path / "outside.bin", relative_to=root)
+    assert exc.value.code == LAB_412
+    with pytest.raises(ManifestError):
+        digest_file(root / ".." / "outside.bin", relative_to=root)
+
+
+def test_verify_manifest_does_not_flag_files_the_manifest_omits(tmp_path: Path) -> None:
+    write_tree(tmp_path, {"a.csv": b"1", "extra.csv": b"2"})
+    verify_manifest(parse_manifest(document([digest("a.csv", b"1")])), tmp_path)
+
+
 def test_a_sha256_disagreeing_with_the_file_is_refused(tmp_path: Path) -> None:
     write_tree(tmp_path, {"a.csv": b"12345"})
     wrong = parse_manifest(document([digest("a.csv", b"12346")]))

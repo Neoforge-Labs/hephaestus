@@ -75,6 +75,14 @@ class FileDigest(BaseModel):
     sha256: Sha256Hex
     bytes: Annotated[int, Field(ge=0)]
 
+    @field_validator("path")
+    @classmethod
+    def _path_is_relative_within_the_dataset(cls, path: str) -> str:
+        """10.1: non-empty segments joined by ``/``, none ``.`` or ``..``, no leading ``/``."""
+        if any(segment in ("", ".", "..") for segment in path.split("/")):
+            raise ValueError(f"path {path!r} is not a relative path within the dataset")
+        return path
+
 
 class Manifest(BaseModel):
     """A dataset manifest (10.1). ``files`` keeps the order it was given; the hash does not."""
@@ -130,9 +138,14 @@ def digest_file(path: Path, *, relative_to: Path) -> FileDigest:
         while chunk := handle.read(_CHUNK):
             sha.update(chunk)
             size += len(chunk)
-    return FileDigest(
-        path=path.relative_to(relative_to).as_posix(), sha256=sha.hexdigest(), bytes=size
-    )
+    try:
+        return FileDigest(
+            path=path.relative_to(relative_to).as_posix(), sha256=sha.hexdigest(), bytes=size
+        )
+    except (ValueError, ValidationError) as exc:
+        # `relative_to` raises a bare ValueError for a path outside the root, and
+        # the model refuses a `..` segment that stays lexically inside it.
+        raise ManifestError(f"{path} is not a file within {relative_to}: {exc}") from exc
 
 
 def _walk(directory: Path) -> list[Path]:
@@ -184,6 +197,11 @@ def verify_manifest(manifest: Manifest, root: Path) -> None:
 
     A file the manifest names that ``root`` does not hold is refused too: the
     manifest then describes a dataset that is not the one on disk.
+
+    This verifies every entry the manifest names. It does NOT flag files present
+    under ``root`` that the manifest omits: 10.4 does not require that stronger
+    check, so a caller that needs "the manifest names everything there" must
+    compare the listing itself (for instance against :func:`manifest_for`).
     """
     for entry in manifest.files:
         target = root / entry.path
