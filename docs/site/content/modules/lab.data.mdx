@@ -207,10 +207,17 @@ directory something else is writing to is outside what this guards.
 `push(manifest, root=..., remote=...)` stores the manifest's files in a DVC
 remote under the manifest's `data_hash`, and `pull(manifest, into=..., remote=...)`
 brings them back. `pull` distrusts what arrives: it fetches into scratch space,
-verifies there, and only then copies, so a refused pull leaves `into` as it found
-it. A snapshot that cannot be obtained at all is
+verifies there, and only then copies. A snapshot that cannot be obtained at all is
 [HEPH-LAB-424](/errors/HEPH-LAB-424); one that arrives and disagrees with the
 manifest is [HEPH-LAB-412](/errors/HEPH-LAB-412).
+
+A **refused** pull leaves `into` exactly as it found it, because every refusal
+happens before the first byte is written there. A **failed copy** is a weaker
+promise, and the two are worth keeping apart: the copies run one destination at a
+time, each atomic in itself, so an I/O error partway through leaves the
+destinations already copied in place and the rest absent. Nothing is ever
+half-written, but a failed copy is not all-or-nothing; a caller that needs that
+pulls into a directory it can discard.
 
 DVC is driven through its Python API in a throwaway repository, so neither the
 dataset directory nor the destination becomes a DVC repository. The snapshot

@@ -38,9 +38,11 @@ refusal works without the extra installed.
 ## An example
 
 Save this as `demo.py` and run `uv run python demo.py`. It needs the `stats`
-extra, for the two intervals.
+extra, for the interval and the across-seeds summary.
 
 ```python
+from statistics import fmean
+
 from hephkit.lab.stats import (
     Scale,
     StatsError,
@@ -77,10 +79,16 @@ try:
 except StatsError as exc:
     print("refused:", exc)
 
-print(bootstrap_ci(treated, seed=7, resamples=2000))
-print(bootstrap_ci(treated, seed=7, resamples=2000) == bootstrap_ci(treated, seed=7, resamples=2000))
+# The properties, not the bounds: see the note under the output.
+interval = bootstrap_ci(treated, seed=7, resamples=2000)
+print("brackets the mean:  ", interval.low < fmean(treated) < interval.high)
+print("confidence:         ", interval.confidence)
+print("one seed, one answer:", interval == bootstrap_ci(treated, seed=7, resamples=2000))
 
-print(aggregate_seeds({0: 0.78, 1: 0.81, 2: 0.76, 3: 0.80}, seed=7))
+summary = aggregate_seeds({0: 0.78, 1: 0.81, 2: 0.76, 3: 0.80}, seed=7)
+print("seeds:              ", summary.n)
+print("mean and sd:        ", round(summary.mean, 4), round(summary.sd, 4))
+print("interval of the mean brackets it:", summary.interval.low < summary.mean < summary.interval.high)
 try:
     aggregate_seeds({0: 0.8, 1: 0.8, 2: 0.8}, seed=7)
 except StatsError as exc:
@@ -96,11 +104,24 @@ delta  1.0
 test='welch_t' reason='two independent groups, interval outcome, normal, unequal variance'
 refused: a paired nominal design is not covered by the table (for two groups, McNemar's test)
 refused: both samples are constant: the pooled standard deviation is 0
-low=0.77 high=0.8 confidence=0.95
-True
-n=4 mean=0.7875000000000001 sd=0.022173557826083472 interval=Interval(low=0.765, high=0.805, confidence=0.95)
+brackets the mean:   True
+confidence:          0.95
+one seed, one answer: True
+seeds:               4
+mean and sd:         0.7875 0.0222
+interval of the mean brackets it: True
 refused: the sample is constant: a bootstrap of it is a zero-width interval
 ```
+
+**Why this page does not print the interval's bounds.** They would be BCa output
+over SciPy's resampling order and NumPy's RNG stream, so a SciPy upgrade that
+changed either would make this page wrong with nothing failing anywhere. That is
+the same reason the bootstrap is contract-tested and never vectored, and it would
+be odd for the page to do what it says a vector must not. The effect sizes, the
+mean and the standard deviation above are printed because they are arithmetic
+over the inputs: they are the same on every machine and in every release. What
+the interval is shown doing is what it promises — it brackets the mean, it
+reports the confidence it was asked for, and one seed gives one answer.
 
 ## Effect sizes
 
@@ -117,6 +138,56 @@ sample given as a bare `str` or `bytes`. For Cohen's *d* and Hedges' *g* also a
 sample of one observation, which has no sample variance, and two constant samples,
 whose pooled deviation is 0. Cliff's *delta* has no variance term, so one
 observation per sample, or all ties (which is 0), is a defined value.
+
+These statistics are **descriptive**. Each summarises the two samples in front of
+it: none tests a hypothesis, produces a p-value, or says anything about a
+population. *d* and *g* standardise by a *pooled* deviation, which assumes the two
+groups have roughly a common variance; where they plainly do not, the pooled
+figure describes neither group, and Cliff's *delta* — which needs no variance at
+all — is the honest summary. The *g* factor is the standard closed-form
+approximation to the small-sample correction, not the exact gamma-function form,
+and the gap is widest where it matters most: about 1.3% at `n = 4`, 0.1% by
+`n = 10`.
+
+### A sample is any iterable
+
+A sample may be a list, a tuple, a `polars` `Series`, a NumPy array, or anything
+else iterable that is not a `str` or `bytes`, and its values may be any
+`numbers.Real` — `numpy.float64` and `numpy.int64` included. So the two modules
+this wave shipped compose directly: a frame read through
+[`lab.data`](/modules/lab.data) goes straight into an effect size, with no
+`.to_list()` in between. This block needs the `data` extra as well as `stats`:
+
+```python
+import polars as pl
+
+from hephkit.lab.stats import bootstrap_ci, cohens_d
+
+frame = pl.DataFrame(
+    {
+        "baseline": [0.71, 0.74, 0.69, 0.73, 0.70],
+        "treated": [0.78, 0.81, 0.76, 0.80, 0.79],
+    }
+)
+
+print("d from the frame:", round(cohens_d(frame["treated"], frame["baseline"]), 3))
+print("d via numpy:     ", round(cohens_d(frame["treated"].to_numpy(), frame["baseline"].to_numpy()), 3))
+
+interval = bootstrap_ci(frame["treated"], seed=7, resamples=2000)
+print("same interval as from a list:", interval == bootstrap_ci(frame["treated"].to_list(), seed=7, resamples=2000))
+```
+
+It prints:
+
+```text
+d from the frame: 3.7
+d via numpy:      3.7
+same interval as from a list: True
+```
+
+A `str` and a `bytes` stay refused, because iterating one would read characters
+as observations. A `bool` stays refused too, in a NumPy array as in a list: `True`
+as an observation is a mistake, not a 1.
 
 ## Choosing a test
 
@@ -152,8 +223,9 @@ small to carry the choice, and the message says so.
 
 ## Bootstrap intervals
 
-`bootstrap_ci(sample, statistic=mean, *, seed, confidence=0.95, resamples=10_000)`
-returns a BCa interval from `scipy.stats.bootstrap`. `seed` is required, and
+`bootstrap_ci(sample, statistic=statistics.fmean, *, seed, confidence=0.95, resamples=10_000)`
+returns a BCa interval from `scipy.stats.bootstrap`. `statistic` takes any callable
+over a list of floats, and the default is the mean. `seed` is required, and
 reaches SciPy as an explicit `numpy.random.default_rng(seed)`; nothing reads
 global random state, so two calls with the same arguments give the same interval
 and a recorded run replays.
