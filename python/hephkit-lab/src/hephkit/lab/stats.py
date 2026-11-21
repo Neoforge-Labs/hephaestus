@@ -50,15 +50,24 @@ pins every row):
 * two groups that are not normal, or ordinal: ``mann_whitney_u`` unpaired,
   ``wilcoxon_signed_rank`` paired (``normal=False`` decides before
   ``equal_variance`` is read, so there is never a Welch test on ranks);
-* three or more unpaired groups: ``one_way_anova`` for interval and normal,
-  ``kruskal_wallis`` otherwise;
+* three or more unpaired groups: ``one_way_anova`` for interval, normal and
+  equal variance, ``welch_anova`` for interval and normal with unequal
+  variance, ``kruskal_wallis`` otherwise;
 * nominal, unpaired: ``chi_square``, or ``fisher_exact`` when ``n_min`` (the
-  smallest cell count) is below 5.
+  smallest *expected* cell count) is below 5. A request carries no outcome
+  categories, so it cannot say whether the table is 2x2; the ``fisher_exact``
+  reason therefore says the test is of the full contingency table, the
+  Freeman-Halton generalisation when it is larger than 2x2.
 
 Refused: fewer than two groups, a paired nominal design, and a paired design
 of three or more groups.
 
-Two rulings go beyond the plan's table, which was wrong in both places.
+Three rulings go beyond the plan's table, which was wrong in all three places.
+Interval, normal, unpaired groups of three or more with unequal variance get
+``welch_anova`` rather than ``one_way_anova``: the caller stated the variance
+assumption, and handing back a test that assumes the opposite would be the
+failure this module exists to prevent; the table already draws the same line at
+two groups (``independent_t`` against ``welch_t``).
 Ordinal data with three or more groups joins the rank row (``kruskal_wallis``)
 rather than being left without a test: the table said "interval" there, but
 Kruskal-Wallis is the canonical rank test for ordinal data across independent
@@ -186,8 +195,11 @@ class TestRequest(BaseModel):
     """What the design says about its data: the only input :func:`choose_test` reads.
 
     ``groups`` and ``n_min`` cannot be negative, so a request that cannot exist
-    fails here rather than reaching the table. ``n_min`` is the smallest cell
-    count (used only for the nominal Fisher boundary).
+    fails here rather than reaching the table. ``n_min`` is the smallest
+    *expected* cell count (used only for the nominal Fisher boundary). The model
+    is strict: pass ``Scale.interval``, not the bare string ``"interval"``
+    (JSON input, as the vectors hold it, is validated with
+    ``model_validate_json``).
     """
 
     __test__ = False  # not a pytest class, despite the name
@@ -213,6 +225,11 @@ class TestChoice(BaseModel):
     reason: str
 
 
+def _rank_outcome(r: TestRequest) -> str:
+    """The property that sends a design to a rank test, for a reason to quote."""
+    return "ordinal outcome" if r.scale is Scale.ordinal else "interval outcome that is not normal"
+
+
 def choose_test(request: TestRequest) -> TestChoice:
     """Name the test the design calls for, or raise :class:`StatsError` when the table has none."""
     r = request
@@ -223,17 +240,20 @@ def choose_test(request: TestRequest) -> TestChoice:
     if r.scale is Scale.nominal:
         if r.paired:
             raise StatsError(
-                "a paired nominal design is not covered by the table (it would need McNemar's test)"
+                "a paired nominal design is not covered by the table "
+                "(for two groups, McNemar's test)"
             )
         if r.n_min < 5:
             return TestChoice(
                 test="fisher_exact",
-                reason=f"nominal outcome with smallest cell count n_min {r.n_min} below 5, "
-                "where chi-square's large-sample approximation does not hold",
+                reason=f"nominal outcome with smallest expected cell count n_min {r.n_min} below 5, "
+                "where chi-square's large-sample approximation does not hold; the exact test "
+                "applies to the full contingency table, as the Freeman-Halton generalisation "
+                "when it is larger than 2x2",
             )
         return TestChoice(
             test="chi_square",
-            reason=f"nominal outcome with smallest cell count n_min {r.n_min} of at least 5",
+            reason=f"nominal outcome with smallest expected cell count n_min {r.n_min} of at least 5",
         )
     if r.groups >= 3:
         if r.paired:
@@ -243,17 +263,22 @@ def choose_test(request: TestRequest) -> TestChoice:
                 "request cannot express (the request is too small to carry it, not a row missing)"
             )
         if r.scale is Scale.interval and r.normal:
+            if r.equal_variance:
+                return TestChoice(
+                    test="one_way_anova",
+                    reason=f"{r.groups} independent interval groups, normal, equal variance",
+                )
             return TestChoice(
-                test="one_way_anova",
-                reason=f"{r.groups} independent interval groups, normal",
+                test="welch_anova",
+                reason=f"{r.groups} independent interval groups, normal, unequal variance",
             )
-        why = "ordinal outcome" if r.scale is Scale.ordinal else "interval outcome that is not normal"
+        why = _rank_outcome(r)
         return TestChoice(
             test="kruskal_wallis",
             reason=f"{r.groups} independent groups with an {why}, so a rank test",
         )
     if r.scale is Scale.ordinal or not r.normal:
-        why = "ordinal outcome" if r.scale is Scale.ordinal else "interval outcome that is not normal"
+        why = _rank_outcome(r)
         if r.paired:
             return TestChoice(
                 test="wilcoxon_signed_rank",

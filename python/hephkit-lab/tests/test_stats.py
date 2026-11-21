@@ -10,10 +10,9 @@ from __future__ import annotations
 import math
 
 import pytest
-
-from hephkit.errors import LAB_422
 from pydantic import ValidationError
 
+from hephkit.errors import LAB_422
 from hephkit.lab.stats import (
     Scale,
     StatsError,
@@ -181,6 +180,7 @@ def test_an_inappropriate_test_is_refused_rather_than_approximated() -> None:
         {"groups": 3, "paired": True},
         {"groups": 5, "paired": True, "normal": False},
         {"scale": Scale.ordinal, "groups": 3, "paired": True},
+        {"scale": Scale.interval, "groups": 5, "paired": True, "normal": False},
     ):
         with pytest.raises(StatsError) as exc:
             choose_test(request(**kw))
@@ -194,7 +194,7 @@ def test_the_refusal_says_what_was_wrong_with_the_request() -> None:
         choose_test(request(groups=0))
     with pytest.raises(StatsError, match="paired nominal"):
         choose_test(request(scale=Scale.nominal, paired=True))
-    with pytest.raises(StatsError, match=r"repeated-measures.*cannot express"):
+    with pytest.raises(StatsError, match="sphericity"):
         choose_test(request(groups=3, paired=True))
 
 
@@ -209,7 +209,10 @@ def test_the_reason_names_the_rule_that_decided() -> None:
     assert "n_min 4" in choose_test(request(scale=Scale.nominal, n_min=4)).reason
     assert "not normal" in choose_test(request(normal=False)).reason
     assert "ordinal" in choose_test(request(scale=Scale.ordinal)).reason
-    assert "paired" in choose_test(request(paired=True)).reason
+    assert choose_test(request(paired=True)).reason == "two paired groups, interval outcome, normal"
+    assert "unequal variance" in choose_test(request(groups=3, equal_variance=False)).reason
+    assert "Freeman-Halton" in choose_test(request(scale=Scale.nominal, groups=3, n_min=2)).reason
+    assert "expected cell count" in choose_test(request(scale=Scale.nominal)).reason
 
 
 def test_a_request_with_an_unknown_member_is_refused() -> None:
@@ -247,4 +250,30 @@ def test_three_ordinal_groups_take_the_rank_test() -> None:
 def test_the_choice_is_frozen() -> None:
     choice = choose_test(request())
     with pytest.raises(ValidationError):
-        choice.test = "welch_t"  # type: ignore[misc]
+        choice.test = "welch_t"  # mypy gates src only; this line is not type-checked
+
+
+def test_three_normal_groups_with_unequal_variance_take_welch_anova() -> None:
+    assert choose_test(request(groups=3, equal_variance=False)).test == "welch_anova"
+    assert choose_test(request(groups=3, equal_variance=True)).test == "one_way_anova"
+    # Non-normal decides before variance is read, as at two groups.
+    assert choose_test(request(groups=3, normal=False, equal_variance=False)).test == "kruskal_wallis"
+
+
+def test_nominal_groups_of_three_take_the_same_rule_as_two() -> None:
+    assert choose_test(request(scale=Scale.nominal, groups=3, n_min=5)).test == "chi_square"
+    assert choose_test(request(scale=Scale.nominal, groups=3, n_min=4)).test == "fisher_exact"
+
+
+def test_the_strict_model_wants_the_enum_member_not_the_string() -> None:
+    with pytest.raises(ValidationError):
+        TestRequest.model_validate(
+            {
+                "scale": "interval",
+                "groups": 2,
+                "paired": False,
+                "normal": True,
+                "equal_variance": True,
+                "n_min": 9,
+            }
+        )
