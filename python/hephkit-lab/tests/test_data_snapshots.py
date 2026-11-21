@@ -275,6 +275,38 @@ def test_an_unexpected_remote_layout_fails_loudly_naming_the_dvc_version(tmp_pat
 
 
 @pytest.mark.extras
+def test_a_connection_failure_during_the_fetch_is_missing_not_corrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sibling of the pointer-read test, on the other call that reaches the wire.
+
+    A host can answer the pointer read and die during the fetch -- connection
+    reset, a timeout, a provider's I/O error -- and DVC surfaces that as an
+    `OSError` rather than a `DvcException`. Without the mapping the caller got a
+    raw `OSError` carrying no code, which is the uncoded outcome the 412/424
+    split exists to prevent: a snapshot that could not be obtained is absent
+    (424), never corrupt (412).
+    """
+    from hephkit.lab.data import snapshots
+
+    source, remote = tmp_path / "src", tmp_path / "remote"
+    manifest = build(source)
+    snapshots.push(manifest, root=source, remote=str(remote))
+
+    def reset(*args: object, **kwargs: object) -> None:
+        raise ConnectionResetError("connection reset by peer")
+
+    # Patched after the pointer read, so this is the fetch failing and not the
+    # read: `_read_pointer` uses `fs.cat_file`, `_fetch` uses `Repo.pull`.
+    monkeypatch.setattr("dvc.repo.Repo.pull", reset)
+    with pytest.raises(MissingManifestError) as caught:
+        snapshots.pull(manifest, into=tmp_path / "dst", remote=str(remote))
+    assert caught.value.code == LAB_424
+    assert str(remote) in str(caught.value)
+    assert not (tmp_path / "dst").exists()
+
+
+@pytest.mark.extras
 def test_an_error_outside_dvc_propagates_unchanged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

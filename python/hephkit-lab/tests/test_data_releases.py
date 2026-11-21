@@ -113,6 +113,63 @@ def test_a_datetime_is_refused_with_a_type_error() -> None:
         release_as_of([JAN], datetime(2026, 1, 15, 0, 0))
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [0, 1764000000, 1.5, True, None, [], {}],
+    ids=["epoch", "unix-seconds", "float", "bool", "null", "array", "object"],
+)
+def test_a_published_whose_type_is_not_a_date_is_refused(bad: object) -> None:
+    """10.4: a member whose type is not section 10's is invalid, not coerced.
+
+    Read off the clause: 10.3 makes `published` an RFC 3339 `full-date`, so a
+    number is not one. This is the refusal that matters most in section 10,
+    because `published` is the only thing 10.3 orders releases by -- see the
+    test below for what accepting it would do.
+    """
+    with pytest.raises(TemporalError) as excinfo:
+        Release.model_validate({"release": "r", "published": bad})
+    assert excinfo.value.code == LAB_412
+
+
+def test_a_numeric_published_cannot_resolve_every_date_against_1970() -> None:
+    """The consequence, stated as a test rather than left to the reader.
+
+    Lax coercion read `published=0` as 1970-01-01. A table built that way is
+    eligible for every date a run could ask about, so `release_as_of` returned
+    a release -- hindsight in the sampling frame, with no refusal and no
+    warning. The refusal has to happen where the table is built, because by the
+    time the resolver sees a `date` the information that it was a number is gone.
+    """
+    with pytest.raises(TemporalError):
+        release_as_of(
+            [Release.model_validate({"release": "epoch", "published": 0})], date(2026, 6, 1)
+        )
+
+
+def test_a_published_that_is_a_datetime_is_refused_not_truncated() -> None:
+    with pytest.raises(TemporalError, match="full-date"):
+        Release(release="r", published=datetime(2026, 1, 15, 0, 0))
+
+
+def test_a_string_that_is_not_a_date_is_pydantics_refusal_not_this_modules() -> None:
+    """Where the coded refusal stops, said out loud so it is not rediscovered.
+
+    The type gate above is about the *type*: a string is the type 10.3 gives, so
+    a string that is not a well-formed date passes the gate and pydantic's own
+    date parser refuses it -- a `ValidationError` carrying no `.code`, because
+    this module has no parse function to translate one into a `TemporalError`
+    the way `lab.data.manifest.parse_manifest` does. Still a refusal, and never
+    a wrong date; just not a coded one.
+    """
+    with pytest.raises(ValidationError):
+        Release.model_validate({"release": "r", "published": "not-a-date"})
+
+
+def test_the_two_forms_a_published_may_take_are_both_accepted() -> None:
+    """The refusal must not have closed the door on the string 10.3 asks for."""
+    assert Release.model_validate({"release": "2026-01", "published": "2026-01-15"}) == JAN
+
+
 def test_a_release_is_frozen_and_refuses_unknown_members() -> None:
     with pytest.raises(ValidationError):
         JAN.release = "x"

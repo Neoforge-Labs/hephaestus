@@ -7,6 +7,7 @@ only compares returned bodies cannot tell a cache from a passthrough.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -221,6 +222,65 @@ def test_a_failed_write_leaves_no_temp_file(tmp_path: Path, monkeypatch: pytest.
     with pytest.raises(OSError):
         SourceCache(tmp_path, upstream_version="v1").fetch(REQ, Fetcher())
     assert list(tmp_path.iterdir()) == []
+
+
+def test_a_sidecar_write_that_fails_leaves_nothing_frozen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The state the write ordering exists for: body written, sidecar not.
+
+    Failing the *first* `os.replace` never reaches it -- nothing is on disk at
+    all then, so it proves only that the first write is atomic. The second
+    replace is the sidecar's, so this is the half-written entry: the body is
+    there and no record names it.
+
+    The module's claim is that such an entry is not frozen, and both readers
+    have to agree about that. `frozen()` must not list it, and the next offline
+    `fetch` must raise the absence error rather than serve a body whose digest
+    nothing recorded.
+    """
+    real_replace = os.replace
+    calls: list[int] = []
+
+    def fail_the_second(src: object, dst: object) -> None:
+        calls.append(1)
+        if len(calls) == 2:
+            raise OSError("disk full")
+        real_replace(src, dst)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("hephkit.lab.sources.os.replace", fail_the_second)
+    with pytest.raises(OSError):
+        SourceCache(tmp_path, upstream_version="v1").fetch(REQ, Fetcher())
+    assert len(calls) == 2, "the sidecar write was never attempted"
+    # The body landed, the record did not, and no temp file was left behind.
+    assert [p.name for p in sorted(tmp_path.iterdir())] == [
+        cache_key(REQ, upstream_version="v1").split(":")[1] + ".body"
+    ]
+    monkeypatch.undo()
+    cache = SourceCache(tmp_path, upstream_version="v1", offline=True)
+    assert cache.frozen() == ()
+    with pytest.raises(MissingSourceError):
+        cache.fetch(REQ, Fetcher())
+
+
+def test_frozen_does_not_report_a_key_the_filenames_do_not_carry(tmp_path: Path) -> None:
+    """A renamed sidecar must not make `frozen()` claim a key `fetch` cannot find.
+
+    `fetch` looks an entry up by the hex of the key it computed, so a record
+    moved to another name is unreachable. Reporting its `key` field anyway would
+    make `frozen()` lie about what is replayable, which is the worse half: the
+    fetch side fails safe by missing, the report does not.
+    """
+    cache = SourceCache(tmp_path, upstream_version="v1")
+    cache.fetch(REQ, Fetcher())
+    key = cache_key(REQ, upstream_version="v1")
+    assert cache.frozen() == (key,)
+    for suffix in (".json", ".body"):
+        _only(tmp_path, suffix).rename(tmp_path / f"renamed{suffix}")
+    assert cache.frozen() == ()
+    # And the fetch side agrees it is not there.
+    with pytest.raises(MissingSourceError):
+        SourceCache(tmp_path, upstream_version="v1", offline=True).fetch(REQ, Fetcher())
 
 
 def test_a_sidecar_with_no_digest_is_corrupt(tmp_path: Path) -> None:

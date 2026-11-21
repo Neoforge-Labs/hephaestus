@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -168,6 +168,43 @@ def test_a_sha256_that_is_not_64_hex_characters_is_refused(bad: str) -> None:
 def test_bytes_must_be_a_non_negative_integer(bad: object) -> None:
     with pytest.raises(ManifestError):
         parse_manifest(document([{**digest("a.csv", b"1"), "bytes": bad}]))
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [0, 1764000000, 1.5, True, None, [], {}, "not-a-date"],
+    ids=["epoch", "unix-seconds", "float", "bool", "null", "array", "object", "non-date-string"],
+)
+def test_a_captured_at_that_is_not_a_date_is_refused(bad: object) -> None:
+    """10.4: a member whose type is not 10.1's is invalid, not coerced.
+
+    Read off the clause, not off the code: 10.1 gives `captured_at` as an
+    RFC 3339 `full-date` string, so a number is not a date and MUST NOT be read
+    as one. Pydantic's lax mode would read `0` as 1970-01-01 and the manifest
+    would then describe a capture that never happened.
+    """
+    with pytest.raises(ManifestError) as exc:
+        parse_manifest({**document([digest("a.csv", b"1")]), "captured_at": bad})
+    assert exc.value.code == LAB_412
+
+
+def test_a_captured_at_that_is_a_datetime_is_refused_not_truncated() -> None:
+    """A `datetime` is a `date` subclass, and 10.1's type is a calendar date."""
+    with pytest.raises(ValidationError, match="full-date"):
+        Manifest(
+            **{**META, "captured_at": datetime(2026, 2, 3, 0, 0)},  # type: ignore[arg-type]
+            files=(FileDigest(path="a.csv", sha256="a" * 64, bytes=1),),
+        )
+
+
+def test_the_two_forms_a_captured_at_may_take_are_both_accepted() -> None:
+    """The refusal must not have closed the door on the string 10.1 asks for."""
+    from_json = parse_manifest(document([digest("a.csv", b"1")]))
+    assert from_json.captured_at == date(2026, 2, 3)
+    assert from_json.captured_at == Manifest(
+        **META,  # type: ignore[arg-type]
+        files=from_json.files,
+    ).captured_at
 
 
 def test_bytes_disagreeing_with_the_file_is_refused(tmp_path: Path) -> None:

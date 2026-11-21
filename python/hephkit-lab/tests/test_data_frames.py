@@ -118,6 +118,26 @@ def test_query_sees_every_file_in_the_manifest(tmp_path: Path) -> None:
 
 
 @pytest.mark.extras
+def test_the_name_query_loads_through_is_not_left_for_the_callers_sql(tmp_path: Path) -> None:
+    """Each file is registered under a fixed internal name and unregistered again.
+
+    Two things to hold. A manifest `path` with a directory in it must still
+    become a table of exactly that name -- `relation.create(path)` would read
+    `nested/b.csv` as schema `nested` -- and the name used to get it in must be
+    gone before the caller's SQL runs, or the last file loaded would be
+    queryable under a name the manifest never gave.
+    """
+    import duckdb
+
+    manifest = build(tmp_path, {"nested/b.csv": CSV_B})
+    assert query(manifest, root=tmp_path, sql='SELECT count(*) AS n FROM "nested/b.csv"')[
+        "n"
+    ].to_list() == [2]
+    with pytest.raises(duckdb.CatalogException):
+        query(manifest, root=tmp_path, sql="SELECT * FROM _hephkit_manifest_source")
+
+
+@pytest.mark.extras
 def test_query_refuses_a_moved_file_before_running_anything(tmp_path: Path) -> None:
     manifest = build(tmp_path, {"a.csv": CSV_A})
     (tmp_path / "a.csv").write_bytes(CSV_A.replace(b"30", b"31"))

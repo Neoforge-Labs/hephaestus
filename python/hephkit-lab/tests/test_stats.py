@@ -1,14 +1,24 @@
-"""Contract tests for ``hephkit.lab.stats`` effect sizes.
+"""Contract tests for ``hephkit.lab.stats``.
 
-Every value here is worked by hand from the published definition in the
-comment beside it; none was read off the code. No test is marked ``extras``:
-effect sizes are arithmetic over sequences and run in the spine environment.
+Three things live here, in this order: the effect sizes, test selection, and the
+bootstrap interval with the across-seeds summary.
+
+Every value is worked by hand from the published definition in the comment
+beside it; none was read off the code.
+
+Most tests run in the spine environment, because effect sizes, `choose_test` and
+every *refusal* of `bootstrap_ci` are arithmetic and validation with no extra
+behind them. The tests that compute an interval, and the two that pass a polars
+`Series` or a NumPy array, are marked ``extras``: they need SciPy or polars, and
+`test-spine` deselects them.
 """
 
 from __future__ import annotations
 
+import json
 import math
 import statistics
+from fractions import Fraction
 
 import pytest
 from pydantic import ValidationError
@@ -99,6 +109,26 @@ def test_a_zero_variance_pair_is_refused_rather_than_divided_by_zero() -> None:
         assert exc.value.code == "HEPH-LAB-422"
 
 
+def test_one_constant_sample_against_one_varying_sample_is_a_finite_d() -> None:
+    """The `and` in the zero-variance guard, pinned.
+
+    A constant control group against a varying treatment is a design
+    researchers actually run, and it has a pooled variance: for [1,2,3] the sum
+    of squared deviations is 2 and for a constant sample it is 0, so the pooled
+    variance is (0 + 2)/(3 + 3 - 2) = 0.5 and the pooled sd is sqrt(0.5).
+
+    A mutation of that `and` to `or` would refuse all three of these.
+    """
+    # Means 2 and 2: the difference is 0, and 0/sqrt(0.5) is a finite 0.0.
+    assert cohens_d([2, 2, 2], [1, 2, 3]) == 0.0
+    # Means 3 and 2: d = 1/sqrt(0.5) = sqrt(2).
+    assert cohens_d([3, 3, 3], [1, 2, 3]) == pytest.approx(math.sqrt(2), rel=1e-12)
+    # The sign follows a - b, so the other way round is -sqrt(2).
+    assert cohens_d([1, 2, 3], [3, 3, 3]) == pytest.approx(-math.sqrt(2), rel=1e-12)
+    # n = 6, so J = 1 - 3/15 = 4/5.
+    assert hedges_g([3, 3, 3], [1, 2, 3]) == pytest.approx(0.8 * math.sqrt(2), rel=1e-12)
+
+
 def test_zero_variance_with_different_means_is_refused_not_infinite() -> None:
     for statistic in (cohens_d, hedges_g):
         with pytest.raises(StatsError):
@@ -148,8 +178,28 @@ def test_a_bool_or_non_number_is_refused() -> None:
 
 
 def test_a_string_is_not_a_sample() -> None:
+    # Iterable, but iterating it would read characters as observations.
     with pytest.raises(StatsError):
         cliffs_delta("abc", [1, 2])  # type: ignore[arg-type]
+    with pytest.raises(StatsError):
+        cliffs_delta(b"abc", [1, 2])  # type: ignore[arg-type]
+
+
+def test_any_other_iterable_is_a_sample() -> None:
+    """Wider than `Sequence`, which is what refused a frame column.
+
+    No extra needed for these three: the gate is about the container, and a
+    `set` is unordered but every statistic here is order-independent.
+    """
+    assert cohens_d((1, 2, 3), (3, 4, 5)) == -2.0
+    assert cohens_d(iter([1, 2, 3]), iter([3, 4, 5])) == -2.0
+    assert hedges_g(iter([1, 2, 3]), iter([3, 4, 5])) == pytest.approx(-1.6, rel=1e-12)
+    assert cliffs_delta(iter([4, 5, 6]), iter([1, 2, 3])) == 1.0
+
+
+def test_a_fraction_is_a_real_number() -> None:
+    # `numbers.Real`, not `int | float`: this is what also admits `numpy.int64`.
+    assert cohens_d([Fraction(1), Fraction(2), Fraction(3)], [3, 4, 5]) == -2.0
 
 
 def test_inputs_are_not_mutated_and_order_does_not_matter() -> None:
@@ -221,18 +271,25 @@ def test_the_reason_names_the_rule_that_decided() -> None:
 
 
 def test_a_request_with_an_unknown_member_is_refused() -> None:
-    with pytest.raises(ValidationError):
-        TestRequest.model_validate(
-            {
-                "scale": "interval",
-                "groups": 2,
-                "paired": False,
-                "normal": True,
-                "equal_variance": True,
-                "n_min": 3,
-                "alpha": 0.05,
-            }
-        )
+    """`extra="forbid"`, pinned by the stray member and nothing else.
+
+    Through `model_validate_json`, the mode the vectors use: a strict model
+    takes its enum from a JSON string there, so `scale` is accepted and `alpha`
+    is the only thing left that can fail. Passing the bare string to
+    `model_validate` instead would be refused for the enum on its own, and the
+    test would pass with `extra="forbid"` removed.
+    """
+    payload = {
+        "scale": "interval",
+        "groups": 2,
+        "paired": False,
+        "normal": True,
+        "equal_variance": True,
+        "n_min": 3,
+    }
+    assert TestRequest.model_validate_json(json.dumps(payload)).groups == 2
+    with pytest.raises(ValidationError, match="alpha"):
+        TestRequest.model_validate_json(json.dumps({**payload, "alpha": 0.05}))
 
 
 def test_a_request_that_cannot_exist_is_refused_by_construction() -> None:
@@ -348,6 +405,20 @@ def test_aggregate_seeds_refuses_no_seeds_and_a_non_mapping() -> None:
         aggregate_seeds([0.1, 0.2], seed=1)  # type: ignore[arg-type]
 
 
+def test_an_interval_enforces_what_its_docstring_promises() -> None:
+    """`low <= high` and `0 < confidence < 1`, both checked.
+
+    It is an exported model a caller constructs, so an interval built the wrong
+    way round would read as a valid one and bracket nothing.
+    """
+    assert Interval(low=1.0, high=1.0, confidence=0.5).low == 1.0  # a point is not inverted
+    with pytest.raises(ValidationError, match="low <= high"):
+        Interval(low=2.0, high=1.0, confidence=0.95)
+    for bad in (0.0, 1.0, -0.5, 1.5):
+        with pytest.raises(ValidationError):
+            Interval(low=1.0, high=2.0, confidence=bad)
+
+
 def test_an_interval_and_a_summary_are_frozen() -> None:
     interval = Interval(low=1.0, high=2.0, confidence=0.9)
     with pytest.raises(ValidationError):
@@ -355,6 +426,58 @@ def test_an_interval_and_a_summary_are_frozen() -> None:
     summary = SeedSummary(n=2, mean=1.5, sd=0.5, interval=interval)
     with pytest.raises(ValidationError):
         summary.n = 3  # mypy gates src only; this line is not type-checked
+
+
+@pytest.mark.extras
+def test_a_polars_series_and_a_numpy_array_are_samples() -> None:
+    """The composition of the two modules this wave shipped, pinned.
+
+    `frame["a"]` is a polars `Series` and `.to_numpy()` is an `ndarray`;
+    neither is a `collections.abc.Sequence`, so both were refused, and so was
+    `list()` of an integer NumPy array, because `np.int64` is not an `int`.
+    Only `.to_list()` worked, which made the obvious call the wrong one.
+    """
+    import numpy
+    import polars as pl
+
+    frame = pl.DataFrame({"a": [0.71, 0.74, 0.69, 0.73, 0.70], "b": [0.78, 0.81, 0.76, 0.80, 0.79]})
+    expected = cohens_d(frame["a"].to_list(), frame["b"].to_list())
+    assert cohens_d(frame["a"], frame["b"]) == expected
+    assert cohens_d(frame["a"].to_numpy(), frame["b"].to_numpy()) == expected
+    assert hedges_g(frame["a"], frame["b"]) == hedges_g(
+        frame["a"].to_list(), frame["b"].to_list()
+    )
+    assert cliffs_delta(frame["a"], frame["b"]) == -1.0
+    # An integer NumPy array, as an array and as a list of its np.int64 values.
+    counts = numpy.array([3, 5, 4, 6])
+    assert cohens_d(counts, [1, 2, 3, 2]) == cohens_d(counts.tolist(), [1, 2, 3, 2])
+    assert cohens_d(list(counts), [1, 2, 3, 2]) == cohens_d(counts.tolist(), [1, 2, 3, 2])
+    # And through the bootstrap, which materialises the sample for SciPy.
+    series = bootstrap_ci(frame["a"], resamples=400, seed=3)
+    assert series == bootstrap_ci(frame["a"].to_list(), resamples=400, seed=3)
+    assert series == bootstrap_ci(frame["a"].to_numpy(), resamples=400, seed=3)
+    assert series == bootstrap_ci(numpy.asarray(frame["a"].to_list()), resamples=400, seed=3)
+
+
+@pytest.mark.extras
+def test_the_widened_gate_still_refuses_a_bool_and_a_nan_from_a_library() -> None:
+    """The two refusals that are judgements, not type narrowness.
+
+    `numpy.bool_` is not a Python `bool` and is not a `numbers.Real`, so a
+    boolean array is refused as "not a real number" rather than read as 0 and 1;
+    a NumPy `nan` is refused as not finite, as a Python one is.
+    """
+    import numpy
+    import polars as pl
+
+    with pytest.raises(StatsError, match="not a real number"):
+        cohens_d(numpy.array([True, False, True]), [1, 2, 3])
+    with pytest.raises(StatsError, match="not a real number"):
+        cohens_d(pl.Series([True, False, True]), [1, 2, 3])
+    with pytest.raises(StatsError, match="not finite"):
+        cohens_d(numpy.array([1.0, numpy.nan, 3.0]), [1, 2, 3])
+    with pytest.raises(StatsError, match="not finite"):
+        bootstrap_ci(numpy.array([1.0, numpy.inf, 3.0]), seed=1)
 
 
 @pytest.mark.extras

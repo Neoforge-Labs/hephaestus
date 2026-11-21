@@ -135,20 +135,53 @@ def test_the_typing_marker_is_inside_the_subpackage_we_own() -> None:
     )
 
 
+def lab_modules(source: Path = SRC) -> tuple[str, ...]:
+    """Every module and subpackage of `hephkit.lab`, as dotted names.
+
+    Walked off the directory rather than listed, and this is the reason: nothing
+    else in the suite imports a submodule by name. `hephkit/lab/__init__.py`
+    re-exports nothing (ADR 0021), so a module nobody imported in a test would
+    be covered by nothing at all, and a module-scope `import scipy` in it would
+    land with every check green -- which is the one way the spine guarantee of
+    ADR 0023 can be broken silently. A hardcoded tuple only covers the modules
+    whoever last edited it remembered.
+
+    Private modules are included on purpose: `_extras` is imported by the rest,
+    and a heavy import in it would be just as fatal.
+    """
+    root = source / "hephkit" / "lab"
+    found: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root)
+        parts = relative.with_suffix("").parts
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+            if not parts:  # `hephkit.lab` itself, imported by every test already
+                continue
+        found.append(".".join(("hephkit", "lab", *parts)))
+    return tuple(found)
+
+
 # Every module this distribution adds on top of the spine, each imported by name.
-# `hephkit.lab.data` is a package whose `__init__` imports its submodules, but
-# naming each one here means a heavy import in any of them is caught even if the
-# `__init__` is later changed to stop importing it.
-LAB_MODULES = (
-    "hephkit.lab.data",
-    "hephkit.lab.data.manifest",
-    "hephkit.lab.data.releases",
-    "hephkit.lab.data.frames",
-    "hephkit.lab.data.snapshots",
-    "hephkit.lab.data.cards",
-    "hephkit.lab.sources",
-    "hephkit.lab.stats",
-)
+# `hephkit.lab.data` is a package whose `__init__` imports its submodules, and it
+# is named here in its own right, so a heavy import in any of them is caught even
+# if the `__init__` is later changed to stop importing it.
+LAB_MODULES = lab_modules()
+
+
+def test_the_module_walk_finds_the_package_and_nothing_outside_it() -> None:
+    """The derived list is what the two import tests stand on, so pin its shape."""
+    assert "hephkit.lab.data" in LAB_MODULES, LAB_MODULES
+    assert "hephkit.lab.data.manifest" in LAB_MODULES, LAB_MODULES
+    assert "hephkit.lab.stats" in LAB_MODULES, LAB_MODULES
+    assert "hephkit.lab._extras" in LAB_MODULES, LAB_MODULES
+    # The namespace portion's own `__init__` is not a module to import by name,
+    # and nothing outside `hephkit.lab` is in range.
+    assert "hephkit.lab" not in LAB_MODULES
+    assert all(name.startswith("hephkit.lab.") for name in LAB_MODULES), LAB_MODULES
+    # One entry per .py file under the package, minus the package's own __init__.
+    files = list((SRC / "hephkit" / "lab").rglob("*.py"))
+    assert len(LAB_MODULES) == len(files) - 1, (LAB_MODULES, files)
 
 # What the extras bring in beyond `HEAVY`: NumPy (the `stats` bootstrap) and
 # PyArrow (DuckDB's bridge to polars). Neither is an extra of its own, so
@@ -196,18 +229,25 @@ from datetime import date
 from pathlib import Path
 
 from hephkit.lab._extras import MissingExtraError
-from hephkit.lab.data import FileDigest, Manifest, push, query, read_frame
-from hephkit.lab.stats import bootstrap_ci
+from hephkit.lab.data import FileDigest, Manifest, pull, push, query, read_frame
+from hephkit.lab.stats import aggregate_seeds, bootstrap_ci
 
 manifest = Manifest(
     dataset="d", source="s", release="r", extractor_version="1", captured_at=date(2026, 1, 1),
     files=(FileDigest(path="a.csv", sha256="0" * 64, bytes=0),),
 )
+# Every public function that reaches for an extra, all six of them. A caller
+# that gets a bare ModuleNotFoundError instead of this is told to fix the wrong
+# thing, so each entry point needs its own line here.
 calls = {{
     "read_frame": lambda: read_frame(manifest, root=Path(".")),
     "query": lambda: query(manifest, root=Path("."), sql="select 1"),
     "push": lambda: push(manifest, root=Path("."), remote="."),
+    "pull": lambda: pull(manifest, into=Path("."), remote="."),
     "bootstrap_ci": lambda: bootstrap_ci([1.0, 2.0, 4.0], seed=0),
+    # Reaches the extra through bootstrap_ci, which is exactly why it is here:
+    # its own validation must not refuse first and hide that.
+    "aggregate_seeds": lambda: aggregate_seeds({{0: 1.0, 1: 2.0, 2: 4.0}}, seed=0),
 }}
 named = {{}}
 for label, call in calls.items():
@@ -216,9 +256,10 @@ for label, call in calls.items():
     except MissingExtraError as exc:
         named[label] = str(exc)
 assert sorted(named) == sorted(calls), f"these did not raise MissingExtraError: {{named}}"
-for label in ("read_frame", "query", "push"):
+for label in ("read_frame", "query", "push", "pull"):
     assert "hephkit-lab[data]" in named[label], named[label]
-assert "hephkit-lab[stats]" in named["bootstrap_ci"], named["bootstrap_ci"]
+for label in ("bootstrap_ci", "aggregate_seeds"):
+    assert "hephkit-lab[stats]" in named[label], named[label]
 """
 
 
