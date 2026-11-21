@@ -126,22 +126,6 @@ def test_query_refuses_a_moved_file_before_running_anything(tmp_path: Path) -> N
 
 
 @pytest.mark.extras
-def test_query_cannot_see_a_file_the_manifest_omits(tmp_path: Path) -> None:
-    import duckdb
-
-    manifest = build(tmp_path, {"a.csv": CSV_A})
-    (tmp_path / "stray.csv").write_bytes(b"id\n9\n")
-    # DuckDB would otherwise resolve a bare file name, or read_csv('...'), straight
-    # from disk: external access is shut once the manifest's files are loaded.
-    for sql in (
-        'SELECT * FROM "stray.csv"',
-        f"SELECT * FROM read_csv('{tmp_path / 'stray.csv'}')",
-    ):
-        with pytest.raises(duckdb.Error):
-            query(manifest, root=tmp_path, sql=sql)
-
-
-@pytest.mark.extras
 def test_query_handles_parquet_a_name_with_a_quote_and_a_non_tabular_entry(
     tmp_path: Path,
 ) -> None:
@@ -187,3 +171,107 @@ def test_query_keeps_the_dtypes_duckdb_assigned(tmp_path: Path) -> None:
     assert isinstance(frame["money"].dtype, pl.Decimal), "a DECIMAL must not become a float"
     assert frame["money"].dtype.scale == 2
     assert frame["nothing"].dtype.is_integer(), "an all-null column keeps its declared type"
+
+
+@pytest.mark.extras
+def test_read_frame_does_not_glob_a_manifest_path(tmp_path: Path) -> None:
+    """A manifest-named `x*.csv` must not pull in the unlisted `xother.csv`."""
+    manifest = build(tmp_path, {"x*.csv": b"n\n1\n2\n"})
+    (tmp_path / "xother.csv").write_bytes(b"n\n99\n")
+    assert read_frame(manifest, root=tmp_path)["n"].to_list() == [1, 2]
+
+
+@pytest.mark.extras
+def test_query_does_not_glob_a_manifest_path(tmp_path: Path) -> None:
+    manifest = build(tmp_path, {"x*.csv": b"n\n1\n2\n", "p[1].csv": b"n\n5\n"})
+    (tmp_path / "xother.csv").write_bytes(b"n\n99\n")
+    (tmp_path / "p1.csv").write_bytes(b"n\n77\n")
+    frame = query(
+        manifest, root=tmp_path, sql='SELECT n FROM "x*.csv" UNION ALL SELECT n FROM "p[1].csv" ORDER BY n'
+    )
+    assert frame["n"].to_list() == [1, 2, 5]
+
+
+@pytest.mark.extras
+def test_read_frame_refuses_a_parquet_file_whose_digest_moved(tmp_path: Path) -> None:
+    import polars as pl
+
+    pl.DataFrame({"k": [1, 2, 3]}).write_parquet(tmp_path / "p.parquet")
+    manifest = manifest_for(tmp_path, **META)  # type: ignore[arg-type]
+    data = bytearray((tmp_path / "p.parquet").read_bytes())
+    data[len(data) // 2] ^= 0x01
+    (tmp_path / "p.parquet").write_bytes(bytes(data))
+    with pytest.raises(ManifestError):
+        read_frame(manifest, root=tmp_path)
+
+
+@pytest.mark.extras
+@pytest.mark.parametrize(
+    "template",
+    [
+        "ATTACH '{stray}' AS other",
+        "SELECT * FROM glob('{dir}/*')",
+        "COPY (SELECT 1 AS n) TO '{dir}/out.csv'",
+        "SET enable_external_access = true",
+        "SELECT * FROM read_csv('{stray}')",
+        'SELECT * FROM "stray.csv"',
+    ],
+)
+def test_caller_sql_cannot_reach_the_filesystem(tmp_path: Path, template: str) -> None:
+    import duckdb
+
+    manifest = build(tmp_path, {"a.csv": CSV_A})
+    stray = tmp_path / "stray.csv"
+    stray.write_bytes(b"id\n9\n")
+    with pytest.raises(duckdb.Error):
+        query(manifest, root=tmp_path, sql=template.format(stray=stray, dir=tmp_path))
+    assert not (tmp_path / "out.csv").exists()
+
+
+@pytest.mark.extras
+def test_query_refuses_a_statement_that_returns_no_relation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DuckDB 1.x returns None for DDL; 2.x does not. The guard must hold on both."""
+    import duckdb
+
+    real_connect = duckdb.connect
+
+    class NoRelation:
+        def __init__(self, inner: object) -> None:
+            self._inner = inner
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._inner, name)
+
+        def sql(self, *args: object, **kwargs: object) -> None:
+            return None
+
+    monkeypatch.setattr(duckdb, "connect", lambda *a, **k: NoRelation(real_connect(*a, **k)))
+    manifest = build(tmp_path, {"a.csv": CSV_A})
+    with pytest.raises(ValueError, match="returns rows"):
+        query(manifest, root=tmp_path, sql="CREATE TABLE t (a INTEGER)")
+
+
+@pytest.mark.extras
+def test_paths_differing_only_by_case_fail_loudly(tmp_path: Path) -> None:
+    """DuckDB's catalog is case-insensitive, so `A.csv` and `a.csv` collide. Never silently."""
+    import duckdb
+
+    from hephkit.lab.data.manifest import FileDigest
+
+    (tmp_path / "a.csv").write_bytes(CSV_A)
+    if not (tmp_path / "A.csv").exists():  # a case-sensitive filesystem
+        (tmp_path / "A.csv").write_bytes(CSV_A)
+    one = manifest_for(tmp_path, **META)  # type: ignore[arg-type]
+    digest = one.files[0]
+    manifest = one.model_copy(
+        update={
+            "files": (
+                FileDigest(path="a.csv", sha256=digest.sha256, bytes=digest.bytes),
+                FileDigest(path="A.csv", sha256=digest.sha256, bytes=digest.bytes),
+            )
+        }
+    )
+    with pytest.raises(duckdb.CatalogException):
+        query(manifest, root=tmp_path, sql='SELECT * FROM "a.csv"')

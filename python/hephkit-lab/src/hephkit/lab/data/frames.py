@@ -39,10 +39,6 @@ def _only(manifest: Manifest, entry: FileDigest) -> Manifest:
     return manifest.model_copy(update={"files": (entry,)})
 
 
-def _sql_literal(text: str) -> str:
-    return "'" + text.replace("'", "''") + "'"
-
-
 def _sql_identifier(text: str) -> str:
     return '"' + text.replace('"', '""') + '"'
 
@@ -69,10 +65,12 @@ def read_frame(manifest: Manifest, *, root: Path, file: str | None = None) -> pl
     if suffix not in _FORMATS:
         raise ValueError(f"{entry.path!r}: cannot read a {suffix or 'suffixless'} file as a frame")
     verify_manifest(_only(manifest, entry), root)
-    target = root / entry.path
-    frame: pl.DataFrame = (
-        polars.read_parquet(target) if suffix == ".parquet" else polars.read_csv(target)
-    )
+    # A handle, never the path string: polars treats a path as a glob pattern, so
+    # a manifest-named `x*.csv` would pull in an unlisted `xother.csv`.
+    with (root / entry.path).open("rb") as handle:
+        frame: pl.DataFrame = (
+            polars.read_parquet(handle) if suffix == ".parquet" else polars.read_csv(handle)
+        )
     return frame
 
 
@@ -94,11 +92,18 @@ def query(manifest: Manifest, *, root: Path, sql: str) -> pl.DataFrame:
             suffix = Path(entry.path).suffix
             if suffix not in _FORMATS:
                 continue
-            reader = "read_parquet" if suffix == ".parquet" else "read_csv"
-            connection.execute(
-                f"CREATE TABLE {_sql_identifier(entry.path)} AS "
-                f"SELECT * FROM {reader}({_sql_literal(str(root / entry.path))})"
-            )
+            # DuckDB is handed the open file, never its path: `read_csv` and
+            # `read_parquet` glob a path string, so a manifest-named `x*.csv`
+            # would load an unlisted `xother.csv` that no digest covers.
+            with (root / entry.path).open("rb") as handle:
+                relation = (
+                    connection.read_parquet(handle)
+                    if suffix == ".parquet"
+                    else connection.read_csv(handle)
+                )
+                connection.execute(
+                    f"CREATE TABLE {_sql_identifier(entry.path)} AS SELECT * FROM relation"
+                )
         # Loaded as tables, then the door is shut: with external access on, DuckDB
         # resolves a bare file name or `read_csv('...')` straight from disk, so a
         # file the manifest omits (or any file the process can read) would be
@@ -108,7 +113,10 @@ def query(manifest: Manifest, *, root: Path, sql: str) -> pl.DataFrame:
         # null stays an integer, a DECIMAL stays a decimal. Rebuilding the frame
         # from Python rows would leave polars to guess every dtype from whichever
         # rows the query happened to return.
-        frame: pl.DataFrame = connection.sql(sql).pl()
+        result = connection.sql(sql)
+        if result is None:
+            raise ValueError("query() needs a statement that returns rows, not DDL or a SET")
+        frame: pl.DataFrame = result.pl()
     finally:
         connection.close()
     return frame
