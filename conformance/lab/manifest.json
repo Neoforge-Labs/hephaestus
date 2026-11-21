@@ -1,0 +1,481 @@
+{
+  "suite": "lab.manifest",
+  "spec": "0.6.0",
+  "description": "Dataset manifests and the digest scope, spec section 10. `input.manifest` is a manifest document (10.1). `input.disk`, when present, maps a path to the exact UTF-8 text of a file written under a scratch root before the manifest is checked against it, so a case can pin a `bytes` that disagrees with the file it names (10.4). `expect.data_hash` is the manifest's `data_hash` (10.2): the content hash (4.2) of the canonical JSON (4.1) of the `{path, sha256, bytes}` array sorted by `path` byte-wise. `expect.error` is the registry code of the refusal (10.4). Every `sha256` in an input is a literal stated by the case, never read back from an implementation.",
+  "source": "Spec section 10 and the Wave 2 plan (docs/superpowers/plans/). Derived without this kit's code. Each file's `sha256` is hashlib.sha256 over the UTF-8 bytes of the literal text the case names (a.csv = 'id,value\\n1,2\\n', whose digest `shasum -a 256` reproduces: c15097c4...d93c), and `bytes` is the length of those bytes. Each `expect.data_hash` is 'sha256:' + hashlib.sha256 over rfc8785.dumps (the RFC 8785 reference package, pinned by conformance/hashing/) of the array of {path, sha256, bytes} objects sorted by path.encode('utf-8'), with no concatenation of file bytes. The refusal cases are the five of 10.4 plus the unknown and missing top-level members of 10.1; each is invalid by reading the clause, not by running a parser.",
+  "cases": [
+    {
+      "name": "single-file",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": 13
+            }
+          ]
+        }
+      },
+      "expect": {
+        "data_hash": "sha256:0053236c261700212396e25811b44581f5c36421001bc8b5dbee449deaa5b302"
+      }
+    },
+    {
+      "name": "two-files-in-order",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": 13
+            },
+            {
+              "path": "b.csv",
+              "sha256": "bc17c6a2665227b17cce6a7b321b5085958ac39fdd4bc3b6d1dbc32e4d3293e1",
+              "bytes": 13
+            }
+          ]
+        }
+      },
+      "expect": {
+        "data_hash": "sha256:1464c993fd3cf5ce9c14f6d47533e25ca7c2e7cd25752b497d32cced8044f72f"
+      }
+    },
+    {
+      "name": "two-files-reversed",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "b.csv",
+              "sha256": "bc17c6a2665227b17cce6a7b321b5085958ac39fdd4bc3b6d1dbc32e4d3293e1",
+              "bytes": 13
+            },
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": 13
+            }
+          ]
+        }
+      },
+      "expect": {
+        "data_hash": "sha256:1464c993fd3cf5ce9c14f6d47533e25ca7c2e7cd25752b497d32cced8044f72f"
+      }
+    },
+    {
+      "name": "rename-changes-the-hash",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "renamed.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": 13
+            }
+          ]
+        }
+      },
+      "expect": {
+        "data_hash": "sha256:50e5808b2b2f42f17718d5604aa02099db7ec922ea8d5a347dc83c3793d98f4b"
+      }
+    },
+    {
+      "name": "empty-file-is-a-file",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "empty.txt",
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          ]
+        }
+      },
+      "expect": {
+        "data_hash": "sha256:1317a84d02c9b4d37ec94060d6b5436713471ea6d5629b4020c05d7cf087cbdf"
+      }
+    },
+    {
+      "name": "sort-is-bytewise-over-paths",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "B.csv",
+              "sha256": "e83189db38554920ea572093f9ad32facf682f28ccecdac085c1511735a2b492",
+              "bytes": 6
+            },
+            {
+              "path": "a.csv",
+              "sha256": "b908e4daaf9d57fe9cb551a689a35c9a9e0fac85fdf11faaa0a1ba0e5efc06fd",
+              "bytes": 6
+            },
+            {
+              "path": "dir/x.csv",
+              "sha256": "8578a26bad9cf662e6e0cd91540eea63fb2ed5b5b2cebc471364c137b12931e6",
+              "bytes": 6
+            },
+            {
+              "path": "dir.x.csv",
+              "sha256": "5ddbce254c08372e429a250112c6f4593868687ab01e9a126193e5a83560362b",
+              "bytes": 4
+            },
+            {
+              "path": "é.csv",
+              "sha256": "8f8df9963c9628741bfeeac7efb739164d0858fd03eb1950f385bb26512cef55",
+              "bytes": 7
+            }
+          ]
+        }
+      },
+      "expect": {
+        "data_hash": "sha256:c384389cf8a32756138ca1d3813951658363c572043926eaa6d5276f72e18bc2"
+      }
+    },
+    {
+      "name": "sort-ignores-the-listed-order",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "é.csv",
+              "sha256": "8f8df9963c9628741bfeeac7efb739164d0858fd03eb1950f385bb26512cef55",
+              "bytes": 7
+            },
+            {
+              "path": "dir.x.csv",
+              "sha256": "5ddbce254c08372e429a250112c6f4593868687ab01e9a126193e5a83560362b",
+              "bytes": 4
+            },
+            {
+              "path": "dir/x.csv",
+              "sha256": "8578a26bad9cf662e6e0cd91540eea63fb2ed5b5b2cebc471364c137b12931e6",
+              "bytes": 6
+            },
+            {
+              "path": "a.csv",
+              "sha256": "b908e4daaf9d57fe9cb551a689a35c9a9e0fac85fdf11faaa0a1ba0e5efc06fd",
+              "bytes": 6
+            },
+            {
+              "path": "B.csv",
+              "sha256": "e83189db38554920ea572093f9ad32facf682f28ccecdac085c1511735a2b492",
+              "bytes": 6
+            }
+          ]
+        }
+      },
+      "expect": {
+        "data_hash": "sha256:c384389cf8a32756138ca1d3813951658363c572043926eaa6d5276f72e18bc2"
+      }
+    },
+    {
+      "name": "data-hash-ignores-descriptive-members",
+      "input": {
+        "manifest": {
+          "dataset": "other",
+          "source": "https://example.org/demo",
+          "release": "2027-09",
+          "extractor_version": "0.1.0",
+          "captured_at": "2027-10-11",
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": 13
+            }
+          ]
+        }
+      },
+      "expect": {
+        "data_hash": "sha256:0053236c261700212396e25811b44581f5c36421001bc8b5dbee449deaa5b302"
+      }
+    },
+    {
+      "name": "empty-files-array",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": []
+        }
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "duplicate-path",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": 13
+            },
+            {
+              "path": "a.csv",
+              "sha256": "bc17c6a2665227b17cce6a7b321b5085958ac39fdd4bc3b6d1dbc32e4d3293e1",
+              "bytes": 13
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "sha256-uppercase",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "C15097C46E6DBFE67D8106C18B850FF4312898C146771669AE50324F910ED93C",
+              "bytes": 13
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "sha256-63-characters",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93",
+              "bytes": 13
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "negative-bytes",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": -1
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "bytes-disagrees-with-the-file",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": 14
+            }
+          ]
+        },
+        "disk": {
+          "a.csv": "id,value\n1,2\n"
+        }
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "file-entry-with-an-undefined-member",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": 13,
+              "mtime": 0
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "file-entry-missing-bytes",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "manifest-with-an-undefined-member",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": 13
+            }
+          ],
+          "license": "cc0"
+        }
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "manifest-missing-release",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": 13
+            }
+          ]
+        }
+      },
+      "expect": {
+        "error": "HEPH-LAB-412"
+      }
+    },
+    {
+      "name": "bytes-agrees-with-the-file",
+      "input": {
+        "manifest": {
+          "dataset": "demo",
+          "source": "https://example.org/demo",
+          "release": "2026-01",
+          "extractor_version": "0.1.0",
+          "captured_at": "2026-02-03",
+          "files": [
+            {
+              "path": "a.csv",
+              "sha256": "c15097c46e6dbfe67d8106c18b850ff4312898c146771669ae50324f910ed93c",
+              "bytes": 13
+            }
+          ]
+        },
+        "disk": {
+          "a.csv": "id,value\n1,2\n"
+        }
+      },
+      "expect": {
+        "data_hash": "sha256:0053236c261700212396e25811b44581f5c36421001bc8b5dbee449deaa5b302"
+      }
+    }
+  ]
+}

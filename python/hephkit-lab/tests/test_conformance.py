@@ -24,6 +24,12 @@ import test_repro
 from pydantic import ValidationError, create_model
 
 from hephkit.lab.config import ConfigError, ExperimentConfig, config_hash, resolve
+from hephkit.lab.data.manifest import (
+    ManifestError,
+    data_hash,
+    parse_manifest,
+    verify_manifest,
+)
 from hephkit.lab.record import NONFINITE, NONFINITE_MEMBER, RunRecord, open_record, read_record
 from hephkit.lab.replay import compare
 from hephkit.lab.repro import Accelerator, ProvenanceRecord, capture
@@ -271,10 +277,34 @@ def run_diff(case: Case, tmp_path: Path) -> None:
     assert_member_order(report, expect)
 
 
+def run_manifest(case: Case, tmp_path: Path) -> None:
+    """One `lab.manifest` case: a manifest document in, a `data_hash` or a refusal out (spec 10)."""
+    i = case["input"]
+    expect = case["expect"]
+    for name, text in i.get("disk", {}).items():
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(text.encode("utf-8"))
+
+    def compute() -> str:
+        manifest = parse_manifest(i["manifest"])
+        if "disk" in i:
+            verify_manifest(manifest, tmp_path)
+        return data_hash(manifest)
+
+    if "error" in expect:
+        with pytest.raises(ManifestError) as exc:
+            compute()
+        assert exc.value.code == expect["error"]
+        return
+    assert compute() == expect["data_hash"]
+
+
 RUNNERS: dict[str, Callable[[Case, Path], None]] = {
     "lab.config": run_config,
     "lab.provenance": run_record_case,
     "lab.diff": run_diff,
+    "lab.manifest": run_manifest,
 }
 
 
