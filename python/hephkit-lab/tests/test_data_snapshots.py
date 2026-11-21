@@ -9,6 +9,8 @@ did not write.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
@@ -34,6 +36,19 @@ def build(root: Path, files: dict[str, bytes] | None = None) -> Manifest:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
     return manifest_for(root, **META)  # type: ignore[arg-type]
+
+
+@contextmanager
+def refused(match: str | None = None) -> Iterator[None]:
+    """Expect an integrity refusal: ``HEPH-LAB-412``, and not its 424 subclass.
+
+    ``MissingManifestError`` is a ``ManifestError``, so a bare ``pytest.raises``
+    could not tell the two apart.
+    """
+    with pytest.raises(ManifestError, match=match) as caught:
+        yield
+    assert caught.value.code == LAB_412
+    assert not isinstance(caught.value, MissingManifestError)
 
 
 def listing(root: Path) -> dict[str, bytes]:
@@ -88,7 +103,7 @@ def test_push_refuses_a_root_that_disagrees_with_the_manifest(tmp_path: Path) ->
     source, remote = tmp_path / "src", tmp_path / "remote"
     manifest = build(source)
     (source / "a.csv").write_bytes(b"id,v\n1,99\n2,20\n")
-    with pytest.raises(ManifestError, match="a.csv"):
+    with refused(match="a.csv"):
         push(manifest, root=source, remote=str(remote))
     assert not remote.exists()
 
@@ -135,7 +150,7 @@ def test_a_pull_from_a_remote_that_does_not_exist_is_missing_not_corrupt(tmp_pat
     with pytest.raises(MissingManifestError) as caught:
         pull(manifest, into=tmp_path / "dst", remote=str(absent))
     assert caught.value.code == LAB_424
-    assert str(absent) in str(caught.value) or "no-such-remote" in str(caught.value)
+    assert str(absent) in str(caught.value)
 
 
 @pytest.mark.extras
@@ -148,6 +163,46 @@ def test_a_pull_from_an_unreachable_remote_url_is_missing_not_corrupt(tmp_path: 
         pull(manifest, into=tmp_path / "dst", remote="notaprotocol://nowhere/bucket")
     assert caught.value.code == LAB_424
     assert "notaprotocol://nowhere/bucket" in str(caught.value)
+
+
+@pytest.mark.extras
+def test_a_connection_failure_reading_the_pointer_is_missing_not_corrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A remote that is up in config but unreachable on the wire raises OSError, not DvcException."""
+    from hephkit.lab.data import snapshots
+
+    source, remote = tmp_path / "src", tmp_path / "remote"
+    manifest = build(source)
+    snapshots.push(manifest, root=source, remote=str(remote))
+
+    def unreachable(self: object, path: str) -> bytes:
+        raise ConnectionError("connection refused")
+
+    monkeypatch.setattr("dvc_objects.fs.local.LocalFileSystem.cat_file", unreachable)
+    with pytest.raises(MissingManifestError) as caught:
+        snapshots.pull(manifest, into=tmp_path / "dst", remote=str(remote))
+    assert caught.value.code == LAB_424
+    assert str(remote) in str(caught.value)
+
+
+@pytest.mark.extras
+def test_a_failure_while_placing_a_file_leaves_no_temp_file_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hephkit.lab.data import snapshots
+
+    source, remote, target = tmp_path / "src", tmp_path / "remote", tmp_path / "dst"
+    manifest = build(source)
+    snapshots.push(manifest, root=source, remote=str(remote))
+
+    def full_disk(*args: object, **kwargs: object) -> None:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(snapshots.shutil, "copyfileobj", full_disk)
+    with pytest.raises(OSError, match="no space"):
+        snapshots.pull(manifest, into=target, remote=str(remote))
+    assert [p for p in target.rglob("*") if p.is_file()] == []
 
 
 @pytest.mark.extras
@@ -171,7 +226,7 @@ def test_an_arrival_that_is_a_symlink_is_refused_even_if_its_bytes_match(
         return arrived
 
     monkeypatch.setattr(snapshots, "_fetch", fetch_then_link)
-    with pytest.raises(ManifestError, match="arrived as a link"):
+    with refused(match="arrived as a link"):
         snapshots.pull(manifest, into=target, remote=str(remote))
     assert not target.exists() or listing(target) == {}
 
@@ -199,7 +254,7 @@ def test_an_arrival_whose_directory_is_a_symlink_is_refused(
         return arrived
 
     monkeypatch.setattr(snapshots, "_fetch", fetch_then_link)
-    with pytest.raises(ManifestError, match="arrived as a link"):
+    with refused(match="arrived as a link"):
         snapshots.pull(manifest, into=target, remote=str(remote))
 
 
@@ -249,7 +304,7 @@ def test_a_snapshot_pointer_that_is_not_a_dvc_directory_id_is_refused(tmp_path: 
     assert pointer.is_file()
     for hostile in ('{"md5": "../../etc/passwd"}', '{"md5": 7}', "not json", "{}"):
         pointer.write_text(hostile)
-        with pytest.raises(ManifestError):
+        with refused():
             pull(manifest, into=tmp_path / "dst", remote=str(remote))
 
 
@@ -261,7 +316,7 @@ def test_pull_leaves_nothing_behind_when_it_refuses(tmp_path: Path) -> None:
     manifest = build(source)
     push(manifest, root=source, remote=str(remote))
     corrupt(remote, FILES["raw/b.csv"], b"id,l\n1,y\n")
-    with pytest.raises(ManifestError):
+    with refused():
         pull(manifest, into=target, remote=str(remote))
     # a.csv arrived intact, and still is not in the destination: all or nothing.
     assert not target.exists() or listing(target) == {}
@@ -277,7 +332,7 @@ def test_a_refused_pull_does_not_touch_what_the_destination_held(tmp_path: Path)
     target.mkdir()
     (target / "a.csv").write_bytes(b"previous\n")
     corrupt(remote, FILES["a.csv"], b"id,v\n1,11\n2,20\n")
-    with pytest.raises(ManifestError):
+    with refused():
         pull(manifest, into=target, remote=str(remote))
     assert listing(target) == {"a.csv": b"previous\n"}
 
@@ -308,7 +363,7 @@ def test_pull_refuses_a_destination_directory_a_symlink_routes_outside_the_root(
     target.mkdir()
     elsewhere.mkdir()
     (target / "raw").symlink_to(elsewhere, target_is_directory=True)
-    with pytest.raises(ManifestError, match="outside"):
+    with refused(match="outside"):
         pull(build(source), into=target, remote=str(remote))
     assert list(elsewhere.iterdir()) == []
     assert not (target / "a.csv").exists()  # refused before any file was written
@@ -325,7 +380,7 @@ def test_pull_refuses_a_destination_file_that_is_a_symlink_out_of_the_root(tmp_p
     target.mkdir()
     outside.write_bytes(b"precious\n")
     (target / "a.csv").symlink_to(outside)
-    with pytest.raises(ManifestError, match="outside"):
+    with refused(match="outside"):
         pull(manifest, into=target, remote=str(remote))
     assert outside.read_bytes() == b"precious\n"
 

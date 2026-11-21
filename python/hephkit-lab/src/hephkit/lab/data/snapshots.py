@@ -41,6 +41,14 @@ later with an unrelated lookup error. The pointer's md5 ids and the generated
 A snapshot is one directory of copies, so ``push`` needs room for the files it
 sends. Verification is not atomic with the copy out of scratch: a process that
 rewrites the scratch directory mid-pull is outside what this guards.
+
+The destination-escape check is not atomic with the write either: ``pull``
+resolves every destination, then writes, so a process that swaps a symlink into
+``into`` in between defeats it. Closing that needs ``dir_fd``/``O_NOFOLLOW``
+writes and is out of scope. The realistic hazard is covered: what comes off the
+remote cannot create a link inside ``into`` (only manifest-named regular files
+are copied, and a link in the arrival is refused), so a link there is one the
+caller or another process already placed.
 """
 
 from __future__ import annotations
@@ -74,10 +82,11 @@ _LAYOUT_DVC = "3.x"
 class UnsupportedDvcLayoutError(RuntimeError):
     """The installed DVC lays out its remote differently from the layout this module relies on."""
 
+
 _REMOTE = "snapshot"
 _DATA = "data"
 _POINTER_DIR = "snapshots"
-_DIR_ID = re.compile(r"^[0-9a-f]{32}\.dir$")
+_DIR_ID = re.compile(r"[0-9a-f]{32}\.dir")
 
 
 def _remote_url(remote: str) -> str:
@@ -155,17 +164,32 @@ def _read_pointer(repo: Any, manifest: Manifest, remote: str, dvc_exceptions: Mo
     """
     try:
         odb = repo.cloud.get_remote_odb(_REMOTE)
-        raw = odb.fs.cat_file(_pointer_path(odb, manifest))
-        md5 = json.loads(raw)["md5"]
+        location = _pointer_path(odb, manifest)
     except dvc_exceptions.DvcException as exc:
-        raise MissingManifestError(f"could not read a snapshot from remote {remote!r}: {exc}") from exc
+        raise MissingManifestError(
+            f"could not read a snapshot from remote {remote!r}: {exc}"
+        ) from exc
+    try:
+        raw = odb.fs.cat_file(location)
     except FileNotFoundError as exc:
         raise MissingManifestError(
             f"remote {remote!r} holds no snapshot of data_hash {data_hash(manifest)}"
         ) from exc
+    except (dvc_exceptions.DvcException, OSError) as exc:
+        # A remote that is configured but cannot be reached on the wire
+        # (connection refused, timeout, a provider's I/O error) is an
+        # unobtainable snapshot, not a corrupt one. Narrow on purpose: this one
+        # read, and only DVC's family and OSError. It is its own block because
+        # MissingManifestError is a ValueError, and the parse below must not
+        # catch and relabel it as 412.
+        raise MissingManifestError(
+            f"could not read a snapshot from remote {remote!r}: {exc}"
+        ) from exc
+    try:
+        md5 = json.loads(raw)["md5"]
     except (ValueError, KeyError, TypeError) as exc:
         raise ManifestError(f"the remote's snapshot pointer is not valid: {exc}") from exc
-    if not isinstance(md5, str) or not _DIR_ID.match(md5):
+    if not isinstance(md5, str) or not _DIR_ID.fullmatch(md5):
         raise ManifestError(f"the remote's snapshot pointer names {md5!r}, not a DVC directory id")
     return md5
 
@@ -202,7 +226,7 @@ def _place(source: Path, destination: Path) -> None:
         with os.fdopen(handle, "wb") as out, source.open("rb") as arrived:
             shutil.copyfileobj(arrived, out)
         os.replace(name, destination)
-    except BaseException:  # pragma: no cover - cleanup of a half-copied temp file on an I/O failure
+    except BaseException:
         Path(name).unlink(missing_ok=True)
         raise
 

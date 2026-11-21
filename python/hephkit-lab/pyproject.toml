@@ -114,7 +114,7 @@ filterwarnings = [
     # modules, not pygtrie. Message AND module are both pinned, so no other warning from
     # DVC or anywhere else is let through. Delete this when a DVC release stops
     # reading `.value` (or pins a pygtrie without the deprecation).
-    "ignore:_NoneStep.value will soon raise AttributeError:DeprecationWarning:dvc\\.repo\\.(trie|graph)",
+    "ignore:_NoneStep.value will soon raise AttributeError:DeprecationWarning:dvc\\.repo\\.(trie|graph)$",
 ]
 
 [tool.coverage.run]
