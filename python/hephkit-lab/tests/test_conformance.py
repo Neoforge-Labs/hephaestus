@@ -33,8 +33,9 @@ from hephkit.lab.data.manifest import (
 )
 from hephkit.lab.data.releases import Release, TemporalError, release_as_of
 from hephkit.lab.record import NONFINITE, NONFINITE_MEMBER, RunRecord, open_record, read_record
-from hephkit.lab.replay import compare
+from hephkit.lab.replay import ABSOLUTE_TOLERANCE, RELATIVE_TOLERANCE, compare
 from hephkit.lab.repro import Accelerator, ProvenanceRecord, capture
+from hephkit.lab.stats import StatsError, cliffs_delta, cohens_d, hedges_g
 
 ROOT = Path(__file__).resolve().parents[3] / "conformance"
 LAB = ROOT / "lab"
@@ -316,12 +317,44 @@ def run_releases(case: Case, _tmp_path: Path) -> None:
     assert release_as_of(table, when).release == expect["release"]
 
 
+def within_tolerance(actual: float, expected: float) -> bool:
+    """Spec 9.3's float comparison: |a - b| <= max(1e-9 * max(|a|, |b|), 1e-12).
+
+    The same bound `hephkit.lab.replay` applies to a row value, with its two
+    constants imported rather than restated, so the two cannot drift apart.
+    """
+    bound = max(RELATIVE_TOLERANCE * max(abs(actual), abs(expected)), ABSOLUTE_TOLERANCE)
+    return abs(actual - expected) <= bound
+
+
+EFFECT_SIZES: dict[str, Callable[[Sequence[float], Sequence[float]], float]] = {
+    "cohens_d": cohens_d,
+    "hedges_g": hedges_g,
+    "cliffs_delta": cliffs_delta,
+}
+
+
+def run_effects(case: Case, _tmp_path: Path) -> None:
+    """One `lab.effects` case: two samples in, an effect size or a refusal out."""
+    i = case["input"]
+    expect = case["expect"]
+    statistic = EFFECT_SIZES[i["statistic"]]
+    if "error" in expect:
+        with pytest.raises(StatsError) as exc:
+            statistic(i["a"], i["b"])
+        assert exc.value.code == expect["error"]
+        return
+    actual = statistic(i["a"], i["b"])
+    assert within_tolerance(actual, expect["value"]), (actual, expect["value"])
+
+
 RUNNERS: dict[str, Callable[[Case, Path], None]] = {
     "lab.config": run_config,
     "lab.provenance": run_record_case,
     "lab.diff": run_diff,
     "lab.manifest": run_manifest,
     "lab.releases": run_releases,
+    "lab.effects": run_effects,
 }
 
 
@@ -429,3 +462,13 @@ def test_vector(suite: str, case: Case, tmp_path: Path) -> None:
     if runner is None:
         pytest.fail(f"no runner for suite {suite!r}")
     runner(case, tmp_path)
+
+
+def test_the_effect_comparison_is_tolerant_but_not_loose() -> None:
+    # Inside 9.3's bound: the last-digit noise an irrational constant carries.
+    assert within_tolerance(1.4142135623730951, 1.414213562373095)
+    # Outside it: |a - b| is 1e-6 against a bound of about 1e-9.
+    assert not within_tolerance(1.0, 1.000001)
+    # Near zero the absolute floor decides: 1e-13 passes, 1e-11 does not.
+    assert within_tolerance(1e-13, 0.0)
+    assert not within_tolerance(1e-11, 0.0)
