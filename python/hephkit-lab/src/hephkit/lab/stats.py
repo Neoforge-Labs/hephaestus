@@ -15,12 +15,15 @@ is the honest summary. Hedges' *g* applies ``1 - 3 / (4 n - 9)``, the standard
 closed-form approximation to the small-sample correction, not the exact
 correction ``J = gamma(m/2) / (sqrt(m/2) gamma((m-1)/2))`` with ``m = n - 2``
 that it approximates. The gap is widest exactly where the correction matters
-most: about 1.3% of *J* at ``n = 4``, 0.3% at ``n = 6``, 0.1% at ``n = 10`` and
-0.01% by ``n = 50``. The approximation is nonetheless what is reported, because
-it is what the published definition gives and what
-``conformance/lab/effects.json`` pins by hand; a reader comparing *g* against a
-tool that uses the gamma form should expect a difference of that order at a tiny
-sample, and neither is wrong.
+most: about 1.3% of *J* at ``n = 4``, 0.27% at ``n = 6``, 0.058% at ``n = 10``
+and 0.0014% by ``n = 50``. Those four are relative errors against the exact
+*J*, computed from the gamma form with ``math.lgamma`` and pinned by
+``test_stats.py::test_the_documented_g_approximation_error_is_the_measured_one``,
+so the prose here cannot drift from the arithmetic it describes. The
+approximation is nonetheless what is reported, because it is what the published
+definition gives and what ``conformance/lab/effects.json`` pins by hand; a
+reader comparing *g* against a tool that uses the gamma form should expect a
+difference of that order at a tiny sample, and neither is wrong.
 
 Definitions (the vectors in ``conformance/lab/effects.json`` are worked from
 these by hand):
@@ -177,6 +180,13 @@ def _sample(values: Iterable[float], name: str) -> list[float]:
     * a ``set`` or ``frozenset``, which has already dropped every repeated
       observation, so its variance is not the sample's.
 
+    An object whose *type* is iterable but which refuses to iterate is refused
+    here too, where ``list()`` raises: a 0-d NumPy array (``numpy.array(5.0)``)
+    is the real case -- it passes the check above, because ``ndarray`` has
+    ``__iter__``, and then raises ``TypeError: iteration over a 0-d array``. A
+    scalar is not a sample, and the answer to one must be this module's coded
+    refusal rather than a bare ``TypeError`` out of ``list()``.
+
     Each value must be a :class:`numbers.Real`, which ``numpy.int64`` and
     ``numpy.float64`` are and ``int``/``float`` alone are not, so
     ``list(numpy.array([1, 2, 3]))`` works too. The two refusals that are
@@ -189,7 +199,12 @@ def _sample(values: Iterable[float], name: str) -> list[float]:
             f"sample {name!r} must be an iterable of numbers in the order they were "
             f"observed, not {type(values).__name__}"
         )
-    materialised = list(values)
+    try:
+        materialised = list(values)
+    except TypeError as exc:
+        raise StatsError(
+            f"sample {name!r} has an iterable type but will not iterate: {exc}"
+        ) from exc
     if not materialised:
         raise StatsError(f"sample {name!r} is empty")
     out: list[float] = []
@@ -398,6 +413,10 @@ class Interval(BaseModel):
     the validator below; each is a ``ValidationError``, as a model's own
     constraint is, rather than a :class:`StatsError` (which is what the
     functions raise about a *sample*).
+
+    :func:`bootstrap_ci` does not lean on that validator: it checks its own
+    bounds and raises :class:`StatsError`, so no function in this module can exit
+    with an uncoded error about an interval it built itself.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -437,13 +456,14 @@ def bootstrap_ci(
 ) -> Interval:
     """A bootstrap (BCa) confidence interval of ``statistic`` over ``sample``.
 
-    ``sample`` may be any iterable that is not a ``str`` or ``bytes``, and
-    ``statistic`` receives each resample as a ``list`` of floats. Refuses
-    (``StatsError``) a sample of fewer than two observations, a constant sample
-    (a zero-width interval would read as certainty), an empty or non-finite
-    sample, a ``confidence`` outside (0, 1), ``resamples`` below 1 and a negative
-    ``seed``, all before scipy is imported. Two calls with the same arguments
-    return the same interval.
+    ``sample`` may be any iterable except a ``str``, ``bytes``, mapping or set
+    -- :func:`_sample` says what each of those would iterate instead of the
+    observations -- and ``statistic`` receives each resample as a ``list`` of
+    floats. Refuses (``StatsError``) a sample of fewer than two observations, a
+    constant sample (a zero-width interval would read as certainty), an empty or
+    non-finite sample, a ``confidence`` outside (0, 1), ``resamples`` below 1 and
+    a negative ``seed``, all before scipy is imported. Two calls with the same
+    arguments return the same interval.
     """
     xs = _sample(sample, "sample")
     level = _confidence(confidence)
@@ -490,6 +510,15 @@ def bootstrap_ci(
     # backstop rather than a reachable branch.
     if not (math.isfinite(low) and math.isfinite(high)):  # pragma: no cover
         raise StatsError("the bootstrap distribution of the statistic has no finite interval")
+    # The same backstop for ordering, and here for a second reason: `Interval`
+    # refuses low > high with a `ValidationError`, which is right for a model a
+    # caller constructs and wrong as the way this function reports a result it
+    # computed. Unreachable with scipy's percentile ordering; kept so the two
+    # guards are symmetric and every exit from this function is coded.
+    if low > high:  # pragma: no cover
+        raise StatsError(
+            f"the bootstrap returned an interval the wrong way round: low={low} high={high}"
+        )
     return Interval(low=low, high=high, confidence=level)
 
 

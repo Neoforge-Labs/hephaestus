@@ -19,6 +19,7 @@ import json
 import math
 import statistics
 from fractions import Fraction
+from typing import NoReturn
 
 import pytest
 from pydantic import ValidationError
@@ -210,13 +211,65 @@ def test_a_mapping_or_a_set_is_not_a_sample() -> None:
 def test_any_other_iterable_is_a_sample() -> None:
     """Wider than `Sequence`, which is what refused a frame column.
 
-    No extra needed for these three: the gate is about the container, and a
-    `set` is unordered but every statistic here is order-independent.
+    "Any other" is the gate in `_sample`: anything iterable except a `str`,
+    `bytes`, mapping or set, each refused by the test above because iterating it
+    yields something other than the observations. No extra is needed for these,
+    since the gate is about the container and not about what is in it.
     """
     assert cohens_d((1, 2, 3), (3, 4, 5)) == -2.0
     assert cohens_d(iter([1, 2, 3]), iter([3, 4, 5])) == -2.0
     assert hedges_g(iter([1, 2, 3]), iter([3, 4, 5])) == pytest.approx(-1.6, rel=1e-12)
     assert cliffs_delta(iter([4, 5, 6]), iter([1, 2, 3])) == 1.0
+
+
+def test_an_iterable_type_that_will_not_iterate_is_refused() -> None:
+    """A type that claims to iterate and then refuses, reproduced without NumPy.
+
+    `ndarray` has `__iter__`, so a 0-d array passes `_sample`'s `Iterable`
+    check and then raises `TypeError: iteration over a 0-d array` inside
+    `list()`. A scalar is not a sample; the refusal has to be the coded one, not
+    a bare `TypeError` from the standard library. The real array is pinned in
+    the extras test below; this one runs in the spine environment.
+    """
+
+    class ZeroDimensional:
+        def __iter__(self) -> NoReturn:
+            raise TypeError("iteration over a 0-d array")
+
+    for call in (cohens_d, cliffs_delta):
+        with pytest.raises(StatsError, match="will not iterate"):
+            call(ZeroDimensional(), [1.0, 2.0, 3.0])  # type: ignore[arg-type]
+    with pytest.raises(StatsError, match="will not iterate"):
+        bootstrap_ci(ZeroDimensional(), seed=1)  # type: ignore[arg-type]
+
+
+def test_the_documented_g_approximation_error_is_the_measured_one() -> None:
+    """The figures `stats.py` and `lab.stats.mdx` print, recomputed here.
+
+    Hedges' *g* applies `1 - 3 / (4 n - 9)`, the closed-form approximation to
+    the exact correction `J = gamma(m / 2) / (sqrt(m / 2) gamma((m - 1) / 2))`
+    with `m = n - 2`. Both docs state how far apart they are at four sample
+    sizes; this derives those figures from the gamma form so a stated error can
+    never drift from the arithmetic. `math.lgamma` only -- no extra.
+    """
+
+    def exact(n: int) -> float:
+        m = n - 2
+        return math.exp(math.lgamma(m / 2) - math.lgamma((m - 1) / 2)) / math.sqrt(m / 2)
+
+    def approximation(n: int) -> float:
+        return 1 - 3 / (4 * n - 9)
+
+    # Each documented figure carries two significant figures, and "about" is
+    # what the prose claims, so the check is that rounding the measurement to
+    # that precision gives exactly what is written -- not a tolerance of our
+    # choosing around it.
+    for n, documented in ((4, "1.3"), (6, "0.27"), (10, "0.058"), (50, "0.0014")):
+        measured = abs(approximation(n) - exact(n)) / exact(n) * 100
+        assert float(f"{measured:.1e}") == float(documented), f"n={n}: {measured}"
+    # And the gap closes as n grows, which is the claim the figures illustrate.
+    gaps = [abs(approximation(n) - exact(n)) / exact(n) for n in (4, 6, 10, 50)]
+    assert gaps == sorted(gaps, reverse=True)
 
 
 def test_a_fraction_is_a_real_number() -> None:
@@ -473,6 +526,12 @@ def test_a_polars_series_and_a_numpy_array_are_samples() -> None:
     # An integer NumPy array, as an array and as a list of its np.int64 values.
     counts = numpy.array([3, 5, 4, 6])
     assert cohens_d(counts, [1, 2, 3, 2]) == cohens_d(counts.tolist(), [1, 2, 3, 2])
+    # The one array that is not a sample: 0-d, a scalar wearing an array's type.
+    # `Iterable` admits it and `list()` then raises, so the refusal is the coded
+    # one -- the behaviour `test_an_iterable_type_that_will_not_iterate_is_refused`
+    # reproduces without NumPy, here against the array itself.
+    with pytest.raises(StatsError, match="will not iterate"):
+        cohens_d(numpy.array(5.0), [1.0, 2.0, 3.0])
     assert cohens_d(list(counts), [1, 2, 3, 2]) == cohens_d(counts.tolist(), [1, 2, 3, 2])
     # And through the bootstrap, which materialises the sample for SciPy.
     series = bootstrap_ci(frame["a"], resamples=400, seed=3)

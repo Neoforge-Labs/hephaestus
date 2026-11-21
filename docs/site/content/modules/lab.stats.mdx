@@ -146,13 +146,14 @@ groups have roughly a common variance; where they plainly do not, the pooled
 figure describes neither group, and Cliff's *delta* — which needs no variance at
 all — is the honest summary. The *g* factor is the standard closed-form
 approximation to the small-sample correction, not the exact gamma-function form,
-and the gap is widest where it matters most: about 1.3% at `n = 4`, 0.1% by
-`n = 10`.
+and the gap is widest where it matters most: about 1.3% at `n = 4`, 0.27% at
+`n = 6`, 0.058% at `n = 10` and 0.0014% by `n = 50`, as relative errors of the
+exact *J*.
 
 ### A sample is any iterable
 
 A sample may be a list, a tuple, a `polars` `Series`, a NumPy array, or anything
-else iterable that is not a `str` or `bytes`, and its values may be any
+else iterable except the kinds refused below, and its values may be any
 `numbers.Real` — `numpy.float64` and `numpy.int64` included. So the two modules
 this wave shipped compose directly: a frame read through
 [`lab.data`](/modules/lab.data) goes straight into an effect size, with no
@@ -191,7 +192,9 @@ the observations: a `str` or `bytes` (characters), a mapping (its *keys* — pas
 [`aggregate_seeds`](#across-seeds) takes), and a `set` (which has already dropped
 every repeated observation, so its variance is not the sample's). A `bool` stays
 refused too, in a NumPy array as in a list: `True` as an observation is a
-mistake, not a 1.
+mistake, not a 1. A 0-d NumPy array — `numpy.array(5.0)`, a scalar wearing an
+array's type — is refused as well: it is not a sample, and the refusal is this
+module's coded `StatsError`, not the `TypeError` `list()` would raise on it.
 
 ## Choosing a test
 
