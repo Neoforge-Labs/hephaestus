@@ -85,7 +85,7 @@ def query(manifest: Manifest, *, root: Path, sql: str) -> pl.DataFrame:
     manifest omits cannot be queried, nor can anything else on disk. Entries that are
     not ``.csv`` or ``.parquet`` are verified but not exposed.
     """
-    polars = require("polars", extra="data")
+    require("polars", extra="data")
     duckdb = require("duckdb", extra="data")
     verify_manifest(manifest, root)
     connection = duckdb.connect(":memory:")
@@ -104,12 +104,11 @@ def query(manifest: Manifest, *, root: Path, sql: str) -> pl.DataFrame:
         # file the manifest omits (or any file the process can read) would be
         # queryable and unverified.
         connection.execute("SET enable_external_access = false")
-        cursor = connection.execute(sql)
-        columns = [column[0] for column in cursor.description]
-        rows = cursor.fetchall()
+        # DuckDB's own typing, via its Arrow bridge: an integer column holding a
+        # null stays an integer, a DECIMAL stays a decimal. Rebuilding the frame
+        # from Python rows would leave polars to guess every dtype from whichever
+        # rows the query happened to return.
+        frame: pl.DataFrame = connection.sql(sql).pl()
     finally:
         connection.close()
-    # Rows, not `.pl()`: DuckDB's polars bridge needs pyarrow, which the `data`
-    # extra does not install.
-    frame: pl.DataFrame = polars.DataFrame(rows, schema=columns, orient="row")
     return frame

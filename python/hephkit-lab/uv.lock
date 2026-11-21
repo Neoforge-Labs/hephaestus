@@ -2305,6 +2305,7 @@ all = [
     { name = "mlflow" },
     { name = "polars" },
     { name = "prefect" },
+    { name = "pyarrow" },
     { name = "safetensors" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
@@ -2323,6 +2324,7 @@ data = [
     { name = "duckdb" },
     { name = "dvc" },
     { name = "polars" },
+    { name = "pyarrow" },
 ]
 flows = [
     { name = "prefect" },
@@ -2373,6 +2375,7 @@ requires-dist = [
     { name = "mlflow", marker = "extra == 'track'", specifier = ">=3.0" },
     { name = "polars", marker = "extra == 'data'", specifier = ">=1.20" },
     { name = "prefect", marker = "extra == 'flows'", specifier = ">=3.2" },
+    { name = "pyarrow", marker = "extra == 'data'", specifier = ">=15" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "safetensors", marker = "extra == 'ml'", specifier = ">=0.5" },
     { name = "scipy", marker = "extra == 'stats'", specifier = ">=1.14" },

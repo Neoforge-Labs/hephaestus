@@ -165,3 +165,25 @@ def test_the_module_imports_and_names_the_extra_when_polars_is_absent(
         read_frame(manifest, root=tmp_path)
     with pytest.raises(MissingExtraError, match=r"hephkit-lab\[data\]"):
         query(manifest, root=tmp_path, sql="SELECT 1")
+
+
+@pytest.mark.extras
+def test_query_keeps_the_dtypes_duckdb_assigned(tmp_path: Path) -> None:
+    """Types are DuckDB's, not polars' guess from the rows that came back."""
+    import polars as pl
+
+    manifest = build(tmp_path, {"t.csv": b"n,d\n1,2026-01-02\n,2026-01-03\n"})
+    frame = query(
+        manifest,
+        root=tmp_path,
+        sql=(
+            'SELECT n, d, CAST(1.50 AS DECIMAL(10, 2)) AS money, '
+            'CAST(NULL AS INTEGER) AS nothing FROM "t.csv"'
+        ),
+    )
+    assert frame["n"].dtype.is_integer(), "an integer column holding a null must stay an integer"
+    assert frame["n"].to_list() == [1, None]
+    assert frame["d"].dtype == pl.Date
+    assert isinstance(frame["money"].dtype, pl.Decimal), "a DECIMAL must not become a float"
+    assert frame["money"].dtype.scale == 2
+    assert frame["nothing"].dtype.is_integer(), "an all-null column keeps its declared type"
