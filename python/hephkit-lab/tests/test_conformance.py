@@ -35,7 +35,14 @@ from hephkit.lab.data.releases import Release, TemporalError, release_as_of
 from hephkit.lab.record import NONFINITE, NONFINITE_MEMBER, RunRecord, open_record, read_record
 from hephkit.lab.replay import ABSOLUTE_TOLERANCE, RELATIVE_TOLERANCE, compare
 from hephkit.lab.repro import Accelerator, ProvenanceRecord, capture
-from hephkit.lab.stats import StatsError, cliffs_delta, cohens_d, hedges_g
+from hephkit.lab.stats import (
+    StatsError,
+    TestRequest,
+    choose_test,
+    cliffs_delta,
+    cohens_d,
+    hedges_g,
+)
 
 ROOT = Path(__file__).resolve().parents[3] / "conformance"
 LAB = ROOT / "lab"
@@ -348,6 +355,19 @@ def run_effects(case: Case, _tmp_path: Path) -> None:
     assert within_tolerance(actual, expect["value"]), (actual, expect["value"])
 
 
+def run_selection(case: Case, _tmp_path: Path) -> None:
+    """One `lab.selection` case: a test request in, a test name or a refusal out."""
+    # JSON mode: a strict model takes an enum member from its JSON string, as a vector holds it.
+    request = TestRequest.model_validate_json(json.dumps(case["input"]["request"]))
+    expect = case["expect"]
+    if "error" in expect:
+        with pytest.raises(StatsError) as exc:
+            choose_test(request)
+        assert exc.value.code == expect["error"]
+        return
+    assert choose_test(request).test == expect["test"]
+
+
 RUNNERS: dict[str, Callable[[Case, Path], None]] = {
     "lab.config": run_config,
     "lab.provenance": run_record_case,
@@ -355,6 +375,7 @@ RUNNERS: dict[str, Callable[[Case, Path], None]] = {
     "lab.manifest": run_manifest,
     "lab.releases": run_releases,
     "lab.effects": run_effects,
+    "lab.selection": run_selection,
 }
 
 

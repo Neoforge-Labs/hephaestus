@@ -12,7 +12,17 @@ import math
 import pytest
 
 from hephkit.errors import LAB_422
-from hephkit.lab.stats import StatsError, cliffs_delta, cohens_d, hedges_g
+from pydantic import ValidationError
+
+from hephkit.lab.stats import (
+    Scale,
+    StatsError,
+    TestRequest,
+    choose_test,
+    cliffs_delta,
+    cohens_d,
+    hedges_g,
+)
 
 
 def test_the_error_carries_its_code() -> None:
@@ -149,3 +159,92 @@ def test_inputs_are_not_mutated_and_order_does_not_matter() -> None:
 def test_cliffs_delta_is_antisymmetric() -> None:
     a, b = [1, 4, 4, 9], [2, 4, 7]
     assert cliffs_delta(a, b) == -cliffs_delta(b, a)
+
+
+def request(**kw: object) -> TestRequest:
+    base: dict[str, object] = {
+        "scale": Scale.interval,
+        "groups": 2,
+        "paired": False,
+        "normal": True,
+        "equal_variance": True,
+        "n_min": 30,
+    }
+    return TestRequest.model_validate(base | kw)
+
+
+def test_an_inappropriate_test_is_refused_rather_than_approximated() -> None:
+    for kw in (
+        {"groups": 1},
+        {"groups": 0},
+        {"scale": Scale.nominal, "paired": True},
+        {"groups": 3, "paired": True},
+        {"groups": 5, "paired": True, "normal": False},
+        {"scale": Scale.ordinal, "groups": 3, "paired": True},
+    ):
+        with pytest.raises(StatsError) as exc:
+            choose_test(request(**kw))
+        assert exc.value.code == "HEPH-LAB-422", kw
+
+
+def test_the_refusal_says_what_was_wrong_with_the_request() -> None:
+    with pytest.raises(StatsError, match="one group"):
+        choose_test(request(groups=1))
+    with pytest.raises(StatsError, match="zero groups"):
+        choose_test(request(groups=0))
+    with pytest.raises(StatsError, match="paired nominal"):
+        choose_test(request(scale=Scale.nominal, paired=True))
+    with pytest.raises(StatsError, match=r"repeated-measures.*cannot express"):
+        choose_test(request(groups=3, paired=True))
+
+
+def test_a_small_nominal_cell_count_chooses_fisher_over_chi_square() -> None:
+    assert choose_test(request(scale=Scale.nominal, n_min=4)).test == "fisher_exact"
+    assert choose_test(request(scale=Scale.nominal, n_min=0)).test == "fisher_exact"
+    assert choose_test(request(scale=Scale.nominal, n_min=5)).test == "chi_square"
+
+
+def test_the_reason_names_the_rule_that_decided() -> None:
+    assert "unequal variance" in choose_test(request(equal_variance=False)).reason
+    assert "n_min 4" in choose_test(request(scale=Scale.nominal, n_min=4)).reason
+    assert "not normal" in choose_test(request(normal=False)).reason
+    assert "ordinal" in choose_test(request(scale=Scale.ordinal)).reason
+    assert "paired" in choose_test(request(paired=True)).reason
+
+
+def test_a_request_with_an_unknown_member_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        TestRequest.model_validate(
+            {
+                "scale": "interval",
+                "groups": 2,
+                "paired": False,
+                "normal": True,
+                "equal_variance": True,
+                "n_min": 3,
+                "alpha": 0.05,
+            }
+        )
+
+
+def test_a_request_that_cannot_exist_is_refused_by_construction() -> None:
+    with pytest.raises(ValidationError):
+        request(groups=-1)
+    with pytest.raises(ValidationError):
+        request(n_min=-1)
+    with pytest.raises(ValidationError):
+        request(groups="2")
+
+
+def test_normal_false_overrides_equal_variance() -> None:
+    assert choose_test(request(normal=False, equal_variance=False)).test == "mann_whitney_u"
+
+
+def test_three_ordinal_groups_take_the_rank_test() -> None:
+    assert choose_test(request(scale=Scale.ordinal, groups=3)).test == "kruskal_wallis"
+
+
+def test_the_choice_is_frozen() -> None:
+    choice = choose_test(request())
+    with pytest.raises(ValidationError):
+        choice.test = "welch_t"  # type: ignore[misc]

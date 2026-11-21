@@ -1,4 +1,4 @@
-"""Effect sizes over two samples, and a refusal for every sample they cannot describe.
+"""Effect sizes over two samples, test selection, and a refusal for every case they cannot serve.
 
 An effect size says how large a difference is, which a p-value does not. This
 module holds the three the kit reports: Cohen's *d*, Hedges' *g* and Cliff's
@@ -35,7 +35,38 @@ Limits: the arithmetic is double precision, with means and sums of squares
 accumulated by ``math.fsum``. A constant sample is recognised by its minimum
 equalling its maximum, which is exact, rather than by a variance that rounding
 could leave a hair above 0. Samples are not copied beyond a read of each value
-and are never mutated. Test selection and bootstrap intervals are not here.
+and are never mutated. Bootstrap intervals are not here.
+
+Test selection. :func:`choose_test` names the test a design calls for and
+runs nothing: it is data in, data out, so it needs no extra. Its job is to
+**refuse** when no test in the table is appropriate, because a selector that
+always answers lets a researcher run a test whose assumptions the design does
+not meet and report the p-value anyway. The table (``conformance/lab/selection.json``
+pins every row):
+
+* two interval groups, normal, unpaired: ``independent_t`` with equal variance,
+  ``welch_t`` without; paired: ``paired_t`` (variance is not a condition of a
+  paired design);
+* two groups that are not normal, or ordinal: ``mann_whitney_u`` unpaired,
+  ``wilcoxon_signed_rank`` paired (``normal=False`` decides before
+  ``equal_variance`` is read, so there is never a Welch test on ranks);
+* three or more unpaired groups: ``one_way_anova`` for interval and normal,
+  ``kruskal_wallis`` otherwise;
+* nominal, unpaired: ``chi_square``, or ``fisher_exact`` when ``n_min`` (the
+  smallest cell count) is below 5.
+
+Refused: fewer than two groups, a paired nominal design, and a paired design
+of three or more groups.
+
+Two rulings go beyond the plan's table, which was wrong in both places.
+Ordinal data with three or more groups joins the rank row (``kruskal_wallis``)
+rather than being left without a test: the table said "interval" there, but
+Kruskal-Wallis is the canonical rank test for ordinal data across independent
+groups, so refusing it would be a false refusal. A paired design of three or
+more groups is refused, not given repeated-measures ANOVA or Friedman: those
+rest on assumptions such as sphericity, and a :class:`TestRequest` has no field
+that can state one. That refusal is the request type being too small to carry
+the choice, not a row someone forgot.
 
 Maturity: experimental.
 """
@@ -44,10 +75,22 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from hephkit.errors import LAB_422
 
-__all__ = ["StatsError", "cliffs_delta", "cohens_d", "hedges_g"]
+__all__ = [
+    "Scale",
+    "StatsError",
+    "TestChoice",
+    "TestRequest",
+    "choose_test",
+    "cliffs_delta",
+    "cohens_d",
+    "hedges_g",
+]
 
 
 class StatsError(ValueError):
@@ -129,3 +172,108 @@ def cliffs_delta(a: Sequence[float], b: Sequence[float]) -> float:
             elif x < y:
                 less += 1
     return (greater - less) / (len(xa) * len(xb))
+
+
+class Scale(StrEnum):
+    """The measurement scale of the outcome."""
+
+    interval = "interval"
+    ordinal = "ordinal"
+    nominal = "nominal"
+
+
+class TestRequest(BaseModel):
+    """What the design says about its data: the only input :func:`choose_test` reads.
+
+    ``groups`` and ``n_min`` cannot be negative, so a request that cannot exist
+    fails here rather than reaching the table. ``n_min`` is the smallest cell
+    count (used only for the nominal Fisher boundary).
+    """
+
+    __test__ = False  # not a pytest class, despite the name
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    scale: Scale
+    groups: int = Field(ge=0)
+    paired: bool
+    normal: bool
+    equal_variance: bool
+    n_min: int = Field(ge=0)
+
+
+class TestChoice(BaseModel):
+    """The test chosen and the properties of the design that decided it."""
+
+    __test__ = False
+
+    model_config = ConfigDict(frozen=True)
+
+    test: str
+    reason: str
+
+
+def choose_test(request: TestRequest) -> TestChoice:
+    """Name the test the design calls for, or raise :class:`StatsError` when the table has none."""
+    r = request
+    if r.groups == 0:
+        raise StatsError("zero groups: there is nothing to compare")
+    if r.groups == 1:
+        raise StatsError("one group: a comparison needs at least two groups")
+    if r.scale is Scale.nominal:
+        if r.paired:
+            raise StatsError(
+                "a paired nominal design is not covered by the table (it would need McNemar's test)"
+            )
+        if r.n_min < 5:
+            return TestChoice(
+                test="fisher_exact",
+                reason=f"nominal outcome with smallest cell count n_min {r.n_min} below 5, "
+                "where chi-square's large-sample approximation does not hold",
+            )
+        return TestChoice(
+            test="chi_square",
+            reason=f"nominal outcome with smallest cell count n_min {r.n_min} of at least 5",
+        )
+    if r.groups >= 3:
+        if r.paired:
+            raise StatsError(
+                "a paired design of three or more groups is a repeated-measures design: the table "
+                "covers none, and the choice depends on assumptions such as sphericity that this "
+                "request cannot express (the request is too small to carry it, not a row missing)"
+            )
+        if r.scale is Scale.interval and r.normal:
+            return TestChoice(
+                test="one_way_anova",
+                reason=f"{r.groups} independent interval groups, normal",
+            )
+        why = "ordinal outcome" if r.scale is Scale.ordinal else "interval outcome that is not normal"
+        return TestChoice(
+            test="kruskal_wallis",
+            reason=f"{r.groups} independent groups with an {why}, so a rank test",
+        )
+    if r.scale is Scale.ordinal or not r.normal:
+        why = "ordinal outcome" if r.scale is Scale.ordinal else "interval outcome that is not normal"
+        if r.paired:
+            return TestChoice(
+                test="wilcoxon_signed_rank",
+                reason=f"two paired groups with an {why}, so a rank test on the differences",
+            )
+        return TestChoice(
+            test="mann_whitney_u",
+            reason=f"two independent groups with an {why}, so a rank test",
+        )
+    if r.paired:
+        return TestChoice(
+            test="paired_t",
+            reason="two paired groups, interval outcome, normal",
+        )
+    if r.equal_variance:
+        return TestChoice(
+            test="independent_t",
+            reason="two independent groups, interval outcome, normal, equal variance",
+        )
+    return TestChoice(
+        test="welch_t",
+        reason="two independent groups, interval outcome, normal, unequal variance",
+    )

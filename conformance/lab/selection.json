@@ -1,0 +1,297 @@
+{
+  "suite": "lab.selection",
+  "spec": "0.6.0",
+  "description": "Statistical test selection, design 9.3. `input.request` is a TestRequest (scale, groups, paired, normal, equal_variance, n_min) and `derivation` is prose for the reader, not data an implementation consumes. `expect` is {\"test\": name} for the test the decision table assigns, or {\"error\": \"HEPH-LAB-422\"} for a request the table refuses rather than approximates. The `reason` text is not pinned.",
+  "source": "Transcribed from the decision table in the plan (Task 12), which was written before any implementation existed; every outcome was copied from a table row and none was produced by running this kit (CLAUDE.md rule 2). Two cases come from a ruling, not from the table, and are marked RULING in their derivation. (1) Ordinal data with three or more unpaired groups -> kruskal_wallis: ordinal joins the three-or-more-groups rank row, because Kruskal-Wallis is the canonical rank test for ordinal data across independent groups and 'interval' in the table row was the loose word. (2) Any paired design with three or more groups is refused: the parametric answer (repeated-measures ANOVA) and the rank answer (Friedman) both rest on assumptions such as sphericity that a TestRequest cannot express, so the request type is too small to carry the choice; this is not a missing row.",
+  "cases": [
+    {
+      "name": "two-interval-normal-equal-unpaired-is-independent-t",
+      "input": {
+        "request": {
+          "scale": "interval",
+          "groups": 2,
+          "paired": false,
+          "normal": true,
+          "equal_variance": true,
+          "n_min": 30
+        },
+        "derivation": "Table row: two interval groups, normal, equal variance, unpaired -> independent_t."
+      },
+      "expect": {
+        "test": "independent_t"
+      }
+    },
+    {
+      "name": "two-interval-normal-unequal-unpaired-is-welch-t",
+      "input": {
+        "request": {
+          "scale": "interval",
+          "groups": 2,
+          "paired": false,
+          "normal": true,
+          "equal_variance": false,
+          "n_min": 30
+        },
+        "derivation": "Table row: same, unequal variance -> welch_t."
+      },
+      "expect": {
+        "test": "welch_t"
+      }
+    },
+    {
+      "name": "two-interval-normal-paired-is-paired-t",
+      "input": {
+        "request": {
+          "scale": "interval",
+          "groups": 2,
+          "paired": true,
+          "normal": true,
+          "equal_variance": false,
+          "n_min": 30
+        },
+        "derivation": "Table row: paired -> paired_t; equal variance is not a condition of a paired design, so a False there does not change it."
+      },
+      "expect": {
+        "test": "paired_t"
+      }
+    },
+    {
+      "name": "two-interval-non-normal-unpaired-is-mann-whitney",
+      "input": {
+        "request": {
+          "scale": "interval",
+          "groups": 2,
+          "paired": false,
+          "normal": false,
+          "equal_variance": true,
+          "n_min": 30
+        },
+        "derivation": "Table row: non-normal -> mann_whitney_u unpaired."
+      },
+      "expect": {
+        "test": "mann_whitney_u"
+      }
+    },
+    {
+      "name": "normal-false-overrides-unequal-variance",
+      "input": {
+        "request": {
+          "scale": "interval",
+          "groups": 2,
+          "paired": false,
+          "normal": false,
+          "equal_variance": false,
+          "n_min": 30
+        },
+        "derivation": "Non-normal takes the rank test whatever the variance flag says; no Welch test on ranks."
+      },
+      "expect": {
+        "test": "mann_whitney_u"
+      }
+    },
+    {
+      "name": "two-ordinal-unpaired-is-mann-whitney",
+      "input": {
+        "request": {
+          "scale": "ordinal",
+          "groups": 2,
+          "paired": false,
+          "normal": true,
+          "equal_variance": true,
+          "n_min": 30
+        },
+        "derivation": "Table row: ordinal -> mann_whitney_u unpaired, even with normal=true, because ordinal data has no interval distance to be normal over."
+      },
+      "expect": {
+        "test": "mann_whitney_u"
+      }
+    },
+    {
+      "name": "two-interval-non-normal-paired-is-wilcoxon",
+      "input": {
+        "request": {
+          "scale": "interval",
+          "groups": 2,
+          "paired": true,
+          "normal": false,
+          "equal_variance": true,
+          "n_min": 30
+        },
+        "derivation": "Table row: non-normal paired -> wilcoxon_signed_rank."
+      },
+      "expect": {
+        "test": "wilcoxon_signed_rank"
+      }
+    },
+    {
+      "name": "two-ordinal-paired-is-wilcoxon",
+      "input": {
+        "request": {
+          "scale": "ordinal",
+          "groups": 2,
+          "paired": true,
+          "normal": true,
+          "equal_variance": true,
+          "n_min": 30
+        },
+        "derivation": "Table row: ordinal paired -> wilcoxon_signed_rank."
+      },
+      "expect": {
+        "test": "wilcoxon_signed_rank"
+      }
+    },
+    {
+      "name": "three-interval-normal-is-anova",
+      "input": {
+        "request": {
+          "scale": "interval",
+          "groups": 3,
+          "paired": false,
+          "normal": true,
+          "equal_variance": true,
+          "n_min": 30
+        },
+        "derivation": "Table row: three or more interval groups -> one_way_anova."
+      },
+      "expect": {
+        "test": "one_way_anova"
+      }
+    },
+    {
+      "name": "four-interval-non-normal-is-kruskal-wallis",
+      "input": {
+        "request": {
+          "scale": "interval",
+          "groups": 4,
+          "paired": false,
+          "normal": false,
+          "equal_variance": true,
+          "n_min": 30
+        },
+        "derivation": "Table row: three or more interval groups, non-normal -> kruskal_wallis."
+      },
+      "expect": {
+        "test": "kruskal_wallis"
+      }
+    },
+    {
+      "name": "three-ordinal-unpaired-is-kruskal-wallis",
+      "input": {
+        "request": {
+          "scale": "ordinal",
+          "groups": 3,
+          "paired": false,
+          "normal": true,
+          "equal_variance": true,
+          "n_min": 30
+        },
+        "derivation": "RULING, not in the plan's table: ordinal joins the three-or-more-groups rank row, since Kruskal-Wallis is the rank test for ordinal data across independent groups."
+      },
+      "expect": {
+        "test": "kruskal_wallis"
+      }
+    },
+    {
+      "name": "nominal-n-min-5-is-chi-square",
+      "input": {
+        "request": {
+          "scale": "nominal",
+          "groups": 2,
+          "paired": false,
+          "normal": true,
+          "equal_variance": true,
+          "n_min": 5
+        },
+        "derivation": "Table row: nominal -> chi_square; fisher_exact only when n_min is below 5, so 5 is chi_square."
+      },
+      "expect": {
+        "test": "chi_square"
+      }
+    },
+    {
+      "name": "nominal-n-min-4-is-fisher-exact",
+      "input": {
+        "request": {
+          "scale": "nominal",
+          "groups": 2,
+          "paired": false,
+          "normal": true,
+          "equal_variance": true,
+          "n_min": 4
+        },
+        "derivation": "Table row: nominal with n_min below 5 -> fisher_exact."
+      },
+      "expect": {
+        "test": "fisher_exact"
+      }
+    },
+    {
+      "name": "one-group-refused",
+      "input": {
+        "request": {
+          "scale": "interval",
+          "groups": 1,
+          "paired": false,
+          "normal": true,
+          "equal_variance": true,
+          "n_min": 30
+        },
+        "derivation": "Table refusal: one group has nothing to compare."
+      },
+      "expect": {
+        "error": "HEPH-LAB-422"
+      }
+    },
+    {
+      "name": "zero-groups-refused",
+      "input": {
+        "request": {
+          "scale": "interval",
+          "groups": 0,
+          "paired": false,
+          "normal": true,
+          "equal_variance": true,
+          "n_min": 30
+        },
+        "derivation": "Table refusal: zero groups."
+      },
+      "expect": {
+        "error": "HEPH-LAB-422"
+      }
+    },
+    {
+      "name": "paired-nominal-refused",
+      "input": {
+        "request": {
+          "scale": "nominal",
+          "groups": 2,
+          "paired": true,
+          "normal": true,
+          "equal_variance": true,
+          "n_min": 30
+        },
+        "derivation": "Table refusal: a paired nominal design is not covered."
+      },
+      "expect": {
+        "error": "HEPH-LAB-422"
+      }
+    },
+    {
+      "name": "paired-three-groups-refused",
+      "input": {
+        "request": {
+          "scale": "interval",
+          "groups": 3,
+          "paired": true,
+          "normal": true,
+          "equal_variance": true,
+          "n_min": 30
+        },
+        "derivation": "RULING, not in the plan's table: repeated measures needs sphericity, which the request cannot express, so choosing would assert something the caller never said."
+      },
+      "expect": {
+        "error": "HEPH-LAB-422"
+      }
+    }
+  ]
+}
