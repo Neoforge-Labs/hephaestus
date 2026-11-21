@@ -35,7 +35,27 @@ Limits: the arithmetic is double precision, with means and sums of squares
 accumulated by ``math.fsum``. A constant sample is recognised by its minimum
 equalling its maximum, which is exact, rather than by a variance that rounding
 could leave a hair above 0. Samples are not copied beyond a read of each value
-and are never mutated. Bootstrap intervals are not here.
+and are never mutated.
+
+Bootstrap intervals. :func:`bootstrap_ci` resamples one sample with
+``scipy.stats.bootstrap`` (BCa, scipy's default) and returns an :class:`Interval`.
+It is contract-tested, never vectored: a vector would have to take its numbers
+from a seeded scipy run, which would make scipy's resampling order and RNG stream
+the definition of our behaviour. The contract is that a nominal 95% interval
+covers a known parameter at about the nominal rate, and that one seed gives one
+interval. ``seed`` is required and reaches scipy as ``numpy.random.default_rng(seed)``,
+passed explicitly; nothing reads global RNG state, so a recorded run replays.
+
+A bootstrap of a constant sample returns a zero-width interval, and a zero-width
+95% interval reads as certainty. So a sample of one observation, a constant
+sample (all ties) and an empty or non-finite sample are :class:`StatsError`
+(``HEPH-LAB-422``), as are a ``confidence`` outside the open interval (0, 1), a
+``resamples`` below 1 and a negative ``seed``. All of that is checked *before*
+scipy is imported, so a refusal works with no ``stats`` extra installed; only a
+call that computes an interval needs it. :func:`aggregate_seeds` summarises one
+number per seed (a run's metric under each seed) as a mean, a sample standard
+deviation and a bootstrap interval of the mean, iterating the seeds in sorted
+order so the summary cannot depend on how the mapping was built.
 
 Test selection. :func:`choose_test` names the test a design calls for and
 runs nothing: it is data in, data out, so it needs no extra. Its job is to
@@ -83,22 +103,30 @@ Maturity: experimental.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+import warnings
+from collections.abc import Callable, Mapping, Sequence
 from enum import StrEnum
+from statistics import fmean as mean
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from hephkit.errors import LAB_422
+from hephkit.lab._extras import require
 
 __all__ = [
+    "Interval",
     "Scale",
+    "SeedSummary",
     "StatsError",
     "TestChoice",
     "TestRequest",
+    "aggregate_seeds",
+    "bootstrap_ci",
     "choose_test",
     "cliffs_delta",
     "cohens_d",
     "hedges_g",
+    "mean",
 ]
 
 
@@ -302,3 +330,119 @@ def choose_test(request: TestRequest) -> TestChoice:
         test="welch_t",
         reason="two independent groups, interval outcome, normal, unequal variance",
     )
+
+
+class Interval(BaseModel):
+    """A confidence interval: ``low <= high``, at a ``confidence`` strictly between 0 and 1."""
+
+    model_config = ConfigDict(frozen=True)
+
+    low: float
+    high: float
+    confidence: float
+
+
+def _confidence(confidence: float) -> float:
+    if isinstance(confidence, bool) or not isinstance(confidence, int | float):
+        raise StatsError(f"confidence must be a number, not {confidence!r}")
+    if not 0.0 < confidence < 1.0:  # False for nan, too
+        raise StatsError(f"confidence must lie strictly between 0 and 1, not {confidence!r}")
+    return float(confidence)
+
+
+def _seed(seed: int) -> int:
+    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        raise StatsError(f"seed must be a non-negative integer, not {seed!r}")
+    return seed
+
+
+def bootstrap_ci(
+    sample: Sequence[float],
+    statistic: Callable[[Sequence[float]], float] = mean,
+    *,
+    confidence: float = 0.95,
+    resamples: int = 10_000,
+    seed: int,
+) -> Interval:
+    """A bootstrap (BCa) confidence interval of ``statistic`` over ``sample``.
+
+    ``statistic`` receives each resample as a ``list`` of floats. Refuses
+    (``StatsError``) a sample of fewer than two observations, a constant sample
+    (a zero-width interval would read as certainty), an empty or non-finite
+    sample, a ``confidence`` outside (0, 1), ``resamples`` below 1 and a negative
+    ``seed``, all before scipy is imported. Two calls with the same arguments
+    return the same interval.
+    """
+    xs = _sample(sample, "sample")
+    level = _confidence(confidence)
+    seed = _seed(seed)
+    if isinstance(resamples, bool) or not isinstance(resamples, int) or resamples < 1:
+        raise StatsError(f"resamples must be an integer of at least 1, not {resamples!r}")
+    if len(xs) < 2:
+        raise StatsError("a bootstrap interval needs at least two observations")
+    if min(xs) == max(xs):
+        raise StatsError("the sample is constant: a bootstrap of it is a zero-width interval")
+    numpy = require("numpy", extra="stats")
+    stats = require("scipy.stats", extra="stats")
+
+    def on_resample(resample: object) -> float:
+        return float(statistic(list(map(float, resample))))  # type: ignore[call-overload]
+
+    # A statistic whose bootstrap distribution is degenerate (a constant, `min`)
+    # makes scipy warn and return nan; refuse that, as for a constant sample.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", stats.DegenerateDataWarning)
+        try:
+            result = stats.bootstrap(
+                (numpy.asarray(xs),),
+                on_resample,
+                vectorized=False,
+                n_resamples=resamples,
+                confidence_level=level,
+                method="BCa",
+                random_state=numpy.random.default_rng(seed),
+            )
+        except stats.DegenerateDataWarning as exc:
+            raise StatsError(f"the statistic has a degenerate bootstrap distribution: {exc}") from exc
+    low = float(result.confidence_interval.low)
+    high = float(result.confidence_interval.high)
+    if not (math.isfinite(low) and math.isfinite(high)):
+        raise StatsError("the bootstrap distribution of the statistic has no finite interval")
+    return Interval(low=low, high=high, confidence=level)
+
+
+class SeedSummary(BaseModel):
+    """One metric across seeds: how many, their mean and sample standard deviation, and an interval of the mean."""
+
+    model_config = ConfigDict(frozen=True)
+
+    n: int
+    mean: float
+    sd: float
+    interval: Interval
+
+
+def aggregate_seeds(
+    values: Mapping[int, float],
+    *,
+    confidence: float = 0.95,
+    seed: int,
+) -> SeedSummary:
+    """Summarise one metric measured under several seeds (``values`` maps seed to metric).
+
+    The values are taken in sorted seed order, so two mappings holding the same
+    pairs give the same summary however they were built. Refuses (``StatsError``)
+    fewer than two seeds, and every sample refusal of :func:`bootstrap_ci`,
+    including identical values under every seed. ``seed`` drives the bootstrap
+    only; it is unrelated to the keys of ``values``.
+    """
+    if not isinstance(values, Mapping):
+        raise StatsError(f"values must map seed to metric, not {type(values).__name__}")
+    ordered = [values[k] for k in sorted(values)]
+    xs = _sample(ordered, "values")
+    if len(xs) < 2:
+        raise StatsError("a multi-seed summary needs at least two seeds")
+    interval = bootstrap_ci(xs, confidence=confidence, seed=seed)
+    centre = math.fsum(xs) / len(xs)
+    sd = math.sqrt(_sum_of_squares(xs) / (len(xs) - 1))
+    return SeedSummary(n=len(xs), mean=centre, sd=sd, interval=interval)

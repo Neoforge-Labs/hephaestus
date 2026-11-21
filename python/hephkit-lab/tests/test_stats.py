@@ -8,15 +8,20 @@ effect sizes are arithmetic over sequences and run in the spine environment.
 from __future__ import annotations
 
 import math
+import statistics
 
 import pytest
 from pydantic import ValidationError
 
 from hephkit.errors import LAB_422
 from hephkit.lab.stats import (
+    Interval,
     Scale,
+    SeedSummary,
     StatsError,
     TestRequest,
+    aggregate_seeds,
+    bootstrap_ci,
     choose_test,
     cliffs_delta,
     cohens_d,
@@ -277,3 +282,172 @@ def test_the_strict_model_wants_the_enum_member_not_the_string() -> None:
                 "n_min": 9,
             }
         )
+
+
+# --- bootstrap intervals and seed aggregation -------------------------------
+#
+# Contract-tested, never vectored (design 9.3): the expected numbers of a seeded
+# scipy run would make scipy's resampling order and RNG stream the definition.
+# The refusal tests below are unmarked on purpose: the sample is validated before
+# scipy is imported, so they run in the spine environment with no `stats` extra.
+
+
+def test_a_zero_variance_sample_is_refused_rather_than_given_a_zero_width_interval() -> None:
+    with pytest.raises(StatsError, match="constant"):
+        bootstrap_ci([3.0, 3.0, 3.0, 3.0], seed=1)
+
+
+def test_all_ties_of_integers_are_refused_too() -> None:
+    with pytest.raises(StatsError, match="constant"):
+        bootstrap_ci([7, 7], seed=1)
+
+
+def test_a_single_observation_sample_is_refused() -> None:
+    with pytest.raises(StatsError, match="at least two"):
+        bootstrap_ci([4.2], seed=1)
+
+
+@pytest.mark.parametrize("bad", [[], [1.0, math.nan, 3.0], [1.0, math.inf], [True, False], "12", [1, "2"]])
+def test_an_unusable_sample_is_refused(bad: object) -> None:
+    with pytest.raises(StatsError):
+        bootstrap_ci(bad, seed=1)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("confidence", [0.0, 1.0, -0.5, 1.5, math.nan, math.inf, True, "0.95"])
+def test_a_confidence_outside_the_open_unit_interval_is_refused(confidence: object) -> None:
+    with pytest.raises(StatsError, match="confidence"):
+        bootstrap_ci([1.0, 2.0, 4.0], confidence=confidence, seed=1)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("resamples", [0, -3, 2.5, True])
+def test_fewer_than_one_resample_is_refused(resamples: object) -> None:
+    with pytest.raises(StatsError, match="resamples"):
+        bootstrap_ci([1.0, 2.0, 4.0], resamples=resamples, seed=1)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("seed", [-1, 1.5, True, "1"])
+def test_a_seed_that_is_not_a_non_negative_integer_is_refused(seed: object) -> None:
+    with pytest.raises(StatsError, match="seed"):
+        bootstrap_ci([1.0, 2.0, 4.0], seed=seed)  # type: ignore[arg-type]
+
+
+def test_aggregate_seeds_refuses_a_single_seed() -> None:
+    with pytest.raises(StatsError, match="at least two seeds"):
+        aggregate_seeds({0: 0.9}, seed=1)
+
+
+def test_aggregate_seeds_refuses_identical_values_under_every_seed() -> None:
+    with pytest.raises(StatsError, match="constant"):
+        aggregate_seeds({0: 0.9, 1: 0.9, 2: 0.9}, seed=1)
+
+
+def test_aggregate_seeds_refuses_no_seeds_and_a_non_mapping() -> None:
+    with pytest.raises(StatsError):
+        aggregate_seeds({}, seed=1)
+    with pytest.raises(StatsError, match="map seed to metric"):
+        aggregate_seeds([0.1, 0.2], seed=1)  # type: ignore[arg-type]
+
+
+def test_an_interval_and_a_summary_are_frozen() -> None:
+    interval = Interval(low=1.0, high=2.0, confidence=0.9)
+    with pytest.raises(ValidationError):
+        interval.low = 0.0  # mypy gates src only; this line is not type-checked
+    summary = SeedSummary(n=2, mean=1.5, sd=0.5, interval=interval)
+    with pytest.raises(ValidationError):
+        summary.n = 3  # mypy gates src only; this line is not type-checked
+
+
+@pytest.mark.extras
+def test_two_runs_at_one_seed_give_the_same_interval() -> None:
+    sample = [2.1, 3.4, 1.9, 5.6, 4.0, 3.3, 2.8, 4.7]
+    first = bootstrap_ci(sample, resamples=500, seed=42)
+    assert bootstrap_ci(sample, resamples=500, seed=42) == first
+    # The seed is what decides: another seed resamples differently.
+    assert bootstrap_ci(sample, resamples=500, seed=43) != first
+
+
+@pytest.mark.extras
+def test_the_global_random_state_does_not_reach_the_interval() -> None:
+    import random
+
+    import numpy
+
+    sample = [2.1, 3.4, 1.9, 5.6, 4.0, 3.3, 2.8, 4.7]
+    random.seed(1)
+    numpy.random.seed(1)
+    first = bootstrap_ci(sample, resamples=300, seed=7)
+    random.seed(999)
+    numpy.random.seed(999)
+    assert bootstrap_ci(sample, resamples=300, seed=7) == first
+
+
+@pytest.mark.extras
+def test_an_interval_brackets_the_statistic_and_reports_its_confidence() -> None:
+    sample = [2.1, 3.4, 1.9, 5.6, 4.0, 3.3, 2.8, 4.7]
+    interval = bootstrap_ci(sample, resamples=500, confidence=0.9, seed=5)
+    assert interval.confidence == 0.9
+    assert interval.low < math.fsum(sample) / len(sample) < interval.high
+
+
+@pytest.mark.extras
+def test_a_wider_confidence_gives_a_wider_interval() -> None:
+    sample = [2.1, 3.4, 1.9, 5.6, 4.0, 3.3, 2.8, 4.7]
+    narrow = bootstrap_ci(sample, resamples=1000, confidence=0.5, seed=5)
+    wide = bootstrap_ci(sample, resamples=1000, confidence=0.99, seed=5)
+    assert wide.high - wide.low > narrow.high - narrow.low
+
+
+@pytest.mark.extras
+def test_the_statistic_is_the_one_asked_for() -> None:
+    sample = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 100.0]
+    ci = bootstrap_ci(sample, statistics.median, resamples=500, seed=3)
+    assert ci.low < statistics.median(sample) < ci.high
+    # The mean of this sample is 14.5, far above anything the median interval reaches.
+    assert ci.high < 14.5
+
+
+@pytest.mark.extras
+@pytest.mark.slow
+def test_a_nominal_95_interval_covers_a_known_parameter_about_95_percent_of_the_time() -> None:
+    import numpy
+
+    # Normal(10, 2), n = 100, true mean 10. 1000 replicates put the standard error
+    # of the measured coverage near 0.007, so the band is nominal +/- 0.02, about
+    # three of them. An interval that is too narrow (the sample's min and max
+    # would cover ~100%, a point estimate 0%) or too wide falls outside it.
+    true_mean, sd, n = 10.0, 2.0, 100
+    replicates, resamples = 1000, 300
+    rng = numpy.random.default_rng(20261121)
+    covered = 0
+    for i in range(replicates):
+        draw = rng.normal(true_mean, sd, size=n).tolist()
+        ci = bootstrap_ci(draw, resamples=resamples, confidence=0.95, seed=i)
+        covered += ci.low <= true_mean <= ci.high
+    coverage = covered / replicates
+    assert 0.93 <= coverage <= 0.97, coverage
+
+
+@pytest.mark.extras
+def test_aggregate_seeds_reports_the_seed_count_it_was_given() -> None:
+    summary = aggregate_seeds({0: 0.80, 1: 0.84, 2: 0.82, 3: 0.86, 4: 0.78}, seed=11)
+    assert summary.n == 5
+    assert summary.mean == pytest.approx(0.82, rel=1e-12)
+    # sample variance (divisor n - 1): deviations -.02 .02 0 .04 -.04 -> 0.004 / 4.
+    assert summary.sd == pytest.approx(math.sqrt(0.001), rel=1e-9)
+    assert summary.interval.low < summary.mean < summary.interval.high
+    assert summary.interval.confidence == 0.95
+
+
+@pytest.mark.extras
+def test_aggregate_seeds_does_not_depend_on_the_mapping_order() -> None:
+    pairs = [(0, 0.80), (1, 0.84), (2, 0.82), (3, 0.86), (4, 0.78)]
+    forward = dict(pairs)
+    backward = dict(reversed(pairs))
+    assert list(forward) != list(backward)
+    assert aggregate_seeds(forward, seed=11) == aggregate_seeds(backward, seed=11)
+
+
+@pytest.mark.extras
+def test_a_statistic_with_a_degenerate_bootstrap_distribution_is_refused() -> None:
+    with pytest.raises(StatsError, match="degenerate bootstrap distribution"):
+        bootstrap_ci([1.0, 2.0, 4.0, 8.0], lambda _: math.nan, resamples=50, seed=1)

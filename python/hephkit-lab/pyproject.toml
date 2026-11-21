@@ -97,7 +97,8 @@ include = ["src", "tests", "pyproject.toml"]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 # Registered for parity with `hephkit`, whose `test-fast` task deselects it. No
-# lab test is slow yet; the marker exists so the two task sets stay identical.
+# lab test is slow except the bootstrap coverage property; the marker keeps the two
+# task sets identical.
 markers = [
     "slow: long-running tests; deselect with -m 'not slow'",
     # A test that imports a library from an extra (polars, duckdb, ...). The
