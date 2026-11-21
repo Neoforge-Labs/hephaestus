@@ -120,6 +120,16 @@
       "maturity": "experimental"
     },
     {
+      "name": "lab.sources",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
+      "name": "lab.stats",
+      "home": "python",
+      "maturity": "experimental"
+    },
+    {
       "name": "lab.track",
       "home": "python",
       "maturity": "experimental"

@@ -1,0 +1,229 @@
+---
+title: "lab.data"
+---
+
+# lab.data
+
+`hephkit.lab.data` is [spec section 10](/spec#10-dataset-manifests) in Python: a
+dataset is a directory of files plus a manifest that names each file by path,
+SHA-256 and length, and the `data_hash` a provenance record cites is computed
+from that manifest and from nothing else. The readers check a file against the
+manifest before they read it, so a number cannot come from bytes that are not
+the dataset the record names, and a date resolves to the release that date would
+have seen, never a later one.
+
+Maturity: **`experimental`**. The API may change, and per
+[ADR 0015](/adrs/0015-maturity-levels) nothing below `stable` may sit in a
+production money path. Why the research spine is its own distribution is
+[ADR 0023](/adrs/0023-hephkit-lab-ships-separately); why integrity comes before
+capability is [ADR 0022](/adrs/0022-research-integrity-is-the-spine).
+
+## Installing
+
+`hephkit-lab` is not on PyPI yet — [ADR 0023](/adrs/0023-hephkit-lab-ships-separately)
+records the precondition on publishing it — so install both portions of the
+`hephkit` namespace package out of a checkout of this repository. The manifest,
+the release resolver and the data card are pure Python and need nothing more.
+Reading frames, querying, and snapshots need the `data` extra (polars, DuckDB,
+PyArrow and DVC):
+
+```bash
+uv add --editable ./python/hephkit ./python/hephkit-lab
+uv add polars duckdb pyarrow dvc
+```
+
+The second line is separate only because the first install is a path and not a
+published name: once the distribution is on PyPI, `hephkit-lab[data]` is the one
+line. Nothing in the extra is imported until a function that needs it is called,
+and one that cannot find it raises `MissingExtraError` naming the extra, so
+`import hephkit.lab.data` works on a spine-only install.
+
+## An example: a manifest, a hash, and a refusal
+
+Save this as `demo.py` and run `uv run python demo.py`. It needs the `data`
+extra, for `read_frame` and `query`.
+
+```python
+import tempfile
+from datetime import date
+from pathlib import Path
+
+from hephkit.lab.data import (
+    ManifestError,
+    Release,
+    TemporalError,
+    data_card,
+    data_hash,
+    manifest_for,
+    query,
+    read_frame,
+    read_manifest,
+    release_as_of,
+    verify_manifest,
+    write_manifest,
+)
+
+root = Path(tempfile.mkdtemp()) / "cohort"
+root.mkdir()
+(root / "visits.csv").write_text("patient,visits\na,3\nb,5\nc,4\n")
+
+manifest = manifest_for(
+    root,
+    dataset="cohort",
+    source="https://example.org/cohort",
+    release="2026-q3",
+    extractor_version="1.4.0",
+    captured_at=date(2026, 10, 2),
+)
+print("data_hash:", data_hash(manifest))
+write_manifest(manifest, root.parent / "cohort.manifest.json")
+
+# Later, in another process: the manifest on disk is what the run cites.
+manifest = read_manifest(root.parent / "cohort.manifest.json")
+verify_manifest(manifest, root)
+print(read_frame(manifest, root=root, file="visits.csv").shape)
+print(query(manifest, root=root, sql='SELECT sum(visits) AS total FROM "visits.csv"'))
+
+# Date to release: the release that date would have seen, never a later one.
+releases = [
+    Release(release="2026-q1", published=date(2026, 4, 1)),
+    Release(release="2026-q3", published=date(2026, 10, 1)),
+]
+print(release_as_of(releases, date(2026, 6, 30)).release)
+try:
+    release_as_of(releases, date(2026, 3, 1))
+except TemporalError as exc:
+    print("refused:", exc)
+
+# One byte moves: the frame is refused, not read.
+(root / "visits.csv").write_text("patient,visits\na,3\nb,5\nc,9\n")
+try:
+    read_frame(manifest, root=root, file="visits.csv")
+except ManifestError as exc:
+    print("refused:", str(exc)[:80], "...")
+
+print(data_card(manifest, notes="Visit counts only."))
+```
+
+It prints this (the `refused:` line for the changed file is cut at 80
+characters by the script; the full message names both digests):
+
+```text
+data_hash: sha256:0fc3da3fae7ac9389ec082b86e24c5b82a2778e2e8404ca97bd815adebefeab1
+(3, 2)
+shape: (1, 1)
+┌───────────────┐
+│ total         │
+│ ---           │
+│ decimal[38,0] │
+╞═══════════════╡
+│ 12            │
+└───────────────┘
+2026-q1
+refused: no release was published on or before 2026-03-01
+refused: 'visits.csv': the manifest says sha256 68a0335c4574420911122aff53746f6790eff4eda ...
+# Data card: cohort
+
+## Provenance
+
+- Dataset: `cohort`
+- Source: `https://example.org/cohort`
+- Release: `2026-q3`
+- Extractor version: `1.4.0`
+- Captured at: 2026-10-02
+
+## Data hash
+
+`sha256:0fc3da3fae7ac9389ec082b86e24c5b82a2778e2e8404ca97bd815adebefeab1`
+
+## Files (1)
+
+| Path | SHA-256 | Bytes |
+| --- | --- | --- |
+| `visits.csv` | `68a0335c4574420911122aff53746f6790eff4eda51c6a60be02a0f7c689af08` | 27 |
+
+## Notes
+
+> Visit counts only.
+```
+
+The `data_hash` is the value a run record stores. It is the same on any machine
+and in any directory, because it is computed from the manifest's file entries
+and not from where the files sit.
+
+## What the digest covers
+
+[Spec 10.2](/spec#10-dataset-manifests) fixes the scope. `data_hash` is the
+content hash of the canonical JSON of the array of `{path, sha256, bytes}`
+objects, one per file, sorted by `path` under byte-wise comparison. Three
+consequences are the point:
+
+- **It covers the bytes the extractor wrote**, not the upstream source. Each
+  `sha256` is the SHA-256 of the file as it sits in the dataset directory.
+- **File bytes are never concatenated**, and the order of a directory walk never
+  reaches the hash. `manifest_for` sorts, so two walks of one directory agree.
+- **`dataset`, `source`, `release`, `extractor_version` and `captured_at` are not
+  in the hash.** They are the manifest's description of the dataset; the hash
+  names its content. Re-labelling a dataset does not change what a run read, so it
+  does not change the hash.
+
+`release` is opaque. Nothing derives an ordering from it; releases are ordered by
+the date they were published.
+
+## Refusals
+
+| Refusal | Raised as | Code |
+| --- | --- | --- |
+| A manifest that is invalid: empty `files`, a duplicate `path`, a malformed `sha256`, a `path` that leaves the dataset, an undefined or missing member | `ManifestError` | [HEPH-LAB-412](/errors/HEPH-LAB-412) |
+| A file whose bytes or length disagree with the manifest, or a file the manifest names that is not there | `ManifestError` | [HEPH-LAB-412](/errors/HEPH-LAB-412) |
+| No manifest file at the path | `MissingManifestError` | [HEPH-LAB-424](/errors/HEPH-LAB-424) |
+| No release was published on or before the date | `TemporalError` | [HEPH-LAB-424](/errors/HEPH-LAB-424) |
+| Two releases share the latest eligible date | `AmbiguousReleaseError` | [HEPH-LAB-412](/errors/HEPH-LAB-412) |
+
+`MissingManifestError` is a `ManifestError`, and `AmbiguousReleaseError` is a
+`TemporalError`, so `except ManifestError` and `except TemporalError` catch the
+family. An ambiguous resolution is refused rather than broken by sorting labels,
+because `release` is opaque and any tiebreak would be a silent wrong answer
+([spec 10.3](/spec#10-dataset-manifests)).
+
+`verify_manifest` checks every entry the manifest names. It does not flag a file
+that is present and unlisted; a caller that needs "the manifest names
+everything there" compares the listing against `manifest_for` itself.
+
+## Reading a frame
+
+`read_frame` and `query` verify before they read. `read_frame` takes `.csv` and
+`.parquet` files and hands polars an open file handle rather than a path string,
+because polars treats a path as a glob and a listed `x*.csv` would otherwise
+load an unlisted `xother.csv`. `query` runs SQL in DuckDB over every tabular
+file the manifest names, each a table called by its manifest `path`, then turns
+external file access off before the caller's SQL runs, so a file the manifest
+omits cannot be queried.
+
+Verification is not atomic with the read: a process that rewrites a file between
+the two defeats it. A frozen dataset is read-only by construction, and a
+directory something else is writing to is outside what this guards.
+
+## Snapshots
+
+`push(manifest, root=..., remote=...)` stores the manifest's files in a DVC
+remote under the manifest's `data_hash`, and `pull(manifest, into=..., remote=...)`
+brings them back. `pull` distrusts what arrives: it fetches into scratch space,
+verifies there, and only then copies, so a refused pull leaves `into` as it found
+it. A snapshot that cannot be obtained at all is
+[HEPH-LAB-424](/errors/HEPH-LAB-424); one that arrives and disagrees with the
+manifest is [HEPH-LAB-412](/errors/HEPH-LAB-412).
+
+DVC is driven through its Python API in a throwaway repository, so neither the
+dataset directory nor the destination becomes a DVC repository. The snapshot
+pointer is stored beside DVC's object tree, which is a DVC 3.x layout; a DVC
+release that moves it raises `UnsupportedDvcLayoutError` naming the version it
+found, not a lookup error from somewhere else.
+
+## The data card
+
+`data_card(manifest, notes=...)` renders the Markdown a reader gets for a
+dataset. It is a pure function of the manifest, so it cannot describe a dataset
+other than the one the manifest names, and it needs no extra. A caller's own
+prose goes last, in a quoted `Notes` section, so nothing a note says can read as
+a line the manifest produced.
